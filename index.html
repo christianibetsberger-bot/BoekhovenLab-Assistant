@@ -1741,8 +1741,8 @@
                 }
 
                 const md5 = function(d) {
-                    let r = /[\x80-\xFF]/g;
-                    if (r.test(d)) d = unescape(encodeURI(d));
+                    d = unescape(encodeURIComponent(d));
+                    
                     let h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE, h3 = 0x10325476;
                     const rots = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
                     const k = [];
@@ -1806,7 +1806,7 @@
                         }
 
                         let nextText = ref.nextSibling ? ref.nextSibling.textContent : "";
-                        let volMatch = nextText.match(/([\d\.]+)\s*(µL|mL|L)/);
+                        let volMatch = nextText.match(/([\d\.]+)\s*(µL|μL|mL|L)/);
                         if (name && volMatch) {
                             let vol = parseFloat(volMatch[1]);
                             if (volMatch[2] === 'mL') vol *= 1000;

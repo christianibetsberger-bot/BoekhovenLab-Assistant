@@ -1467,19 +1467,28 @@
             db.auth.getSession().then(({ data }) => {
                 if (data.session) {
                     this.user = data.session.user;
-                    this.loadCloudInventory(); // Load from cloud instead of local!
+                    this.loadData(); // Load isolated user data FIRST
+                    this.loadCloudInventory(); // Overwrite inventory with cloud data
+                    this.updateThemeColors();
+                    this.$nextTick(() => { this.syncEditor(); });
                 }
             });
 
             // Listen for login/logout events
             db.auth.onAuthStateChange((event, session) => {
-                this.user = session ? session.user : null;
-                if (this.user) this.loadCloudInventory();
+                if (session && session.user) {
+                    const isNewLogin = !this.user || this.user.id !== session.user.id;
+                    this.user = session.user;
+                    if (isNewLogin) {
+                        this.loadData();
+                        this.loadCloudInventory();
+                        this.updateThemeColors();
+                        this.$nextTick(() => { this.syncEditor(); });
+                    }
+                } else {
+                    this.user = null;
+                }
             });
-
-            this.loadData();
-            this.updateThemeColors();
-            this.$nextTick(() => { this.syncEditor(); });
 
             document.addEventListener('keydown', (e) => {
                 if (e.key === ',' && e.target && e.target.type === 'number') {
@@ -1498,7 +1507,9 @@
         watch: {
             $data: {
                 handler(val) { 
-                    this.saveData(); 
+                    if (this.user) {
+                        this.saveData(); 
+                    }
                     if (this.$refs.journalEditor && this.activeJournalEntry) {
                         if (this.$refs.journalEditor.innerHTML !== this.activeJournalEntry.content) {
                             this.$refs.journalEditor.innerHTML = this.activeJournalEntry.content || '';
@@ -1627,18 +1638,22 @@
             },
             async signOut() {
                 await db.auth.signOut();
-                this.inventory = []; // Clear inventory from screen on logout
+                window.location.reload(); // Fully reset the environment state to prevent data leakage
             },
 
             // --- CLOUD DATABASE METHODS ---
             async loadCloudInventory() {
-                // This pulls BOTH Global items and this specific user's Personal items automatically!
-                const { data, error } = await db.from('inventory').select('*');
+                if (!this.user) return;
+                
+                // Fetch Global items OR this specific user's Personal items
+                const { data, error } = await db.from('inventory')
+                    .select('*')
+                    .or(`scope.eq.Global,owner_id.eq.${this.user.id}`);
+                    
                 if (error) {
                     console.error("Error loading inventory:", error);
                     return;
                 }
-                // Convert the cloud data back into your Vue array
                 this.inventory = data.map(row => row.item_data);
             },
 
@@ -2075,11 +2090,16 @@
                 item.scope = (item.scope || 'Global') === 'Personal' ? 'Global' : 'Personal';
             },
             loadData() {
-                const saved = localStorage.getItem('labPlannerDataOS');
+                if (!this.user) return;
+                
+                const saved = localStorage.getItem('labPlannerDataOS_' + this.user.id);
                 if (saved) {
                     try {
                         const parsed = JSON.parse(saved);
-                        // We still load local UI data, but inventory is handled by cloud load
+                        // Prevent loading the auth credentials over state
+                        this.authEmail = '';
+                        this.authPassword = '';
+                        
                         Object.assign(this.$data, parsed);
                         if(!this.stdCalc.type) this.stdCalc.type = 'solid';
                         if(!this.dnaCalc.pathLength) this.dnaCalc.pathLength = 0.05;
@@ -2087,7 +2107,37 @@
                 }
             },
             saveData() {
-                localStorage.setItem('labPlannerDataOS', JSON.stringify(this.$data));
+                if (!this.user) return;
+                
+                const dataToSave = {
+                    inventoryMode: this.inventoryMode,
+                    importTargetMode: this.importTargetMode,
+                    isDarkMode: this.isDarkMode,
+                    uiSettings: this.uiSettings,
+                    globalSettings: this.globalSettings,
+                    inventorySearch: this.inventorySearch,
+                    journal: this.journal,
+                    stdCalc: this.stdCalc,
+                    dnaCalc: this.dnaCalc,
+                    inventory: this.inventory,
+                    reactions: this.reactions,
+                    archivedReactions: this.archivedReactions,
+                    matrices: this.matrices,
+                    archivedMatrices: this.archivedMatrices,
+                    reverseMatrices: this.reverseMatrices,
+                    archivedReverseMatrices: this.archivedReverseMatrices,
+                    wellPlates: this.wellPlates,
+                    archivedPlates: this.archivedPlates,
+                    nextInvId: this.nextInvId,
+                    nextReactionId: this.nextReactionId,
+                    nextMatrixId: this.nextMatrixId,
+                    nextBlockId: this.nextBlockId,
+                    nextRmId: this.nextRmId,
+                    nextRmCompId: this.nextRmCompId,
+                    nextPlateId: this.nextPlateId
+                };
+                
+                localStorage.setItem('labPlannerDataOS_' + this.user.id, JSON.stringify(dataToSave));
             },
             formatNum(num) {
                 if (num === null || num === undefined || isNaN(num)) return (0).toFixed(this.globalSettings.decimals);

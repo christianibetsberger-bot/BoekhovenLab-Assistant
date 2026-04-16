@@ -707,7 +707,7 @@
                             </div>
                         </div>
                         <div>
-                            <button class="small" @click="saveReactionToJournal(reaction)" style="margin-right: 10px;" title="Append table to active journal entry"><i class="fas fa-file-import"></i> Log to Journal</button>
+                            <button class="small" @click="saveReactionToJournal(reaction)" style="margin-right: 10px;" title="Log to Journal"><i class="fas fa-file-import"></i> Log to Journal</button>
                             <button class="secondary small" @click="duplicateReaction(rIndex)" style="margin-right: 5px;" title="Duplicate"><i class="fas fa-copy"></i></button>
                             <button class="secondary small" @click="archiveReaction(rIndex)" style="margin-right: 5px;" title="Archive"><i class="fas fa-box-archive"></i></button>
                             <button class="danger small" @click="removeReaction(rIndex)"><i class="fas fa-trash"></i></button>
@@ -1359,7 +1359,9 @@
 <script>
     const supabaseUrl = 'https://tokbjjuzkrkbmvcslstc.supabase.co';
     const supabaseKey = 'sb_publishable_Ts9DBCncOdA0g1d88kBLfg_GWUt81IT';
-    const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+    
+    // RENAMED TO 'db' TO AVOID CONFLICT WITH GLOBAL 'supabase' OBJECT
+    const db = window.supabase.createClient(supabaseUrl, supabaseKey);
 
     const { createApp } = Vue;
 
@@ -1461,7 +1463,7 @@
         },
         mounted() {
             // Check if someone is already logged in when they open the page
-            supabase.auth.getSession().then(({ data }) => {
+            db.auth.getSession().then(({ data }) => {
                 if (data.session) {
                     this.user = data.session.user;
                     this.loadCloudInventory(); // Load from cloud instead of local!
@@ -1469,7 +1471,7 @@
             });
 
             // Listen for login/logout events
-            supabase.auth.onAuthStateChange((event, session) => {
+            db.auth.onAuthStateChange((event, session) => {
                 this.user = session ? session.user : null;
                 if (this.user) this.loadCloudInventory();
             });
@@ -1614,23 +1616,23 @@
         methods: {
             // --- AUTHENTICATION METHODS ---
             async signUp() {
-                const { data, error } = await supabase.auth.signUp({ email: this.authEmail, password: this.authPassword });
+                const { data, error } = await db.auth.signUp({ email: this.authEmail, password: this.authPassword });
                 if (error) alert(error.message);
                 else alert("Account created! You can now log in.");
             },
             async signIn() {
-                const { data, error } = await supabase.auth.signInWithPassword({ email: this.authEmail, password: this.authPassword });
+                const { data, error } = await db.auth.signInWithPassword({ email: this.authEmail, password: this.authPassword });
                 if (error) alert(error.message);
             },
             async signOut() {
-                await supabase.auth.signOut();
+                await db.auth.signOut();
                 this.inventory = []; // Clear inventory from screen on logout
             },
 
             // --- CLOUD DATABASE METHODS ---
             async loadCloudInventory() {
                 // This pulls BOTH Global items and this specific user's Personal items automatically!
-                const { data, error } = await supabase.from('inventory').select('*');
+                const { data, error } = await db.from('inventory').select('*');
                 if (error) {
                     console.error("Error loading inventory:", error);
                     return;
@@ -1649,7 +1651,7 @@
                     item_data: item
                 };
 
-                const { error } = await supabase.from('inventory').insert([payload]);
+                const { error } = await db.from('inventory').insert([payload]);
                 if (error) alert("Error saving to cloud: " + error.message);
             },
 
@@ -1949,10 +1951,10 @@
                                 }
                             },
                             auto: true
-                        }
-                    },
-                    inError; false
-                };
+                        },
+                        inError: false // FIXED: Replaced semicolon with colon
+                    };
+                }
 
                 const steps = [
                     {
@@ -1970,6 +1972,7 @@
                     if (!groupedTransfers[key]) {
                         groupedTransfers[key] = { sourceKey: t.sourceKey, volume: formattedVol, cavities: [] };
                     }
+                    groupedTransfers[key].childCavities = groupedTransfers[key].cavities || []; // safety
                     groupedTransfers[key].cavities.push(t.destCavity);
                 });
 
@@ -2923,7 +2926,6 @@
             
             saveDnaToInventory() {
                 const rawSeq = this.dnaCalc.sequence.trim();
-                const cleanSeq = rawSeq.replace(/\[.*?\]/g, '').toUpperCase().replace(/[^ACGTU]/g, '');
                 const newItem = {
                     id: 'mod_' + this.nextInvId++, code: this.dnaCalc.saveCode || 'CALC', cas: '', itemClass: this.dnaCalc.saveClass, name: this.dnaCalc.saveName, stock: parseFloat(this.formatNum(this.dnaConcentration)), stockUnit: 'µM', location: '', sublocation: '', catalogNum: '', unitSize: '', sequence: rawSeq.startsWith("5'") ? rawSeq : `5'-${rawSeq}-3'`, length: this.calculatedLength, gc: this.calculatedGc, tm: this.calculatedTm, mw: this.activeMw, extinction: this.calculatedExtinction, oligoType: this.dnaCalc.type, manualMw: this.dnaCalc.manualMw || null, scope: this.inventoryMode
                 };
@@ -3101,7 +3103,7 @@
                         
                         if (targetR < this.getPlateRows(plate.format) && targetC < this.getPlateCols(plate.format)) {
                             let wId = this.getWellId(targetR, targetC);
-                            let cellHtml = this.calculateMatrixCell(matrix, rowId, colId);
+                            let cellHtml = this.calculateMatrixCell(matrix, rowBlockId, colBlockId);
                             plate.wells[wId] = cellHtml;
                         }
                     });
@@ -3177,7 +3179,7 @@
                     });
                     html += `</tbody></table></div>`;
                 } else {
-                    html += `<p style="opacity: 0.7; font-style: italic;">Matrix is empty (select row and column blocks).</p>`;
+                    html += `<p style="opacity: 0.7; font-style: italic; margin-top: 10px;">Matrix is empty (select row and column blocks).</p>`;
                 }
                 html += `</div><br>`;
                 

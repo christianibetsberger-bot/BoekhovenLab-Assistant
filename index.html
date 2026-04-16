@@ -1360,7 +1360,8 @@
     const supabaseUrl = 'https://tokbjjuzkrkbmvcslstc.supabase.co';
     const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRva2JqanV6a3JrYm12Y3Nsc3RjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzEwMDgsImV4cCI6MjA5MTkwNzAwOH0.tx65AtSrm3IbeAU54GqdisTMb42LMdtrefBlbu-jrdY';
     
-    const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+    // CHANGED: We renamed 'supabase' to 'db' so it doesn't crash the browser!
+    const db = window.supabase.createClient(supabaseUrl, supabaseKey);
 
     const { createApp } = Vue;
 
@@ -1462,7 +1463,7 @@
         },
         mounted() {
             // Check if someone is already logged in when they open the page
-            supabase.auth.getSession().then(({ data }) => {
+            db.auth.getSession().then(({ data }) => {
                 if (data.session) {
                     this.user = data.session.user;
                     this.loadCloudInventory(); // Load from cloud instead of local!
@@ -1470,7 +1471,7 @@
             });
 
             // Listen for login/logout events
-            supabase.auth.onAuthStateChange((event, session) => {
+            db.auth.onAuthStateChange((event, session) => {
                 this.user = session ? session.user : null;
                 if (this.user) this.loadCloudInventory();
             });
@@ -1616,58 +1617,61 @@
             // --- AUTHENTICATION METHODS ---
             async signUp() {
                 try {
-                    if (!this.authEmail || !this.authPassword) {
-                        alert("Please enter an email and a password.");
-                        return;
-                    }
-                    const { data, error } = await supabase.auth.signUp({ email: this.authEmail, password: this.authPassword });
+                    const { data, error } = await db.auth.signUp({ email: this.authEmail, password: this.authPassword });
                     if (error) alert(error.message);
                     else alert("Account created! You can now log in.");
                 } catch (err) {
-                    alert("CRASH: The browser blocked the request. Is your GitHub link pasted exactly into Supabase URL Configuration? Details: " + err.message);
+                    alert("CRASH CATCHER: " + err.message);
                 }
             },
             async signIn() {
                 try {
-                    if (!this.authEmail || !this.authPassword) {
-                        alert("Please enter an email and a password.");
-                        return;
-                    }
-                    const { data, error } = await supabase.auth.signInWithPassword({ email: this.authEmail, password: this.authPassword });
+                    const { data, error } = await db.auth.signInWithPassword({ email: this.authEmail, password: this.authPassword });
                     if (error) alert(error.message);
                 } catch (err) {
-                    alert("CRASH: The browser blocked the request. Is your GitHub link pasted exactly into Supabase URL Configuration? Details: " + err.message);
+                    alert("CRASH CATCHER: " + err.message);
                 }
             },
             async signOut() {
-                await supabase.auth.signOut();
-                this.inventory = []; // Clear inventory from screen on logout
+                try {
+                    await db.auth.signOut();
+                    this.inventory = []; // Clear inventory from screen on logout
+                } catch (err) {
+                    console.error(err);
+                }
             },
 
             // --- CLOUD DATABASE METHODS ---
             async loadCloudInventory() {
-                // This pulls BOTH Global items and this specific user's Personal items automatically!
-                const { data, error } = await supabase.from('inventory').select('*');
-                if (error) {
-                    console.error("Error loading inventory:", error);
-                    return;
+                try {
+                    // This pulls BOTH Global items and this specific user's Personal items automatically!
+                    const { data, error } = await db.from('inventory').select('*');
+                    if (error) {
+                        console.error("Error loading inventory:", error);
+                        return;
+                    }
+                    // Convert the cloud data back into your Vue array
+                    this.inventory = data.map(row => row.item_data);
+                } catch (err) {
+                    console.error("Cloud load crash:", err);
                 }
-                // Convert the cloud data back into your Vue array
-                this.inventory = data.map(row => row.item_data);
             },
 
             async saveItemToCloud(item) {
                 if (!this.user) return;
-                
-                // We package your item into the format our SQL table expects
-                const payload = {
-                    owner_id: this.user.id,
-                    scope: item.scope || 'Global',
-                    item_data: item
-                };
+                try {
+                    // We package your item into the format our SQL table expects
+                    const payload = {
+                        owner_id: this.user.id,
+                        scope: item.scope || 'Global',
+                        item_data: item
+                    };
 
-                const { error } = await supabase.from('inventory').insert([payload]);
-                if (error) alert("Error saving to cloud: " + error.message);
+                    const { error } = await db.from('inventory').insert([payload]);
+                    if (error) alert("Error saving to cloud: " + error.message);
+                } catch (err) {
+                    console.error("Save crash:", err);
+                }
             },
 
             updateDefaultLabware(plate) {

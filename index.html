@@ -1467,10 +1467,14 @@
             db.auth.getSession().then(({ data }) => {
                 if (data.session) {
                     this.user = data.session.user;
-                    this.loadData(); // Load isolated user data FIRST
-                    this.loadCloudInventory(); // Overwrite inventory with cloud data
-                    this.updateThemeColors();
-                    this.$nextTick(() => { this.syncEditor(); });
+                    
+                    // NEW: Wait a beat for user to initialize, then load cloud state
+                    this.$nextTick(() => {
+                        this.loadData(); 
+                        this.loadCloudInventory(); 
+                        this.updateThemeColors();
+                        this.syncEditor();
+                    });
                 }
             });
 
@@ -1480,10 +1484,12 @@
                     const isNewLogin = !this.user || this.user.id !== session.user.id;
                     this.user = session.user;
                     if (isNewLogin) {
-                        this.loadData();
-                        this.loadCloudInventory();
-                        this.updateThemeColors();
-                        this.$nextTick(() => { this.syncEditor(); });
+                        this.$nextTick(() => {
+                            this.loadData();
+                            this.loadCloudInventory();
+                            this.updateThemeColors();
+                            this.syncEditor();
+                        });
                     }
                 } else {
                     this.user = null;
@@ -2089,13 +2095,14 @@
             toggleScope(item) {
                 item.scope = (item.scope || 'Global') === 'Personal' ? 'Global' : 'Personal';
             },
-            loadData() {
+            async loadData() {
                 if (!this.user) return;
                 
-                const saved = localStorage.getItem('labPlannerDataOS_' + this.user.id);
-                if (saved) {
+                const { data, error } = await db.from('user_data').select('state').eq('user_id', this.user.id).single();
+                
+                if (data && data.state) {
                     try {
-                        const parsed = JSON.parse(saved);
+                        const parsed = data.state;
                         // Prevent loading the auth credentials over state
                         this.authEmail = '';
                         this.authPassword = '';
@@ -2119,7 +2126,7 @@
                     journal: this.journal,
                     stdCalc: this.stdCalc,
                     dnaCalc: this.dnaCalc,
-                    inventory: this.inventory,
+                    // Note: inventory array is handled entirely by saveItemToCloud/loadCloudInventory
                     reactions: this.reactions,
                     archivedReactions: this.archivedReactions,
                     matrices: this.matrices,
@@ -2128,7 +2135,6 @@
                     archivedReverseMatrices: this.archivedReverseMatrices,
                     wellPlates: this.wellPlates,
                     archivedPlates: this.archivedPlates,
-                    nextInvId: this.nextInvId,
                     nextReactionId: this.nextReactionId,
                     nextMatrixId: this.nextMatrixId,
                     nextBlockId: this.nextBlockId,
@@ -2137,7 +2143,16 @@
                     nextPlateId: this.nextPlateId
                 };
                 
-                localStorage.setItem('labPlannerDataOS_' + this.user.id, JSON.stringify(dataToSave));
+                // Debounce the save to avoid spamming Supabase on every keystroke
+                if (this._saveTimeout) clearTimeout(this._saveTimeout);
+                this._saveTimeout = setTimeout(async () => {
+                    const { error } = await db.from('user_data').upsert({ 
+                        user_id: this.user.id, 
+                        state: dataToSave 
+                    }, { onConflict: 'user_id' });
+                    
+                    if (error) console.error("Failed to sync to cloud:", error);
+                }, 2000);
             },
             formatNum(num) {
                 if (num === null || num === undefined || isNaN(num)) return (0).toFixed(this.globalSettings.decimals);

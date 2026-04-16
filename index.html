@@ -707,7 +707,7 @@
                             </div>
                         </div>
                         <div>
-                            <button class="small" @click="saveReactionToJournal(reaction)" style="margin-right: 10px;" title="Log to Journal"><i class="fas fa-file-import"></i> Log to Journal</button>
+                            <button class="small" @click="saveReactionToJournal(reaction)" style="margin-right: 10px;" title="Append table to active journal entry"><i class="fas fa-file-import"></i> Log to Journal</button>
                             <button class="secondary small" @click="duplicateReaction(rIndex)" style="margin-right: 5px;" title="Duplicate"><i class="fas fa-copy"></i></button>
                             <button class="secondary small" @click="archiveReaction(rIndex)" style="margin-right: 5px;" title="Archive"><i class="fas fa-box-archive"></i></button>
                             <button class="danger small" @click="removeReaction(rIndex)"><i class="fas fa-trash"></i></button>
@@ -1352,6 +1352,7 @@
                     </div>
                 </div>
             </div>
+
         </div>
     </template>
 </div>
@@ -1741,8 +1742,8 @@
                 }
 
                 const md5 = function(d) {
-                    d = unescape(encodeURIComponent(d));
-                    
+                    let r = /[\x80-\xFF]/g;
+                    if (r.test(d)) d = unescape(encodeURI(d));
                     let h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE, h3 = 0x10325476;
                     const rots = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
                     const k = [];
@@ -1802,11 +1803,11 @@
                         let concMatch = text.match(/\(([\d\.,]+)\s*([^)]+)\)/);
                         if (concMatch) {
                             concValue = parseFloat(concMatch[1].replace(',', '.'));
-                            concUnit = concMatch[2].trim().replace(/[µμ]/g, 'u');
+                            concUnit = concMatch[2].trim().replace('µ', 'u');
                         }
 
                         let nextText = ref.nextSibling ? ref.nextSibling.textContent : "";
-                        let volMatch = nextText.match(/([\d\.]+)\s*(µL|μL|mL|L)/);
+                        let volMatch = nextText.match(/([\d\.]+)\s*(µL|mL|L)/);
                         if (name && volMatch) {
                             let vol = parseFloat(volMatch[1]);
                             if (volMatch[2] === 'mL') vol *= 1000;
@@ -1948,11 +1949,11 @@
                                             color: reagents.find(r => r.ref === data.reagentRef).reagent.color
                                         }
                                     }
-                                }
-                            },
-                            auto: true
+                                },
+                                auto: true
+                            }
                         },
-                        inError: false // FIXED: Replaced semicolon with colon
+                        inError: false
                     };
                 }
 
@@ -1972,7 +1973,6 @@
                     if (!groupedTransfers[key]) {
                         groupedTransfers[key] = { sourceKey: t.sourceKey, volume: formattedVol, cavities: [] };
                     }
-                    groupedTransfers[key].childCavities = groupedTransfers[key].cavities || []; // safety
                     groupedTransfers[key].cavities.push(t.destCavity);
                 });
 
@@ -2926,6 +2926,7 @@
             
             saveDnaToInventory() {
                 const rawSeq = this.dnaCalc.sequence.trim();
+                const cleanSeq = rawSeq.replace(/\[.*?\]/g, '').toUpperCase().replace(/[^ACGTU]/g, '');
                 const newItem = {
                     id: 'mod_' + this.nextInvId++, code: this.dnaCalc.saveCode || 'CALC', cas: '', itemClass: this.dnaCalc.saveClass, name: this.dnaCalc.saveName, stock: parseFloat(this.formatNum(this.dnaConcentration)), stockUnit: 'µM', location: '', sublocation: '', catalogNum: '', unitSize: '', sequence: rawSeq.startsWith("5'") ? rawSeq : `5'-${rawSeq}-3'`, length: this.calculatedLength, gc: this.calculatedGc, tm: this.calculatedTm, mw: this.activeMw, extinction: this.calculatedExtinction, oligoType: this.dnaCalc.type, manualMw: this.dnaCalc.manualMw || null, scope: this.inventoryMode
                 };
@@ -3179,7 +3180,7 @@
                     });
                     html += `</tbody></table></div>`;
                 } else {
-                    html += `<p style="opacity: 0.7; font-style: italic; margin-top: 10px;">Matrix is empty (select row and column blocks).</p>`;
+                    html += `<p style="opacity: 0.7; font-style: italic;">Matrix is empty (select row and column blocks).</p>`;
                 }
                 html += `</div><br>`;
                 

@@ -1802,7 +1802,7 @@
                         let concMatch = text.match(/\(([\d\.,]+)\s*([^)]+)\)/);
                         if (concMatch) {
                             concValue = parseFloat(concMatch[1].replace(',', '.'));
-                            concUnit = concMatch[2].trim().replace('µ', 'u');
+                            concUnit = concMatch[2].trim().replace(/[µμ]/g, 'u');
                         }
 
                         let nextText = ref.nextSibling ? ref.nextSibling.textContent : "";

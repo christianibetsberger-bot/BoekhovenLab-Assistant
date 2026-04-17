@@ -19,6 +19,10 @@ export const useLabStore = defineStore('lab', {
     activeDropdown: null,
     classOptions: ['DNA', 'RNA', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10', 'C11', 'C12', 'C13+', 'Acid', 'Base', 'Dye', 'Chemical', 'Solvent', 'Enzyme', 'Buffer', 'Other'],
     
+    // RESTORED CALCULATOR STATE
+    stdCalc: { type: 'solid', mw: null, mass: null, massUnit: 0.001, density: null, vol: null, volUnit: 0.001, conc: null, concUnit: 0.000001, saveCode: '', saveCas: '', saveName: '', saveClass: 'Chemical' },
+    dnaCalc: { a260: null, sequence: '', manualMw: null, saveCode: '', saveName: '', saveClass: 'DNA', type: 'DNA', pathLength: 0.05 },
+    
     inventory: [],
     sourceLabwares: [
         { uuid: 'eda1c3ac-a089-4244-b0bc-9e5beb322475', name: '0.5 mL DNA LoBind microtube' },
@@ -67,11 +71,9 @@ export const useLabStore = defineStore('lab', {
     async loadCloudInventory() {
       if (!this.user) return;
 
-      // 1. Load Inventory
       const { data: invData } = await db.from('inventory').select('*');
       if (invData) this.inventory = invData.map(row => row.item_data);
 
-      // 2. Load Reactions with owner_id injection
       const { data: rxnData } = await db.from('reactions').select('*');
       if (rxnData) {
           this.cloudReactions = rxnData.map(row => {
@@ -84,7 +86,6 @@ export const useLabStore = defineStore('lab', {
           }
       }
 
-      // 3. Load Matrices with owner_id injection
       const { data: matData } = await db.from('matrices').select('*');
       if (matData) {
           this.cloudMatrices = matData.map(row => {
@@ -97,7 +98,6 @@ export const useLabStore = defineStore('lab', {
           }
       }
 
-      // 4. Load Screenings with owner_id injection
       const { data: scrData } = await db.from('screenings').select('*');
       if (scrData) {
           this.cloudReverseMatrices = scrData.map(row => {
@@ -110,7 +110,6 @@ export const useLabStore = defineStore('lab', {
           }
       }
 
-      // 5. Load Plates with owner_id injection
       const { data: pltData } = await db.from('plates').select('*');
       if (pltData) {
           this.cloudPlates = pltData.map(row => {
@@ -123,7 +122,6 @@ export const useLabStore = defineStore('lab', {
           }
       }
 
-      // 6. Load Journal Entries
       const { data: jrnData } = await db.from('journals').select('*');
       if (jrnData && jrnData.length > 0) {
           this.journal.entries = jrnData.map(row => row.data);
@@ -155,7 +153,6 @@ export const useLabStore = defineStore('lab', {
             return;
         }
         
-        // Refresh local library cache for the specific table
         const { data } = await db.from(tableName).select('*');
         if (data) {
             const mapped = data.map(row => {
@@ -179,7 +176,6 @@ export const useLabStore = defineStore('lab', {
             return;
         }
         
-        // Refresh local library cache
         const { data } = await db.from(tableName).select('*');
         if (data) {
             const mapped = data.map(row => {

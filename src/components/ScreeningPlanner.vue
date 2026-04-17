@@ -4,6 +4,7 @@ import { useLabStore } from '../stores/labStore'
 
 const store = useLabStore()
 const activeDropdown = ref(null)
+const showCloudLibrary = ref(false)
 
 // --- Helper Functions ---
 const getUM = (val, unit) => {
@@ -37,17 +38,43 @@ const getWellId = (r, c) => { return String.fromCharCode(65 + r) + (c + 1); }
 // --- Screening Logic ---
 const addReverseMatrix = () => {
     store.reverseMatrices.unshift({
-        id: store.nextRmId++, name: 'New Screening', targetVolume: 30, targetVolumeUnit: 'µL',
-        rows: 8, cols: 12, components: [], activeComponentId: null, targetPlateId: '', targetStartWell: 'A1'
+        id: store.nextRmId++, 
+        name: 'New Screening', 
+        targetVolume: 30, 
+        targetVolumeUnit: 'µL',
+        rows: 8, 
+        cols: 12, 
+        components: [], 
+        activeComponentId: null, 
+        targetPlateId: '', 
+        targetStartWell: 'A1',
+        scope: 'Personal',
+        owner_id: store.user.id
     });
 }
+
+const loadFromCloud = (cloudRM) => {
+    const alreadyOpen = store.reverseMatrices.find(m => m.id === cloudRM.id);
+    if (!alreadyOpen) {
+        store.reverseMatrices.unshift(JSON.parse(JSON.stringify(cloudRM)));
+    }
+    showCloudLibrary.value = false;
+}
+
+const closePlanInWorkspace = (index) => {
+    store.reverseMatrices.splice(index, 1);
+}
+
 const removeReverseMatrix = (index) => { store.reverseMatrices.splice(index, 1); }
 const archiveReverseMatrix = (index) => {
-    if(confirm("Archive this screening?")) store.archivedReverseMatrices.push(store.reverseMatrices.splice(index, 1)[0]);
+    if(confirm("Archive this screening locally?")) store.archivedReverseMatrices.push(store.reverseMatrices.splice(index, 1)[0]);
 }
 const duplicateReverseMatrix = (index) => {
     const copy = JSON.parse(JSON.stringify(store.reverseMatrices[index]));
-    copy.id = store.nextRmId++; copy.name += ' (Copy)';
+    copy.id = store.nextRmId++; 
+    copy.name += ' (Copy)';
+    copy.scope = 'Personal';
+    copy.owner_id = store.user.id;
     store.reverseMatrices.splice(index + 1, 0, copy);
 }
 const addReverseMatrixComponent = (rm) => {
@@ -227,14 +254,57 @@ const saveReverseMatrixToPlate = (rm) => {
 
 <template>
   <div class="card">
+
+    <div v-if="showCloudLibrary" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000;">
+        <div style="background: var(--surface); padding: 25px; border-radius: var(--radius); border: 1px solid var(--border); max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
+            <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 10px; margin-bottom: 15px;">
+                <h3 style="margin: 0; color: var(--primary);"><i class="fas fa-cloud"></i> Screening Library</h3>
+                <button class="danger small" @click="showCloudLibrary = false"><i class="fas fa-times"></i></button>
+            </div>
+
+            <h4 style="margin-bottom: 10px; color: var(--success);"><i class="fas fa-globe"></i> Global Lab Feed</h4>
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 25px;">
+                <div v-for="rm in store.cloudReverseMatrices.filter(m => m.scope === 'Global')" :key="'cloud_rmg_'+rm.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
+                    <div>
+                        <strong style="font-size: 1.05rem;">{{ rm.name }}</strong>
+                        <div style="font-size: 0.75rem; opacity: 0.7;">{{ rm.rows }}x{{ rm.cols }} Grid • {{ rm.components.length }} Components</div>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <button class="small" @click="loadFromCloud(rm)"><i class="fas fa-download"></i> Open</button>
+                        <button v-if="rm.owner_id === store.user.id" class="danger small" @click="store.deleteFromCloud('screenings', rm.id)"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+                <div v-if="store.cloudReverseMatrices.filter(m => m.scope === 'Global').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No global screenings published yet.</div>
+            </div>
+
+            <h4 style="margin-bottom: 10px;"><i class="fas fa-lock"></i> My Personal Drafts</h4>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <div v-for="rm in store.cloudReverseMatrices.filter(m => m.scope === 'Personal')" :key="'cloud_rmp_'+rm.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
+                    <div>
+                        <strong style="font-size: 1.05rem;">{{ rm.name }}</strong>
+                        <div style="font-size: 0.75rem; opacity: 0.7;">{{ rm.rows }}x{{ rm.cols }} Grid • {{ rm.components.length }} Components</div>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <button class="small secondary" @click="loadFromCloud(rm)"><i class="fas fa-folder-open"></i> Open</button>
+                        <button class="danger small" @click="store.deleteFromCloud('screenings', rm.id)"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+                <div v-if="store.cloudReverseMatrices.filter(m => m.scope === 'Personal').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No personal drafts saved.</div>
+            </div>
+        </div>
+    </div>
+
     <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
         <h2 style="border: none; padding: 0; margin: 0;"><i class="fas fa-table-cells-large"></i> Screening</h2>
-        <button @click="addReverseMatrix" class="small"><i class="fas fa-plus"></i> New Screening</button>
+        <div style="display: flex; gap: 10px;">
+            <button @click="showCloudLibrary = true" class="secondary small"><i class="fas fa-cloud"></i> Library</button>
+            <button @click="addReverseMatrix" class="small"><i class="fas fa-plus"></i> New Screening</button>
+        </div>
     </div>
 
     <div v-for="(rm, rmIndex) in store.reverseMatrices" :key="rm.id" style="background: var(--panel-bg); border: 1px solid var(--border); padding: 20px; border-radius: var(--radius); margin-bottom: 30px;">
         <div class="flex-between" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end;">
-            <div style="width: 60%; display: flex; gap: 15px; align-items: center;">
+            <div style="width: 45%; display: flex; gap: 15px; align-items: center;">
                 <input type="text" v-model="rm.name" style="font-size: 1.2rem; font-weight: bold; flex-grow: 1; background: transparent; border: none; border-bottom: 2px solid var(--primary); padding-left: 0; color: var(--primary);" placeholder="Screening Name">
                 <div class="input-group" style="margin-bottom: 0; min-width: 150px;">
                     <label style="font-size: 0.7rem; margin-bottom: 2px;">Target Vol / Well</label>
@@ -246,13 +316,25 @@ const saveReverseMatrixToPlate = (rm) => {
                     </div>
                 </div>
             </div>
-            <div>
-                <button class="small" @click="saveReverseMatrixToJournal(rm)" style="margin-right: 10px;"><i class="fas fa-file-import"></i> Log to Journal</button>
-                <button class="secondary small" @click="duplicateReverseMatrix(rmIndex)" style="margin-right: 5px;" title="Duplicate"><i class="fas fa-copy"></i></button>
-                <button class="secondary small" @click="archiveReverseMatrix(rmIndex)" style="margin-right: 5px;" title="Archive"><i class="fas fa-box-archive"></i></button>
-                <button class="danger small" @click="removeReverseMatrix(rmIndex)"><i class="fas fa-trash"></i></button>
+
+            <div style="display: flex; gap: 5px; align-items: center;">
+                <span v-if="rm.scope === 'Global'" style="font-size: 0.75rem; color: var(--success); font-weight: bold; margin-right: 5px;"><i class="fas fa-globe"></i> Global</span>
+                <span v-else style="font-size: 0.75rem; opacity: 0.7; font-weight: bold; margin-right: 5px;"><i class="fas fa-lock"></i> Personal</span>
+
+                <button class="success small" @click="store.saveToCloud('screenings', rm)" title="Save to Cloud"><i class="fas fa-cloud-arrow-up"></i> Save</button>
+                
+                <template v-if="rm.owner_id === store.user.id">
+                    <button v-if="rm.scope !== 'Global'" class="secondary small" @click="rm.scope = 'Global'; store.saveToCloud('screenings', rm)" title="Make Global"><i class="fas fa-bullhorn"></i> Publish</button>
+                    <button v-else class="secondary small" @click="rm.scope = 'Personal'; store.saveToCloud('screenings', rm)" title="Make Private"><i class="fas fa-user-lock"></i> Private</button>
+                </template>
+                
+                <div style="width: 1px; height: 24px; background: var(--border); margin: 0 5px;"></div>
+                <button class="small" @click="saveReverseMatrixToJournal(rm)"><i class="fas fa-file-import"></i> Log</button>
+                <button class="secondary small" @click="duplicateReverseMatrix(rmIndex)"><i class="fas fa-copy"></i></button>
+                <button class="secondary small" @click="archiveReverseMatrix(rmIndex)" title="Local Archive"><i class="fas fa-box-archive"></i></button>
+                <button class="danger small" @click="closePlanInWorkspace(rmIndex)" title="Remove from screen only"><i class="fas fa-times"></i></button>
             </div>
-        </div>
+            </div>
 
         <div style="background: var(--surface); padding: 15px; border: 1px solid var(--border); margin-bottom: 20px; border-radius: var(--radius); overflow: visible; min-height: 250px;">
             <h3><i class="fas fa-vial"></i> 1. Select Reference Stocks</h3>

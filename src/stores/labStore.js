@@ -19,11 +19,7 @@ export const useLabStore = defineStore('lab', {
     activeDropdown: null,
     classOptions: ['DNA', 'RNA', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10', 'C11', 'C12', 'C13+', 'Acid', 'Base', 'Dye', 'Chemical', 'Solvent', 'Enzyme', 'Buffer', 'Other'],
     
-    stdCalc: { type: 'solid', mw: null, mass: null, massUnit: 0.001, density: null, vol: null, volUnit: 0.001, conc: null, concUnit: 0.000001, saveCode: '', saveCas: '', saveName: '', saveClass: 'Chemical' },
-    dnaCalc: { a260: null, sequence: '', manualMw: null, saveCode: '', saveName: '', saveClass: 'DNA', type: 'DNA', pathLength: 0.05 },
-    
     inventory: [],
-    
     sourceLabwares: [
         { uuid: 'eda1c3ac-a089-4244-b0bc-9e5beb322475', name: '0.5 mL DNA LoBind microtube' },
         { uuid: '201812180800', name: '1.5 mL Fisherbrand Premium microtube' },
@@ -39,35 +35,29 @@ export const useLabStore = defineStore('lab', {
         { uuid: '201812181400', name: 'Greiner, 96-well PS F-bottom clear micro', format: 96 },
         { uuid: '202206200958', name: 'Porvair, 2 mL 96-deep well U-bottom plat #1', format: 96 },
         { uuid: '202504221135', name: 'Armadillo 96-Well PCR Plate, Skirted, Cl', format: 96 },
-        { uuid: '202504221136', name: '96-Well Plate, 2.0mL, U-Bottom', format: 96 },
-        { uuid: '202412091405', name: 'MicroAmp™ Fast Optical 96-Well 0.1 mL Re', format: 96 },
-        { uuid: '202104140959', name: 'MicroAmp™ EnduraPlate™ 0.3 mL optical 96', format: 96 },
-        { uuid: '202208051511', name: 'MicroAmp™ 0.3 mL optical 96-well semi-sk', format: 96 },
-        { uuid: '201909201031', name: 'MicroAmp™ 0.2 mL Fast Optical 96-well se', format: 96 },
         { uuid: '201901101700', name: 'Greiner, 384-well PS F-bottom clear micr', format: 384 },
-        { uuid: '202502101238', name: 'Eppendorf 384-Well 140uL V-Bottom Microp', format: 384 },
         { uuid: '4c72a888-6a9c-4977-b9f1-97ff89f6d726', name: 'Corning® 384-Well Clear Round Bottom Mic', format: 384 }
     ],
     
     reactions: [],
     cloudReactions: [],
     archivedReactions: [],
+    
     matrices: [],
+    cloudMatrices: [],
     archivedMatrices: [],
+    
     reverseMatrices: [],
+    cloudReverseMatrices: [],
     archivedReverseMatrices: [],
     
-    journal: {
-        entries: [],
-        activeId: null, 
-        nextId: 1
-    },
+    wellPlates: [],
+    cloudPlates: [],
+    archivedPlates: [],
 
+    journal: { entries: [], activeId: null, nextId: 1 },
     nextInvId: 100, nextReactionId: 2, nextMatrixId: 2, nextBlockId: 100,
     nextRmId: 1, nextRmCompId: 100,
-    
-    wellPlates: [],
-    archivedPlates: [],
     nextPlateId: 1,
     selectedWellInvRef: '',
     viewingItem: null
@@ -77,31 +67,63 @@ export const useLabStore = defineStore('lab', {
     async loadCloudInventory() {
       if (!this.user) return;
 
+      // 1. Load Inventory
       const { data: invData } = await db.from('inventory').select('*');
       if (invData) this.inventory = invData.map(row => row.item_data);
 
+      // 2. Load Reactions with owner_id injection
       const { data: rxnData } = await db.from('reactions').select('*');
       if (rxnData) {
-          // MODIFIED: Attach owner_id to the object so UI knows who created it
           this.cloudReactions = rxnData.map(row => {
-              const rxn = row.data;
-              rxn.owner_id = row.owner_id; 
-              return rxn;
+              const obj = row.data;
+              obj.owner_id = row.owner_id;
+              return obj;
           });
           if (this.reactions.length === 0) {
               this.reactions = this.cloudReactions.filter(r => r.scope === 'Personal').map(r => JSON.parse(JSON.stringify(r)));
           }
       }
 
+      // 3. Load Matrices with owner_id injection
       const { data: matData } = await db.from('matrices').select('*');
-      if (matData) this.matrices = matData.map(row => row.data);
+      if (matData) {
+          this.cloudMatrices = matData.map(row => {
+              const obj = row.data;
+              obj.owner_id = row.owner_id;
+              return obj;
+          });
+          if (this.matrices.length === 0) {
+              this.matrices = this.cloudMatrices.filter(m => m.scope === 'Personal').map(m => JSON.parse(JSON.stringify(m)));
+          }
+      }
 
+      // 4. Load Screenings with owner_id injection
       const { data: scrData } = await db.from('screenings').select('*');
-      if (scrData) this.reverseMatrices = scrData.map(row => row.data);
+      if (scrData) {
+          this.cloudReverseMatrices = scrData.map(row => {
+              const obj = row.data;
+              obj.owner_id = row.owner_id;
+              return obj;
+          });
+          if (this.reverseMatrices.length === 0) {
+              this.reverseMatrices = this.cloudReverseMatrices.filter(s => s.scope === 'Personal').map(s => JSON.parse(JSON.stringify(s)));
+          }
+      }
 
+      // 5. Load Plates with owner_id injection
       const { data: pltData } = await db.from('plates').select('*');
-      if (pltData) this.wellPlates = pltData.map(row => row.data);
+      if (pltData) {
+          this.cloudPlates = pltData.map(row => {
+              const obj = row.data;
+              obj.owner_id = row.owner_id;
+              return obj;
+          });
+          if (this.wellPlates.length === 0) {
+              this.wellPlates = this.cloudPlates.filter(p => p.scope === 'Personal').map(p => JSON.parse(JSON.stringify(p)));
+          }
+      }
 
+      // 6. Load Journal Entries
       const { data: jrnData } = await db.from('journals').select('*');
       if (jrnData && jrnData.length > 0) {
           this.journal.entries = jrnData.map(row => row.data);
@@ -128,15 +150,23 @@ export const useLabStore = defineStore('lab', {
         await db.from(tableName).delete().eq('data->>id', payloadData.id.toString());
         const { error } = await db.from(tableName).insert([payload]);
         
-        // MODIFIED: Catch RLS permission errors cleanly
         if (error) {
-            alert(`Could not save: You do not have permission to modify this protocol.`);
+            alert(`Permission Denied: Only the creator can modify this protocol.`);
             return;
         }
         
-        if (tableName === 'reactions') {
-            const { data } = await db.from('reactions').select('*');
-            if (data) this.cloudReactions = data.map(row => { const rxn = row.data; rxn.owner_id = row.owner_id; return rxn; });
+        // Refresh local library cache for the specific table
+        const { data } = await db.from(tableName).select('*');
+        if (data) {
+            const mapped = data.map(row => {
+                const obj = row.data;
+                obj.owner_id = row.owner_id;
+                return obj;
+            });
+            if (tableName === 'reactions') this.cloudReactions = mapped;
+            if (tableName === 'matrices') this.cloudMatrices = mapped;
+            if (tableName === 'screenings') this.cloudReverseMatrices = mapped;
+            if (tableName === 'plates') this.cloudPlates = mapped;
         }
     },
 
@@ -144,15 +174,23 @@ export const useLabStore = defineStore('lab', {
         if (!this.user) return;
         const { error } = await db.from(tableName).delete().eq('data->>id', itemId.toString());
         
-        // MODIFIED: Catch RLS permission errors cleanly
         if (error) {
             alert("Permission Denied: You can only permanently delete your own protocols.");
             return;
         }
         
-        if (tableName === 'reactions') {
-            const { data } = await db.from('reactions').select('*');
-            if (data) this.cloudReactions = data.map(row => { const rxn = row.data; rxn.owner_id = row.owner_id; return rxn; });
+        // Refresh local library cache
+        const { data } = await db.from(tableName).select('*');
+        if (data) {
+            const mapped = data.map(row => {
+                const obj = row.data;
+                obj.owner_id = row.owner_id;
+                return obj;
+            });
+            if (tableName === 'reactions') this.cloudReactions = mapped;
+            if (tableName === 'matrices') this.cloudMatrices = mapped;
+            if (tableName === 'screenings') this.cloudReverseMatrices = mapped;
+            if (tableName === 'plates') this.cloudPlates = mapped;
         }
     },
 
@@ -161,10 +199,12 @@ export const useLabStore = defineStore('lab', {
       const factor = Math.pow(10, this.globalSettings.decimals);
       return (Math.round((Number(num) + Number.EPSILON) * factor) / factor).toFixed(this.globalSettings.decimals);
     },
+
     toggleDarkMode() {
       this.isDarkMode = !this.isDarkMode;
       this.updateThemeColors();
     },
+
     updateThemeColors() {
       const wrapper = document.getElementById('body-wrapper');
       if (wrapper) {

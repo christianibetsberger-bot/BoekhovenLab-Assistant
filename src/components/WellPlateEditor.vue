@@ -4,6 +4,7 @@ import { useLabStore } from '../stores/labStore'
 
 const store = useLabStore()
 const activeDropdown = ref(null)
+const showCloudLibrary = ref(false)
 
 // --- Helper Functions ---
 const getPlateRows = (format) => { 
@@ -27,17 +28,43 @@ const filterBlockInventory = (query, scope) => {
 
 // --- Plate Management Actions ---
 const addWellPlate = () => { 
-    store.wellPlates.unshift({ id: store.nextPlateId++, name: 'New Plate', format: 96, selectedWell: null, targetLabware: '201812181400', wells: {} }); 
+    store.wellPlates.unshift({ 
+        id: store.nextPlateId++, 
+        name: 'New Plate', 
+        format: 96, 
+        selectedWell: null, 
+        targetLabware: '201812181400', 
+        wells: {},
+        scope: 'Personal',
+        owner_id: store.user.id
+    }); 
 }
-const removeWellPlate = (index) => { store.wellPlates.splice(index, 1); }
+
+const loadFromCloud = (cloudPlate) => {
+    const alreadyOpen = store.wellPlates.find(p => p.id === cloudPlate.id);
+    if (!alreadyOpen) {
+        store.wellPlates.unshift(JSON.parse(JSON.stringify(cloudPlate)));
+    }
+    showCloudLibrary.value = false;
+}
+
+const closePlateInWorkspace = (index) => {
+    store.wellPlates.splice(index, 1);
+}
+
 const archivePlate = (index) => {
-    if(confirm("Archive this well plate?")) store.archivedPlates.push(store.wellPlates.splice(index, 1)[0]);
+    if(confirm("Archive this well plate locally?")) store.archivedPlates.push(store.wellPlates.splice(index, 1)[0]);
 }
+
 const duplicateWellPlate = (index) => {
     const copy = JSON.parse(JSON.stringify(store.wellPlates[index]));
-    copy.id = store.nextPlateId++; copy.name += ' (Copy)';
+    copy.id = store.nextPlateId++; 
+    copy.name += ' (Copy)';
+    copy.scope = 'Personal';
+    copy.owner_id = store.user.id;
     store.wellPlates.splice(index + 1, 0, copy);
 }
+
 const updateDefaultLabware = (plate) => {
     if (plate.format === 384) plate.targetLabware = '201901101700';
     else if (plate.format === 96) plate.targetLabware = '201812181400';
@@ -357,15 +384,58 @@ const exportAndrewPlus = (plate) => {
 
 <template>
   <div class="card">
+    
+    <div v-if="showCloudLibrary" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000;">
+        <div style="background: var(--surface); padding: 25px; border-radius: var(--radius); border: 1px solid var(--border); max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
+            <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 10px; margin-bottom: 15px;">
+                <h3 style="margin: 0; color: var(--primary);"><i class="fas fa-cloud"></i> Well Plate Library</h3>
+                <button class="danger small" @click="showCloudLibrary = false"><i class="fas fa-times"></i></button>
+            </div>
+
+            <h4 style="margin-bottom: 10px; color: var(--success);"><i class="fas fa-globe"></i> Global Lab Feed</h4>
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 25px;">
+                <div v-for="plt in store.cloudPlates.filter(p => p.scope === 'Global')" :key="'cloud_pg_'+plt.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
+                    <div>
+                        <strong style="font-size: 1.05rem;">{{ plt.name }}</strong>
+                        <div style="font-size: 0.75rem; opacity: 0.7;">Format: {{ plt.format }}-Well</div>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <button class="small" @click="loadFromCloud(plt)"><i class="fas fa-download"></i> Open</button>
+                        <button v-if="plt.owner_id === store.user.id" class="danger small" @click="store.deleteFromCloud('plates', plt.id)"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+                <div v-if="store.cloudPlates.filter(p => p.scope === 'Global').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No global plates published yet.</div>
+            </div>
+
+            <h4 style="margin-bottom: 10px;"><i class="fas fa-lock"></i> My Personal Drafts</h4>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <div v-for="plt in store.cloudPlates.filter(p => p.scope === 'Personal')" :key="'cloud_pp_'+plt.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
+                    <div>
+                        <strong style="font-size: 1.05rem;">{{ plt.name }}</strong>
+                        <div style="font-size: 0.75rem; opacity: 0.7;">Format: {{ plt.format }}-Well</div>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <button class="small secondary" @click="loadFromCloud(plt)"><i class="fas fa-folder-open"></i> Open</button>
+                        <button class="danger small" @click="store.deleteFromCloud('plates', plt.id)"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+                <div v-if="store.cloudPlates.filter(p => p.scope === 'Personal').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No personal drafts saved.</div>
+            </div>
+        </div>
+    </div>
+
     <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
         <h2 style="border: none; padding: 0; margin: 0;"><i class="fas fa-border-all"></i> Well Plate</h2>
-        <button @click="addWellPlate" class="small"><i class="fas fa-plus"></i> New Plate</button>
+        <div style="display: flex; gap: 10px;">
+            <button @click="showCloudLibrary = true" class="secondary small"><i class="fas fa-cloud"></i> Library</button>
+            <button @click="addWellPlate" class="small"><i class="fas fa-plus"></i> New Plate</button>
+        </div>
     </div>
 
     <div v-for="(plate, pIndex) in store.wellPlates" :key="plate.id" style="background: var(--panel-bg); border: 1px solid var(--border); padding: 20px; border-radius: var(--radius); margin-bottom: 30px;">
-        <div class="flex-between" style="margin-bottom: 20px; display: flex; justify-content: space-between;">
-            <input type="text" v-model="plate.name" style="font-size: 1.2rem; font-weight: bold; width: 40%; background: transparent; border: none; border-bottom: 2px solid var(--primary); padding-left: 0; color: var(--primary);">
-            <div style="display: flex; gap: 10px; align-items: center;">
+        <div class="flex-between" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end;">
+            <div style="width: 35%; display: flex; gap: 15px; align-items: center;">
+                <input type="text" v-model="plate.name" style="font-size: 1.2rem; font-weight: bold; flex-grow: 1; background: transparent; border: none; border-bottom: 2px solid var(--primary); padding-left: 0; color: var(--primary);">
                 <select v-model="plate.format" @change="updateDefaultLabware(plate)" style="width: 120px; height: 32px; padding: 4px 8px; font-size: 0.85rem;">
                     <option :value="24">24-Well</option>
                     <option :value="48">48-Well</option>
@@ -374,15 +444,34 @@ const exportAndrewPlus = (plate) => {
                     <option :value="'ibidi'">Ibidi gamma chambers</option>
                     <option :value="'pcr8'">8 PCR strips</option>
                 </select>
-                <select v-model="plate.targetLabware" style="width: 180px; height: 32px; padding: 4px 8px; font-size: 0.8rem; margin-left: 10px;">
+            </div>
+
+            <div style="display: flex; gap: 5px; align-items: center;">
+                <span v-if="plate.scope === 'Global'" style="font-size: 0.75rem; color: var(--success); font-weight: bold; margin-right: 5px;"><i class="fas fa-globe"></i> Global</span>
+                <span v-else style="font-size: 0.75rem; opacity: 0.7; font-weight: bold; margin-right: 5px;"><i class="fas fa-lock"></i> Personal</span>
+
+                <button class="success small" @click="store.saveToCloud('plates', plate)" title="Save to Cloud"><i class="fas fa-cloud-arrow-up"></i> Save</button>
+
+                <template v-if="plate.owner_id === store.user.id">
+                    <button class="secondary small" @click="plate.scope = 'Personal'; store.saveToCloud('plates', plate)" v-if="plate.scope === 'Global'" title="Make Private">
+                        <i class="fas fa-user-lock"></i> Private
+                    </button>
+                    <button class="secondary small" @click="plate.scope = 'Global'; store.saveToCloud('plates', plate)" v-if="plate.scope !== 'Global'" title="Publish to Global Lab Feed">
+                        <i class="fas fa-bullhorn"></i> Publish
+                    </button>
+                </template>
+                
+                <div style="width: 1px; height: 24px; background: var(--border); margin: 0 5px;"></div>
+
+                <select v-model="plate.targetLabware" style="width: 150px; height: 32px; padding: 4px 8px; font-size: 0.8rem;">
                     <option value="">Default Target Plate</option>
                     <option v-for="lw in store.targetLabwares.filter(l => l.format === plate.format)" :value="lw.uuid" :key="lw.uuid">{{ lw.name }}</option>
                 </select>
-                <button class="small" @click="savePlateToJournal(plate)" title="Append plate map to active journal entry"><i class="fas fa-file-import"></i> Log to Journal</button>
-                <button class="small" @click="exportAndrewPlus(plate)" title="Export protocol for Andrew+"><i class="fas fa-robot"></i> Export Andrew+</button>
-                <button class="secondary small" @click="duplicateWellPlate(pIndex)" style="margin-right: 5px;" title="Duplicate"><i class="fas fa-copy"></i></button>
-                <button class="secondary small" @click="archivePlate(pIndex)" style="margin-right: 5px;" title="Archive"><i class="fas fa-box-archive"></i></button>
-                <button class="danger small" @click="removeWellPlate(pIndex)"><i class="fas fa-trash"></i></button>
+                <button class="small" @click="savePlateToJournal(plate)" title="Log to Journal"><i class="fas fa-file-import"></i> Log</button>
+                <button class="small" @click="exportAndrewPlus(plate)" title="Export Andrew+"><i class="fas fa-robot"></i> Export</button>
+                <button class="secondary small" @click="duplicateWellPlate(pIndex)" title="Duplicate"><i class="fas fa-copy"></i></button>
+                <button class="secondary small" @click="archivePlate(pIndex)" title="Archive"><i class="fas fa-box-archive"></i></button>
+                <button class="danger small" @click="closePlateInWorkspace(pIndex)" title="Close from workspace"><i class="fas fa-times"></i></button>
             </div>
         </div>
 

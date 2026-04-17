@@ -4,6 +4,7 @@ import { useLabStore } from '../stores/labStore'
 
 const store = useLabStore()
 const activeDropdown = ref(null)
+const showCloudLibrary = ref(false)
 
 // --- Helper Functions ---
 const getUM = (val, unit) => {
@@ -36,24 +37,54 @@ const getWellId = (r, c) => { return String.fromCharCode(65 + r) + (c + 1); }
 // --- Matrix Logic ---
 const addMatrix = () => { 
     store.matrices.unshift({ 
-        id: store.nextMatrixId++, name: 'New Matrix Grid', targetVolume: 30, targetVolumeUnit: 'µL', rowTargetConc: 2.8, rowTargetConcUnit: 'µM', colTargetConc: 1.4, colTargetConcUnit: 'µM', 
+        id: store.nextMatrixId++, 
+        name: 'New Matrix Grid', 
+        targetVolume: 30, 
+        targetVolumeUnit: 'µL', 
+        rowTargetConc: 2.8, 
+        rowTargetConcUnit: 'µM', 
+        colTargetConc: 1.4, 
+        colTargetConcUnit: 'µM', 
         customBlocks: [], 
-        fixedAdditives: [{name: 'Ligase buffer (10x)', vol: 3, searchQuery: '', searchScope: 'Global', labware: ''}, {name: 'T4 DNA Ligase', vol: 2, searchQuery: '', searchScope: 'Global', labware: ''}],
-        selectedRows: [], selectedCols: [], targetPlateId: '', targetStartWell: ''
+        fixedAdditives: [
+            {name: 'Ligase buffer (10x)', vol: 3, searchQuery: '', searchScope: 'Global', labware: ''}, 
+            {name: 'T4 DNA Ligase', vol: 2, searchQuery: '', searchScope: 'Global', labware: ''}
+        ],
+        selectedRows: [], 
+        selectedCols: [], 
+        targetPlateId: '', 
+        targetStartWell: '',
+        scope: 'Personal',
+        owner_id: store.user.id
     }); 
 }
-const removeMatrix = (index) => { store.matrices.splice(index, 1); }
+
+const loadFromCloud = (cloudMatrix) => {
+    const alreadyOpen = store.matrices.find(m => m.id === cloudMatrix.id);
+    if (!alreadyOpen) {
+        store.matrices.unshift(JSON.parse(JSON.stringify(cloudMatrix)));
+    }
+    showCloudLibrary.value = false;
+}
+
+const closePlanInWorkspace = (index) => {
+    store.matrices.splice(index, 1);
+}
+
 const addBlockToMatrix = (matrix) => { matrix.customBlocks.push({ id: 'blk_' + store.nextBlockId++, name: 'New Block', itemIds: [], searchQuery: '', searchScope: 'Global', labware: '' }); }
 const addFixedAdditive = (matrix) => {
     if(!matrix.fixedAdditives) matrix.fixedAdditives = [];
     matrix.fixedAdditives.push({ name: 'New Component', vol: 1, searchQuery: '', searchScope: 'Global', labware: '' });
 }
 const archiveMatrix = (index) => {
-    if(confirm("Archive this matrix?")) store.archivedMatrices.push(store.matrices.splice(index, 1)[0]);
+    if(confirm("Archive this matrix locally?")) store.archivedMatrices.push(store.matrices.splice(index, 1)[0]);
 }
 const duplicateMatrix = (index) => {
     const copy = JSON.parse(JSON.stringify(store.matrices[index]));
-    copy.id = store.nextMatrixId++; copy.name += ' (Copy)';
+    copy.id = store.nextMatrixId++; 
+    copy.name += ' (Copy)';
+    copy.scope = 'Personal';
+    copy.owner_id = store.user.id;
     store.matrices.splice(index + 1, 0, copy);
 }
 
@@ -185,14 +216,55 @@ const saveMatrixToPlate = (matrix) => {
 
 <template>
   <div class="card">
+    
+    <div v-if="showCloudLibrary" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000;">
+        <div style="background: var(--surface); padding: 25px; border-radius: var(--radius); border: 1px solid var(--border); max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
+            <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 10px; margin-bottom: 15px;">
+                <h3 style="margin: 0; color: var(--primary);"><i class="fas fa-cloud"></i> Matrix Library</h3>
+                <button class="danger small" @click="showCloudLibrary = false"><i class="fas fa-times"></i></button>
+            </div>
+
+            <h4 style="margin-bottom: 10px; color: var(--success);"><i class="fas fa-globe"></i> Global Lab Feed</h4>
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 25px;">
+                <div v-for="mat in store.cloudMatrices.filter(m => m.scope === 'Global')" :key="'cloud_mg_'+mat.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
+                    <div>
+                        <strong style="font-size: 1.05rem;">{{ mat.name }}</strong>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <button class="small" @click="loadFromCloud(mat)"><i class="fas fa-download"></i> Open</button>
+                        <button v-if="mat.owner_id === store.user.id" class="danger small" @click="store.deleteFromCloud('matrices', mat.id)"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+                <div v-if="store.cloudMatrices.filter(m => m.scope === 'Global').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No global matrices published yet.</div>
+            </div>
+
+            <h4 style="margin-bottom: 10px;"><i class="fas fa-lock"></i> My Personal Drafts</h4>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <div v-for="mat in store.cloudMatrices.filter(m => m.scope === 'Personal')" :key="'cloud_mp_'+mat.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
+                    <div>
+                        <strong style="font-size: 1.05rem;">{{ mat.name }}</strong>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <button class="small secondary" @click="loadFromCloud(mat)"><i class="fas fa-folder-open"></i> Open</button>
+                        <button class="danger small" @click="store.deleteFromCloud('matrices', mat.id)"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+                <div v-if="store.cloudMatrices.filter(m => m.scope === 'Personal').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No personal drafts saved.</div>
+            </div>
+        </div>
+    </div>
+
     <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
         <h2 style="border: none; padding: 0; margin: 0;"><i class="fas fa-table-cells"></i> Matrix</h2>
-        <button @click="addMatrix" class="small"><i class="fas fa-plus"></i> New Matrix</button>
+        <div style="display: flex; gap: 10px;">
+            <button @click="showCloudLibrary = true" class="secondary small"><i class="fas fa-cloud"></i> Library</button>
+            <button @click="addMatrix" class="small"><i class="fas fa-plus"></i> New Matrix</button>
+        </div>
     </div>
     
     <div v-for="(matrix, mIndex) in store.matrices" :key="matrix.id" style="background: var(--panel-bg); border: 1px solid var(--border); padding: 20px; border-radius: var(--radius); margin-bottom: 30px;">
         <div class="flex-between" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end;">
-            <div style="width: 60%; display: flex; gap: 15px; align-items: center;">
+            <div style="width: 45%; display: flex; gap: 15px; align-items: center;">
                 <input type="text" v-model="matrix.name" style="font-size: 1.2rem; font-weight: bold; flex-grow: 1; background: transparent; border: none; border-bottom: 2px solid var(--primary); padding-left: 0; color: var(--primary);">
                 <div class="input-group" style="margin-bottom: 0; min-width: 150px;">
                     <label style="font-size: 0.7rem; margin-bottom: 2px;">Target Vol</label>
@@ -204,13 +276,36 @@ const saveMatrixToPlate = (matrix) => {
                     </div>
                 </div>
             </div>
-            <div>
-                <button class="small" @click="saveMatrixToJournal(matrix)" style="margin-right: 10px;"><i class="fas fa-file-import"></i> Log to Journal</button>
-                <button class="secondary small" @click="duplicateMatrix(mIndex)" style="margin-right: 5px;" title="Duplicate"><i class="fas fa-copy"></i></button>
-                <button class="secondary small" @click="archiveMatrix(mIndex)" style="margin-right: 5px;" title="Archive"><i class="fas fa-box-archive"></i></button>
-                <button class="danger small" @click="removeMatrix(mIndex)"><i class="fas fa-trash"></i></button>
+
+            <div style="display: flex; gap: 5px; align-items: center;">
+                <span v-if="matrix.scope === 'Global'" style="font-size: 0.75rem; color: var(--success); font-weight: bold; margin-right: 10px;">
+                    <i class="fas fa-globe"></i> Global
+                </span>
+                <span v-else style="font-size: 0.75rem; opacity: 0.7; font-weight: bold; margin-right: 10px;">
+                    <i class="fas fa-lock"></i> Personal
+                </span>
+
+                <button class="success small" @click="store.saveToCloud('matrices', matrix)" title="Save to Cloud">
+                    <i class="fas fa-cloud-arrow-up"></i> Save
+                </button>
+
+                <template v-if="matrix.owner_id === store.user.id">
+                    <button class="secondary small" @click="matrix.scope = 'Personal'; store.saveToCloud('matrices', matrix)" v-if="matrix.scope === 'Global'" title="Make Private">
+                        <i class="fas fa-user-lock"></i> Private
+                    </button>
+                    <button class="secondary small" @click="matrix.scope = 'Global'; store.saveToCloud('matrices', matrix)" v-if="matrix.scope !== 'Global'" title="Publish to Global Lab Feed">
+                        <i class="fas fa-bullhorn"></i> Publish
+                    </button>
+                </template>
+                
+                <div style="width: 1px; height: 24px; background: var(--border); margin: 0 5px;"></div>
+
+                <button class="small" @click="saveMatrixToJournal(matrix)" title="Append table to active journal entry"><i class="fas fa-file-import"></i> Log</button>
+                <button class="secondary small" @click="duplicateMatrix(mIndex)" title="Duplicate"><i class="fas fa-copy"></i></button>
+                <button class="secondary small" @click="archiveMatrix(mIndex)" title="Local Archive"><i class="fas fa-box-archive"></i></button>
+                <button class="danger small" @click="closePlanInWorkspace(mIndex)" title="Remove from screen only"><i class="fas fa-times"></i></button>
             </div>
-        </div>
+            </div>
 
         <div style="background: var(--surface); padding: 15px; border: 1px solid var(--border); margin-bottom: 20px; border-radius: var(--radius);">
             <h3><i class="fas fa-cubes"></i> 1. Define Component Blocks</h3>

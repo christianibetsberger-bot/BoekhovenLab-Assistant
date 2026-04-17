@@ -4,6 +4,7 @@ import { useLabStore } from '../stores/labStore'
 
 const store = useLabStore()
 const activeDropdown = ref(null)
+const showCloudLibrary = ref(false)
 
 // --- Helper Math ---
 const getUM = (val, unit) => {
@@ -56,6 +57,17 @@ const addReaction = () => {
         scope: 'Personal' // Ensure new plans start as private
     }); 
 }
+
+const loadFromCloud = (cloudReaction) => {
+    // Check if it's already open to prevent messy duplicates
+    const alreadyOpen = store.reactions.find(r => r.id === cloudReaction.id);
+    if (!alreadyOpen) {
+        // Create a deep copy so we can edit it safely
+        store.reactions.unshift(JSON.parse(JSON.stringify(cloudReaction)));
+    }
+    showCloudLibrary.value = false; // Close the modal
+}
+
 const removeReaction = (index) => { store.reactions.splice(index, 1); }
 const addItem = (reaction) => { reaction.items.push({ invId: '', searchQuery: '', searchScope: 'Global', target: 1, targetUnit: 'µM', isFixed: false, fixedVol: 1, fixedVolUnit: 'µL', labware: '' }); }
 const removeItem = (reaction, itemIndex) => { reaction.items.splice(itemIndex, 1); }
@@ -154,9 +166,46 @@ const saveReactionToWell = (reaction) => {
 
 <template>
   <div class="card">
+    
+    <div v-if="showCloudLibrary" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000;">
+        <div style="background: var(--surface); padding: 25px; border-radius: var(--radius); border: 1px solid var(--border); max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
+            <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 10px; margin-bottom: 15px;">
+                <h3 style="margin: 0; color: var(--primary);"><i class="fas fa-cloud"></i> Protocol Library</h3>
+                <button class="danger small" @click="showCloudLibrary = false"><i class="fas fa-times"></i></button>
+            </div>
+
+            <h4 style="margin-bottom: 10px; color: var(--success);"><i class="fas fa-globe"></i> Global Lab Feed</h4>
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 25px;">
+                <div v-for="rxn in store.cloudReactions.filter(r => r.scope === 'Global')" :key="'cloud_g_'+rxn.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
+                    <div>
+                        <strong style="font-size: 1.05rem;">{{ rxn.name }}</strong>
+                        <div style="font-size: 0.75rem; opacity: 0.7;">{{ rxn.targetVolume }} {{ rxn.targetVolumeUnit }} • {{ rxn.items.length }} Components</div>
+                    </div>
+                    <button class="small" @click="loadFromCloud(rxn)"><i class="fas fa-download"></i> Open</button>
+                </div>
+                <div v-if="store.cloudReactions.filter(r => r.scope === 'Global').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No global protocols published yet.</div>
+            </div>
+
+            <h4 style="margin-bottom: 10px;"><i class="fas fa-lock"></i> My Personal Drafts</h4>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <div v-for="rxn in store.cloudReactions.filter(r => r.scope === 'Personal')" :key="'cloud_p_'+rxn.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
+                    <div>
+                        <strong style="font-size: 1.05rem;">{{ rxn.name }}</strong>
+                        <div style="font-size: 0.75rem; opacity: 0.7;">{{ rxn.targetVolume }} {{ rxn.targetVolumeUnit }} • {{ rxn.items.length }} Components</div>
+                    </div>
+                    <button class="small secondary" @click="loadFromCloud(rxn)"><i class="fas fa-folder-open"></i> Open</button>
+                </div>
+                <div v-if="store.cloudReactions.filter(r => r.scope === 'Personal').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No personal drafts saved.</div>
+            </div>
+        </div>
+    </div>
+
     <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
         <h2 style="border: none; padding: 0; margin: 0;"><i class="fas fa-flask"></i> Reaction Plan</h2>
-        <button @click="addReaction" class="small"><i class="fas fa-plus"></i> New Plan</button>
+        <div style="display: flex; gap: 10px;">
+            <button @click="showCloudLibrary = true" class="secondary small"><i class="fas fa-cloud"></i> Cloud Library</button>
+            <button @click="addReaction" class="small"><i class="fas fa-plus"></i> New Plan</button>
+        </div>
     </div>
     
     <div v-for="(reaction, rIndex) in store.reactions" :key="reaction.id" style="background: var(--panel-bg); border: 1px solid var(--border); padding: 20px; border-radius: var(--radius); margin-bottom: 20px;">
@@ -196,7 +245,7 @@ const saveReactionToWell = (reaction) => {
                 <button class="secondary small" @click="archiveReaction(rIndex)" title="Archive"><i class="fas fa-box-archive"></i></button>
                 <button class="danger small" @click="removeReaction(rIndex); store.deleteFromCloud('reactions', reaction.id)"><i class="fas fa-trash"></i></button>
             </div>
-            </div>
+        </div>
         
         <div class="table-responsive" style="min-height: 250px; overflow: visible;">
             <table>

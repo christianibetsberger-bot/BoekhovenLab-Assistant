@@ -50,6 +50,7 @@ export const useLabStore = defineStore('lab', {
     ],
     
     reactions: [],
+    cloudReactions: [],
     archivedReactions: [],
     matrices: [],
     archivedMatrices: [],
@@ -81,9 +82,15 @@ export const useLabStore = defineStore('lab', {
       const { data: invData } = await db.from('inventory').select('*');
       if (invData) this.inventory = invData.map(row => row.item_data);
 
-      // 2. Load Reactions (Because of RLS, Supabase only sends Personal + Global)
+      // 2. Load Reactions into the BACKGROUND library
       const { data: rxnData } = await db.from('reactions').select('*');
-      if (rxnData) this.reactions = rxnData.map(row => row.data);
+      if (rxnData) {
+          this.cloudReactions = rxnData.map(row => row.data);
+          // Auto-load personal drafts only if workspace is completely empty
+          if (this.reactions.length === 0) {
+              this.reactions = this.cloudReactions.filter(r => r.scope === 'Personal').map(r => JSON.parse(JSON.stringify(r)));
+          }
+      }
 
       // 3. Load Matrices
       const { data: matData } = await db.from('matrices').select('*');
@@ -110,7 +117,6 @@ export const useLabStore = defineStore('lab', {
     async saveItemToCloud(item) {
       if (!this.user) return;
       const payload = { owner_id: this.user.id, scope: item.scope || 'Global', item_data: item };
-      // Delete old version to prevent duplicates on edit, then insert new
       await db.from('inventory').delete().eq('item_data->>id', item.id.toString());
       const { error } = await db.from('inventory').insert([payload]);
       if (error) alert("Error saving inventory: " + error.message);
@@ -120,13 +126,18 @@ export const useLabStore = defineStore('lab', {
         if (!this.user) return;
         const payload = {
             owner_id: this.user.id,
-            scope: payloadData.scope || 'Personal', // Defaults to personal!
+            scope: payloadData.scope || 'Personal', 
             data: payloadData
         };
-        // Find existing record by the internal ID and replace it
         await db.from(tableName).delete().eq('data->>id', payloadData.id.toString());
         const { error } = await db.from(tableName).insert([payload]);
         if (error) alert(`Error saving to ${tableName}: ` + error.message);
+        
+        // Refresh the background library so the browser modal is up to date!
+        if (tableName === 'reactions') {
+            const { data } = await db.from('reactions').select('*');
+            if (data) this.cloudReactions = data.map(row => row.data);
+        }
     },
 
     async deleteFromCloud(tableName, itemId) {

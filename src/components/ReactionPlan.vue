@@ -45,7 +45,16 @@ const filterBlockInventory = (query, scope) => {
 
 // --- Reaction Logic ---
 const addReaction = () => { 
-    store.reactions.unshift({ id: store.nextReactionId++, name: 'New Protocol', targetVolume: 30, targetVolumeUnit: 'µL', items: [], targetPlateId: '', targetWell: '' }); 
+    store.reactions.unshift({ 
+        id: store.nextReactionId++, 
+        name: 'New Protocol', 
+        targetVolume: 30, 
+        targetVolumeUnit: 'µL', 
+        items: [], 
+        targetPlateId: '', 
+        targetWell: '',
+        scope: 'Personal' // Ensure new plans start as private
+    }); 
 }
 const removeReaction = (index) => { store.reactions.splice(index, 1); }
 const addItem = (reaction) => { reaction.items.push({ invId: '', searchQuery: '', searchScope: 'Global', target: 1, targetUnit: 'µM', isFixed: false, fixedVol: 1, fixedVolUnit: 'µL', labware: '' }); }
@@ -55,6 +64,7 @@ const duplicateReaction = (index) => {
     const copy = JSON.parse(JSON.stringify(store.reactions[index]));
     copy.id = store.nextReactionId++;
     copy.name += ' (Copy)';
+    copy.scope = 'Personal'; // Duplicates should always default back to private!
     store.reactions.splice(index + 1, 0, copy);
 }
 
@@ -163,13 +173,30 @@ const saveReactionToWell = (reaction) => {
                     </div>
                 </div>
             </div>
-            <div>
-                <button class="small" @click="saveReactionToJournal(reaction)" style="margin-right: 10px;" title="Append table to active journal entry"><i class="fas fa-file-import"></i> Log to Journal</button>
-                <button class="secondary small" @click="duplicateReaction(rIndex)" style="margin-right: 5px;" title="Duplicate"><i class="fas fa-copy"></i></button>
-                <button class="secondary small" @click="archiveReaction(rIndex)" style="margin-right: 5px;" title="Archive"><i class="fas fa-box-archive"></i></button>
-                <button class="danger small" @click="removeReaction(rIndex)"><i class="fas fa-trash"></i></button>
+
+            <div style="display: flex; gap: 5px; align-items: center;">
+                <span v-if="reaction.scope === 'Global'" style="font-size: 0.75rem; color: var(--success); font-weight: bold; margin-right: 10px;">
+                    <i class="fas fa-globe"></i> Global
+                </span>
+                <span v-else style="font-size: 0.75rem; opacity: 0.7; font-weight: bold; margin-right: 10px;">
+                    <i class="fas fa-lock"></i> Personal
+                </span>
+
+                <button class="success small" @click="store.saveToCloud('reactions', reaction)" title="Save to Personal Cloud">
+                    <i class="fas fa-cloud-arrow-up"></i> Save
+                </button>
+                <button class="secondary small" @click="reaction.scope = 'Global'; store.saveToCloud('reactions', reaction)" v-if="reaction.scope !== 'Global'" title="Publish to Global Lab Feed">
+                    <i class="fas fa-bullhorn"></i> Publish
+                </button>
+                
+                <div style="width: 1px; height: 24px; background: var(--border); margin: 0 5px;"></div>
+
+                <button class="small" @click="saveReactionToJournal(reaction)" title="Append table to active journal entry"><i class="fas fa-file-import"></i> Log</button>
+                <button class="secondary small" @click="duplicateReaction(rIndex)" title="Duplicate"><i class="fas fa-copy"></i></button>
+                <button class="secondary small" @click="archiveReaction(rIndex)" title="Archive"><i class="fas fa-box-archive"></i></button>
+                <button class="danger small" @click="removeReaction(rIndex); store.deleteFromCloud('reactions', reaction.id)"><i class="fas fa-trash"></i></button>
             </div>
-        </div>
+            </div>
         
         <div class="table-responsive" style="min-height: 250px; overflow: visible;">
             <table>

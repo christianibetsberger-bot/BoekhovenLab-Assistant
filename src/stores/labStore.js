@@ -73,27 +73,68 @@ export const useLabStore = defineStore('lab', {
   }),
   
   actions: {
+    // --- THE MASTER CLOUD LOADER ---
     async loadCloudInventory() {
       if (!this.user) return;
-      const { data, error } = await db.from('inventory')
-        .select('*')
-        .or(`scope.eq.Global,owner_id.eq.${this.user.id}`);
-      if (!error && data) {
-          this.inventory = data.map(row => row.item_data);
-      } else {
-          console.error(error);
+
+      // 1. Load Inventory
+      const { data: invData } = await db.from('inventory').select('*');
+      if (invData) this.inventory = invData.map(row => row.item_data);
+
+      // 2. Load Reactions (Because of RLS, Supabase only sends Personal + Global)
+      const { data: rxnData } = await db.from('reactions').select('*');
+      if (rxnData) this.reactions = rxnData.map(row => row.data);
+
+      // 3. Load Matrices
+      const { data: matData } = await db.from('matrices').select('*');
+      if (matData) this.matrices = matData.map(row => row.data);
+
+      // 4. Load Screenings
+      const { data: scrData } = await db.from('screenings').select('*');
+      if (scrData) this.reverseMatrices = scrData.map(row => row.data);
+
+      // 5. Load Plates
+      const { data: pltData } = await db.from('plates').select('*');
+      if (pltData) this.wellPlates = pltData.map(row => row.data);
+
+      // 6. Load Journal Entries
+      const { data: jrnData } = await db.from('journals').select('*');
+      if (jrnData && jrnData.length > 0) {
+          this.journal.entries = jrnData.map(row => row.data);
+          this.journal.entries.sort((a, b) => new Date(b.date) - new Date(a.date));
+          if (!this.journal.activeId) this.journal.activeId = this.journal.entries[0].id;
       }
     },
+
+    // --- THE MASTER CLOUD SAVERS ---
     async saveItemToCloud(item) {
       if (!this.user) return;
-      const payload = {
-          owner_id: this.user.id,
-          scope: item.scope || 'Global',
-          item_data: item
-      };
+      const payload = { owner_id: this.user.id, scope: item.scope || 'Global', item_data: item };
+      // Delete old version to prevent duplicates on edit, then insert new
+      await db.from('inventory').delete().eq('item_data->>id', item.id.toString());
       const { error } = await db.from('inventory').insert([payload]);
-      if (error) alert("Error saving to cloud: " + error.message);
+      if (error) alert("Error saving inventory: " + error.message);
     },
+
+    async saveToCloud(tableName, payloadData) {
+        if (!this.user) return;
+        const payload = {
+            owner_id: this.user.id,
+            scope: payloadData.scope || 'Personal', // Defaults to personal!
+            data: payloadData
+        };
+        // Find existing record by the internal ID and replace it
+        await db.from(tableName).delete().eq('data->>id', payloadData.id.toString());
+        const { error } = await db.from(tableName).insert([payload]);
+        if (error) alert(`Error saving to ${tableName}: ` + error.message);
+    },
+
+    async deleteFromCloud(tableName, itemId) {
+        if (!this.user) return;
+        await db.from(tableName).delete().eq('data->>id', itemId.toString());
+    },
+
+    // --- UTILITIES ---
     formatNum(num) {
       if (num === null || num === undefined || isNaN(num)) return (0).toFixed(this.globalSettings.decimals);
       const factor = Math.pow(10, this.globalSettings.decimals);

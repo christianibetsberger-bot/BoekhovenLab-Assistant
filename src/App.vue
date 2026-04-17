@@ -11,18 +11,19 @@ import StandardStock from './components/StandardStock.vue'
 import SequenceCalc from './components/SequenceCalc.vue'
 import InventoryManager from './components/InventoryManager.vue'
 
-// --- Planners ---
+// --- Advanced Planners ---
 import ReactionPlan from './components/ReactionPlan.vue'
 import MatrixPlanner from './components/MatrixPlanner.vue'
 import ScreeningPlanner from './components/ScreeningPlanner.vue'
 
-// --- Plates & Archive ---
+// --- Plate & Archive Management ---
 import WellPlateEditor from './components/WellPlateEditor.vue'
 import ArchiveManager from './components/ArchiveManager.vue'
 
 const store = useLabStore()
 
 onMounted(() => {
+  // Check if user is already logged in on load
   db.auth.getSession().then(({ data }) => {
     if (data.session) {
       store.user = data.session.user
@@ -30,6 +31,7 @@ onMounted(() => {
     }
   })
 
+  // Listen for login/logout events to switch UI
   db.auth.onAuthStateChange((event, session) => {
     store.user = session?.user || null
     if (store.user) {
@@ -52,9 +54,13 @@ const signOut = async () => {
       
       <template v-else>
         
-        <div class="header-row" style="grid-column: 1 / -1; display: flex; justify-content: flex-end; align-items: center; padding: 10px 0; gap: 15px;">
-          <span style="opacity: 0.7; font-size: 0.85rem;">User: <strong>{{ store.user.email }}</strong></span>
-          <button class="small danger" @click="signOut"><i class="fas fa-sign-out-alt"></i> Logout</button>
+        <div class="full-width-header" style="text-align: right; margin-bottom: 15px; grid-column: 1 / -1;">
+          <span style="opacity: 0.8; font-size: 0.9rem; margin-right: 10px;">
+            Logged in as: <strong>{{ store.user.email }}</strong>
+          </span>
+          <button class="small danger" @click="signOut">
+            <i class="fas fa-sign-out-alt"></i> Log Out
+          </button>
         </div>
         
         <div style="grid-column: 1 / -1;">
@@ -66,10 +72,9 @@ const signOut = async () => {
           <StandardStock />
           <SequenceCalc />
           <ArchiveManager />
-        </div>
+          <InventoryManager /> </div>
 
         <div class="workspace-col" style="grid-column: 2; display: flex; flex-direction: column; gap: 20px;">
-          <InventoryManager />
           <ReactionPlan />
           <MatrixPlanner />
           <ScreeningPlanner />
@@ -82,26 +87,26 @@ const signOut = async () => {
 </template>
 
 <style>
-/* MASTER GRID CONFIGURATION
-   The first column (Calculators) is now 420px.
-   The gap is increased to 25px for better visual separation.
+/* MASTER LAYOUT DEFINITION
+  Column 1 (Sidebar): 450px
+  Column 2 (Workspace): Flexible remainder
 */
 .container {
   display: grid;
-  grid-template-columns: 420px 1fr; 
+  grid-template-columns: 450px 1fr;
   gap: 25px;
   align-items: start;
   max-width: 100%;
   padding: 0 20px;
 }
 
-/* Sidebar and Workspace internal alignment */
+/* Internal column containers */
 .sidebar-col, .workspace-col {
-  min-width: 0; /* Prevents flex children from overflowing the grid */
+  min-width: 0;
 }
 
-/* Mobile Responsive: Collapse to single column on smaller screens */
-@media (max-width: 1200px) {
+/* Responsive adjustment for laptops/smaller monitors */
+@media (max-width: 1300px) {
   .container {
     grid-template-columns: 1fr;
     gap: 20px;

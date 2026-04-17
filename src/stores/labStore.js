@@ -19,7 +19,6 @@ export const useLabStore = defineStore('lab', {
     activeDropdown: null,
     classOptions: ['DNA', 'RNA', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10', 'C11', 'C12', 'C13+', 'Acid', 'Base', 'Dye', 'Chemical', 'Solvent', 'Enzyme', 'Buffer', 'Other'],
     
-    // --- RESTORED CALCULATOR STATE (This is what was missing) ---
     stdCalc: { type: 'solid', mw: null, mass: null, massUnit: 0.001, density: null, vol: null, volUnit: 0.001, conc: null, concUnit: 0.000001, saveCode: '', saveCas: '', saveName: '', saveClass: 'Chemical' },
     dnaCalc: { a260: null, sequence: '', manualMw: null, saveCode: '', saveName: '', saveClass: 'DNA', type: 'DNA', pathLength: 0.05 },
     
@@ -83,9 +82,7 @@ export const useLabStore = defineStore('lab', {
               obj.owner_id = row.owner_id;
               return obj;
           });
-          if (this.reactions.length === 0) {
-              this.reactions = this.cloudReactions.filter(r => r.scope === 'Personal').map(r => JSON.parse(JSON.stringify(r)));
-          }
+          // BUG FIX: Auto-load removed to allow clean workspace
       }
 
       // 3. Load Matrices with owner_id injection
@@ -96,9 +93,7 @@ export const useLabStore = defineStore('lab', {
               obj.owner_id = row.owner_id;
               return obj;
           });
-          if (this.matrices.length === 0) {
-              this.matrices = this.cloudMatrices.filter(m => m.scope === 'Personal').map(m => JSON.parse(JSON.stringify(m)));
-          }
+          // BUG FIX: Auto-load removed to allow clean workspace
       }
 
       // 4. Load Screenings with owner_id injection
@@ -109,9 +104,7 @@ export const useLabStore = defineStore('lab', {
               obj.owner_id = row.owner_id;
               return obj;
           });
-          if (this.reverseMatrices.length === 0) {
-              this.reverseMatrices = this.cloudReverseMatrices.filter(s => s.scope === 'Personal').map(s => JSON.parse(JSON.stringify(s)));
-          }
+          // BUG FIX: Auto-load removed to allow clean workspace
       }
 
       // 5. Load Plates with owner_id injection
@@ -122,9 +115,7 @@ export const useLabStore = defineStore('lab', {
               obj.owner_id = row.owner_id;
               return obj;
           });
-          if (this.wellPlates.length === 0) {
-              this.wellPlates = this.cloudPlates.filter(p => p.scope === 'Personal').map(p => JSON.parse(JSON.stringify(p)));
-          }
+          // BUG FIX: Auto-load removed to allow clean workspace
       }
 
       // 6. Load Journal Entries
@@ -159,7 +150,6 @@ export const useLabStore = defineStore('lab', {
             return;
         }
         
-        // Refresh local library cache for the specific table
         const { data } = await db.from(tableName).select('*');
         if (data) {
             const mapped = data.map(row => {
@@ -183,7 +173,6 @@ export const useLabStore = defineStore('lab', {
             return;
         }
         
-        // Refresh local library cache
         const { data } = await db.from(tableName).select('*');
         if (data) {
             const mapped = data.map(row => {

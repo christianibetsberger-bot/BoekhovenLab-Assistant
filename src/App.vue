@@ -16,7 +16,7 @@ import ReactionPlan from './components/ReactionPlan.vue'
 import MatrixPlanner from './components/MatrixPlanner.vue'
 import ScreeningPlanner from './components/ScreeningPlanner.vue'
 
-// --- Plate & Archive Management (Prepared) ---
+// --- Plate & Archive Management ---
 import WellPlateEditor from './components/WellPlateEditor.vue'
 import ArchiveManager from './components/ArchiveManager.vue'
 
@@ -63,19 +63,24 @@ const signOut = async () => {
           </button>
         </div>
         
-        <LabJournal />
+        <div style="grid-column: 1 / -1;">
+          <LabJournal />
+        </div>
         
-        <GlobalSettings />
-        <StandardStock />
-        <SequenceCalc />
-        <InventoryManager />
-        
-        <ReactionPlan />
-        <MatrixPlanner />
-        <ScreeningPlanner />
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+          <GlobalSettings />
+          <StandardStock />
+          <SequenceCalc />
+          <ArchiveManager />
+        </div>
 
-        <WellPlateEditor />
-        <ArchiveManager />
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+          <InventoryManager />
+          <ReactionPlan />
+          <MatrixPlanner />
+          <ScreeningPlanner />
+          <WellPlateEditor />
+        </div>
 
       </template>
     </div>

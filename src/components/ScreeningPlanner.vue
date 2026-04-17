@@ -50,7 +50,8 @@ const addReverseMatrix = () => {
         targetStartWell: 'A1',
         scope: 'Personal',
         owner_id: store.user.id
-    });
+    })
+    store.saveWorkspaceState();
 }
 
 const loadFromCloud = (cloudRM) => {
@@ -59,16 +60,29 @@ const loadFromCloud = (cloudRM) => {
         store.reverseMatrices.unshift(JSON.parse(JSON.stringify(cloudRM)));
     }
     showCloudLibrary.value = false;
+    store.saveWorkspaceState();
 }
 
 const closePlanInWorkspace = (index) => {
     store.reverseMatrices.splice(index, 1);
+    store.saveWorkspaceState();
 }
 
-const removeReverseMatrix = (index) => { store.reverseMatrices.splice(index, 1); }
-const archiveReverseMatrix = (index) => {
-    if(confirm("Archive this screening locally?")) store.archivedReverseMatrices.push(store.reverseMatrices.splice(index, 1)[0]);
+// Fixed: Added persistence
+const removeReverseMatrix = (index) => { 
+    store.reverseMatrices.splice(index, 1); 
+    store.saveWorkspaceState();
 }
+
+// Fixed: Added persistence because archiving removes it from screen
+const archiveReverseMatrix = (index) => {
+    if(confirm("Archive this screening locally?")) {
+        store.archivedReverseMatrices.push(store.reverseMatrices.splice(index, 1)[0]);
+        store.saveWorkspaceState();
+    }
+}
+
+// Fixed: Added persistence because duplicating adds a new item to screen
 const duplicateReverseMatrix = (index) => {
     const copy = JSON.parse(JSON.stringify(store.reverseMatrices[index]));
     copy.id = store.nextRmId++; 
@@ -76,7 +90,9 @@ const duplicateReverseMatrix = (index) => {
     copy.scope = 'Personal';
     copy.owner_id = store.user.id;
     store.reverseMatrices.splice(index + 1, 0, copy);
+    store.saveWorkspaceState();
 }
+
 const addReverseMatrixComponent = (rm) => {
     rm.components.push({ 
         id: 'rmc_' + store.nextRmCompId++, invId: '', searchQuery: '', searchScope: 'Global', 

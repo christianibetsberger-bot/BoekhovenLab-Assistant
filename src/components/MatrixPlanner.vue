@@ -57,6 +57,7 @@ const addMatrix = () => {
         scope: 'Personal',
         owner_id: store.user.id
     }); 
+    store.saveWorkspaceState(); 
 }
 
 const loadFromCloud = (cloudMatrix) => {
@@ -65,10 +66,12 @@ const loadFromCloud = (cloudMatrix) => {
         store.matrices.unshift(JSON.parse(JSON.stringify(cloudMatrix)));
     }
     showCloudLibrary.value = false;
+    store.saveWorkspaceState(); 
 }
 
 const closePlanInWorkspace = (index) => {
     store.matrices.splice(index, 1);
+    store.saveWorkspaceState(); 
 }
 
 const addBlockToMatrix = (matrix) => { matrix.customBlocks.push({ id: 'blk_' + store.nextBlockId++, name: 'New Block', itemIds: [], searchQuery: '', searchScope: 'Global', labware: '' }); }

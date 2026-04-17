@@ -55,8 +55,9 @@ const addReaction = () => {
         targetPlateId: '', 
         targetWell: '',
         scope: 'Personal',
-        owner_id: store.user.id // Stamp new reactions with the owner
+        owner_id: store.user.id 
     }); 
+    store.saveWorkspaceState();
 }
 
 const loadFromCloud = (cloudReaction) => {
@@ -65,11 +66,12 @@ const loadFromCloud = (cloudReaction) => {
         store.reactions.unshift(JSON.parse(JSON.stringify(cloudReaction)));
     }
     showCloudLibrary.value = false; 
+    store.saveWorkspaceState();
 }
 
-// MODIFIED: This now safely closes the plan from the screen without touching the cloud
 const removeReaction = (index) => { 
     store.reactions.splice(index, 1); 
+    store.saveWorkspaceState();
 }
 
 const addItem = (reaction) => { reaction.items.push({ invId: '', searchQuery: '', searchScope: 'Global', target: 1, targetUnit: 'µM', isFixed: false, fixedVol: 1, fixedVolUnit: 'µL', labware: '' }); }
@@ -80,13 +82,15 @@ const duplicateReaction = (index) => {
     copy.id = store.nextReactionId++;
     copy.name += ' (Copy)';
     copy.scope = 'Personal';
-    copy.owner_id = store.user.id; // The person duplicating becomes the owner of the copy
+    copy.owner_id = store.user.id; 
     store.reactions.splice(index + 1, 0, copy);
+    store.saveWorkspaceState();
 }
 
 const archiveReaction = (index) => {
     if(confirm("Archive this reaction plan locally?")) {
         store.archivedReactions.push(store.reactions.splice(index, 1)[0]);
+        store.saveWorkspaceState();
     }
 }
 
@@ -262,7 +266,7 @@ const saveReactionToWell = (reaction) => {
                 
                 <button class="danger small" @click="removeReaction(rIndex)" title="Close from workspace"><i class="fas fa-times"></i></button>
             </div>
-            </div>
+        </div>
         
         <div class="table-responsive" style="min-height: 250px; overflow: visible;">
             <table>

@@ -37,7 +37,8 @@ const addWellPlate = () => {
         wells: {},
         scope: 'Personal',
         owner_id: store.user.id
-    }); 
+    });
+    store.saveWorkspaceState(); 
 }
 
 const loadFromCloud = (cloudPlate) => {
@@ -46,14 +47,17 @@ const loadFromCloud = (cloudPlate) => {
         store.wellPlates.unshift(JSON.parse(JSON.stringify(cloudPlate)));
     }
     showCloudLibrary.value = false;
+    store.saveWorkspaceState();
 }
 
 const closePlateInWorkspace = (index) => {
     store.wellPlates.splice(index, 1);
+    store.saveWorkspaceState();
 }
 
 const archivePlate = (index) => {
     if(confirm("Archive this well plate locally?")) store.archivedPlates.push(store.wellPlates.splice(index, 1)[0]);
+    store.saveWorkspaceState();
 }
 
 const duplicateWellPlate = (index) => {
@@ -63,6 +67,7 @@ const duplicateWellPlate = (index) => {
     copy.scope = 'Personal';
     copy.owner_id = store.user.id;
     store.wellPlates.splice(index + 1, 0, copy);
+    store.saveWorkspaceState();
 }
 
 const updateDefaultLabware = (plate) => {

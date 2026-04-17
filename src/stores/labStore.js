@@ -19,6 +19,7 @@ export const useLabStore = defineStore('lab', {
     activeDropdown: null,
     classOptions: ['DNA', 'RNA', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10', 'C11', 'C12', 'C13+', 'Acid', 'Base', 'Dye', 'Chemical', 'Solvent', 'Enzyme', 'Buffer', 'Other'],
     
+    // --- Calculators State ---
     stdCalc: { type: 'solid', mw: null, mass: null, massUnit: 0.001, density: null, vol: null, volUnit: 0.001, conc: null, concUnit: 0.000001, saveCode: '', saveCas: '', saveName: '', saveClass: 'Chemical' },
     dnaCalc: { a260: null, sequence: '', manualMw: null, saveCode: '', saveName: '', saveClass: 'DNA', type: 'DNA', pathLength: 0.05 },
     
@@ -67,31 +68,30 @@ export const useLabStore = defineStore('lab', {
   }),
   
   actions: {
-    // --- PERSIST UI STATE ---
+    // --- PERSISTENT WORKSPACE REGISTRY ---
     saveWorkspaceState() {
-      const state = {
+      // This saves a list of "Visible IDs" to the browser's storage
+      const registry = {
         rxnIds: this.reactions.map(r => r.id),
         matIds: this.matrices.map(m => m.id),
         scrIds: this.reverseMatrices.map(s => s.id),
         pltIds: this.wellPlates.map(p => p.id)
       };
-      localStorage.setItem('lab_workspace_registry', JSON.stringify(state));
+      localStorage.setItem('lab_workspace_registry', JSON.stringify(registry));
     },
 
     async loadCloudInventory() {
       if (!this.user) return;
 
-      // Load Registry of what was open
+      // Fetch the registry of what was open before the refresh
       const registryRaw = localStorage.getItem('lab_workspace_registry');
       const registry = registryRaw ? JSON.parse(registryRaw) : { rxnIds: [], matIds: [], scrIds: [], pltIds: [] };
 
       // 1. Load Inventory
       const { data: invData } = await db.from('inventory').select('*');
-      if (invData) {
-          this.inventory = invData.map(row => row.item_data);
-      }
+      if (invData) this.inventory = invData.map(row => row.item_data);
 
-      // 2. Load Reactions with owner_id injection
+      // 2. Load Reactions
       const { data: rxnData } = await db.from('reactions').select('*');
       if (rxnData) {
           this.cloudReactions = rxnData.map(row => {
@@ -99,11 +99,15 @@ export const useLabStore = defineStore('lab', {
               obj.owner_id = row.owner_id;
               return obj;
           });
-          // Restore open reactions based on the registry
+          // Restore items only if their ID is in the registry
           this.reactions = this.cloudReactions.filter(r => registry.rxnIds.includes(r.id)).map(r => JSON.parse(JSON.stringify(r)));
+          
+          // Ensure counter is always higher than highest cloud ID
+          const maxId = Math.max(0, ...this.cloudReactions.map(r => r.id));
+          if (maxId >= this.nextReactionId) this.nextReactionId = maxId + 1;
       }
 
-      // 3. Load Matrices with owner_id injection
+      // 3. Load Matrices
       const { data: matData } = await db.from('matrices').select('*');
       if (matData) {
           this.cloudMatrices = matData.map(row => {
@@ -111,11 +115,13 @@ export const useLabStore = defineStore('lab', {
               obj.owner_id = row.owner_id;
               return obj;
           });
-          // Restore open matrices based on the registry
           this.matrices = this.cloudMatrices.filter(m => registry.matIds.includes(m.id)).map(m => JSON.parse(JSON.stringify(m)));
+          
+          const maxId = Math.max(0, ...this.cloudMatrices.map(m => m.id));
+          if (maxId >= this.nextMatrixId) this.nextMatrixId = maxId + 1;
       }
 
-      // 4. Load Screenings with owner_id injection
+      // 4. Load Screenings
       const { data: scrData } = await db.from('screenings').select('*');
       if (scrData) {
           this.cloudReverseMatrices = scrData.map(row => {
@@ -123,11 +129,13 @@ export const useLabStore = defineStore('lab', {
               obj.owner_id = row.owner_id;
               return obj;
           });
-          // Restore open screenings based on the registry
           this.reverseMatrices = this.cloudReverseMatrices.filter(s => registry.scrIds.includes(s.id)).map(s => JSON.parse(JSON.stringify(s)));
+          
+          const maxId = Math.max(0, ...this.cloudReverseMatrices.map(s => s.id));
+          if (maxId >= this.nextRmId) this.nextRmId = maxId + 1;
       }
 
-      // 5. Load Plates with owner_id injection
+      // 5. Load Plates
       const { data: pltData } = await db.from('plates').select('*');
       if (pltData) {
           this.cloudPlates = pltData.map(row => {
@@ -135,8 +143,10 @@ export const useLabStore = defineStore('lab', {
               obj.owner_id = row.owner_id;
               return obj;
           });
-          // Restore open plates based on the registry
           this.wellPlates = this.cloudPlates.filter(p => registry.pltIds.includes(p.id)).map(p => JSON.parse(JSON.stringify(p)));
+          
+          const maxId = Math.max(0, ...this.cloudPlates.map(p => p.id));
+          if (maxId >= this.nextPlateId) this.nextPlateId = maxId + 1;
       }
 
       // 6. Load Journal Entries
@@ -171,7 +181,6 @@ export const useLabStore = defineStore('lab', {
             return;
         }
         
-        // Refresh local library cache for the specific table
         const { data } = await db.from(tableName).select('*');
         if (data) {
             const mapped = data.map(row => {
@@ -184,6 +193,9 @@ export const useLabStore = defineStore('lab', {
             if (tableName === 'screenings') this.cloudReverseMatrices = mapped;
             if (tableName === 'plates') this.cloudPlates = mapped;
         }
+        
+        // Ensure registry is updated after a save (especially for new items)
+        this.saveWorkspaceState();
     },
 
     async deleteFromCloud(tableName, itemId) {
@@ -195,7 +207,6 @@ export const useLabStore = defineStore('lab', {
             return;
         }
         
-        // Refresh local library cache
         const { data } = await db.from(tableName).select('*');
         if (data) {
             const mapped = data.map(row => {
@@ -208,6 +219,8 @@ export const useLabStore = defineStore('lab', {
             if (tableName === 'screenings') this.cloudReverseMatrices = mapped;
             if (tableName === 'plates') this.cloudPlates = mapped;
         }
+        
+        this.saveWorkspaceState();
     },
 
     formatNum(num) {

@@ -54,21 +54,24 @@ const addReaction = () => {
         items: [], 
         targetPlateId: '', 
         targetWell: '',
-        scope: 'Personal' // Ensure new plans start as private
+        scope: 'Personal',
+        owner_id: store.user.id // Stamp new reactions with the owner
     }); 
 }
 
 const loadFromCloud = (cloudReaction) => {
-    // Check if it's already open to prevent messy duplicates
     const alreadyOpen = store.reactions.find(r => r.id === cloudReaction.id);
     if (!alreadyOpen) {
-        // Create a deep copy so we can edit it safely
         store.reactions.unshift(JSON.parse(JSON.stringify(cloudReaction)));
     }
-    showCloudLibrary.value = false; // Close the modal
+    showCloudLibrary.value = false; 
 }
 
-const removeReaction = (index) => { store.reactions.splice(index, 1); }
+// MODIFIED: This now safely closes the plan from the screen without touching the cloud
+const removeReaction = (index) => { 
+    store.reactions.splice(index, 1); 
+}
+
 const addItem = (reaction) => { reaction.items.push({ invId: '', searchQuery: '', searchScope: 'Global', target: 1, targetUnit: 'µM', isFixed: false, fixedVol: 1, fixedVolUnit: 'µL', labware: '' }); }
 const removeItem = (reaction, itemIndex) => { reaction.items.splice(itemIndex, 1); }
 
@@ -76,12 +79,13 @@ const duplicateReaction = (index) => {
     const copy = JSON.parse(JSON.stringify(store.reactions[index]));
     copy.id = store.nextReactionId++;
     copy.name += ' (Copy)';
-    copy.scope = 'Personal'; // Duplicates should always default back to private!
+    copy.scope = 'Personal';
+    copy.owner_id = store.user.id; // The person duplicating becomes the owner of the copy
     store.reactions.splice(index + 1, 0, copy);
 }
 
 const archiveReaction = (index) => {
-    if(confirm("Archive this reaction plan?")) {
+    if(confirm("Archive this reaction plan locally?")) {
         store.archivedReactions.push(store.reactions.splice(index, 1)[0]);
     }
 }
@@ -181,7 +185,10 @@ const saveReactionToWell = (reaction) => {
                         <strong style="font-size: 1.05rem;">{{ rxn.name }}</strong>
                         <div style="font-size: 0.75rem; opacity: 0.7;">{{ rxn.targetVolume }} {{ rxn.targetVolumeUnit }} • {{ rxn.items.length }} Components</div>
                     </div>
-                    <button class="small" @click="loadFromCloud(rxn)"><i class="fas fa-download"></i> Open</button>
+                    <div style="display: flex; gap: 5px;">
+                        <button class="small" @click="loadFromCloud(rxn)"><i class="fas fa-download"></i> Open</button>
+                        <button v-if="rxn.owner_id === store.user.id" class="danger small" @click="store.deleteFromCloud('reactions', rxn.id)"><i class="fas fa-trash"></i></button>
+                    </div>
                 </div>
                 <div v-if="store.cloudReactions.filter(r => r.scope === 'Global').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No global protocols published yet.</div>
             </div>
@@ -193,7 +200,10 @@ const saveReactionToWell = (reaction) => {
                         <strong style="font-size: 1.05rem;">{{ rxn.name }}</strong>
                         <div style="font-size: 0.75rem; opacity: 0.7;">{{ rxn.targetVolume }} {{ rxn.targetVolumeUnit }} • {{ rxn.items.length }} Components</div>
                     </div>
-                    <button class="small secondary" @click="loadFromCloud(rxn)"><i class="fas fa-folder-open"></i> Open</button>
+                    <div style="display: flex; gap: 5px;">
+                        <button class="small secondary" @click="loadFromCloud(rxn)"><i class="fas fa-folder-open"></i> Open</button>
+                        <button class="danger small" @click="store.deleteFromCloud('reactions', rxn.id)"><i class="fas fa-trash"></i></button>
+                    </div>
                 </div>
                 <div v-if="store.cloudReactions.filter(r => r.scope === 'Personal').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No personal drafts saved.</div>
             </div>
@@ -231,21 +241,28 @@ const saveReactionToWell = (reaction) => {
                     <i class="fas fa-lock"></i> Personal
                 </span>
 
-                <button class="success small" @click="store.saveToCloud('reactions', reaction)" title="Save to Personal Cloud">
+                <button class="success small" @click="store.saveToCloud('reactions', reaction)" title="Save to Cloud">
                     <i class="fas fa-cloud-arrow-up"></i> Save
                 </button>
-                <button class="secondary small" @click="reaction.scope = 'Global'; store.saveToCloud('reactions', reaction)" v-if="reaction.scope !== 'Global'" title="Publish to Global Lab Feed">
-                    <i class="fas fa-bullhorn"></i> Publish
-                </button>
+
+                <template v-if="reaction.owner_id === store.user.id">
+                    <button class="secondary small" @click="reaction.scope = 'Personal'; store.saveToCloud('reactions', reaction)" v-if="reaction.scope === 'Global'" title="Make Private">
+                        <i class="fas fa-user-lock"></i> Private
+                    </button>
+                    <button class="secondary small" @click="reaction.scope = 'Global'; store.saveToCloud('reactions', reaction)" v-if="reaction.scope !== 'Global'" title="Publish to Global Lab Feed">
+                        <i class="fas fa-bullhorn"></i> Publish
+                    </button>
+                </template>
                 
                 <div style="width: 1px; height: 24px; background: var(--border); margin: 0 5px;"></div>
 
                 <button class="small" @click="saveReactionToJournal(reaction)" title="Append table to active journal entry"><i class="fas fa-file-import"></i> Log</button>
                 <button class="secondary small" @click="duplicateReaction(rIndex)" title="Duplicate"><i class="fas fa-copy"></i></button>
-                <button class="secondary small" @click="archiveReaction(rIndex)" title="Archive"><i class="fas fa-box-archive"></i></button>
-                <button class="danger small" @click="removeReaction(rIndex); store.deleteFromCloud('reactions', reaction.id)"><i class="fas fa-trash"></i></button>
+                <button class="secondary small" @click="archiveReaction(rIndex)" title="Local Archive"><i class="fas fa-box-archive"></i></button>
+                
+                <button class="danger small" @click="removeReaction(rIndex)" title="Close from workspace"><i class="fas fa-times"></i></button>
             </div>
-        </div>
+            </div>
         
         <div class="table-responsive" style="min-height: 250px; overflow: visible;">
             <table>

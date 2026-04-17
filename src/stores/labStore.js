@@ -74,37 +74,34 @@ export const useLabStore = defineStore('lab', {
   }),
   
   actions: {
-    // --- THE MASTER CLOUD LOADER ---
     async loadCloudInventory() {
       if (!this.user) return;
 
-      // 1. Load Inventory
       const { data: invData } = await db.from('inventory').select('*');
       if (invData) this.inventory = invData.map(row => row.item_data);
 
-      // 2. Load Reactions into the BACKGROUND library
       const { data: rxnData } = await db.from('reactions').select('*');
       if (rxnData) {
-          this.cloudReactions = rxnData.map(row => row.data);
-          // Auto-load personal drafts only if workspace is completely empty
+          // MODIFIED: Attach owner_id to the object so UI knows who created it
+          this.cloudReactions = rxnData.map(row => {
+              const rxn = row.data;
+              rxn.owner_id = row.owner_id; 
+              return rxn;
+          });
           if (this.reactions.length === 0) {
               this.reactions = this.cloudReactions.filter(r => r.scope === 'Personal').map(r => JSON.parse(JSON.stringify(r)));
           }
       }
 
-      // 3. Load Matrices
       const { data: matData } = await db.from('matrices').select('*');
       if (matData) this.matrices = matData.map(row => row.data);
 
-      // 4. Load Screenings
       const { data: scrData } = await db.from('screenings').select('*');
       if (scrData) this.reverseMatrices = scrData.map(row => row.data);
 
-      // 5. Load Plates
       const { data: pltData } = await db.from('plates').select('*');
       if (pltData) this.wellPlates = pltData.map(row => row.data);
 
-      // 6. Load Journal Entries
       const { data: jrnData } = await db.from('journals').select('*');
       if (jrnData && jrnData.length > 0) {
           this.journal.entries = jrnData.map(row => row.data);
@@ -113,7 +110,6 @@ export const useLabStore = defineStore('lab', {
       }
     },
 
-    // --- THE MASTER CLOUD SAVERS ---
     async saveItemToCloud(item) {
       if (!this.user) return;
       const payload = { owner_id: this.user.id, scope: item.scope || 'Global', item_data: item };
@@ -131,21 +127,35 @@ export const useLabStore = defineStore('lab', {
         };
         await db.from(tableName).delete().eq('data->>id', payloadData.id.toString());
         const { error } = await db.from(tableName).insert([payload]);
-        if (error) alert(`Error saving to ${tableName}: ` + error.message);
         
-        // Refresh the background library so the browser modal is up to date!
+        // MODIFIED: Catch RLS permission errors cleanly
+        if (error) {
+            alert(`Could not save: You do not have permission to modify this protocol.`);
+            return;
+        }
+        
         if (tableName === 'reactions') {
             const { data } = await db.from('reactions').select('*');
-            if (data) this.cloudReactions = data.map(row => row.data);
+            if (data) this.cloudReactions = data.map(row => { const rxn = row.data; rxn.owner_id = row.owner_id; return rxn; });
         }
     },
 
     async deleteFromCloud(tableName, itemId) {
         if (!this.user) return;
-        await db.from(tableName).delete().eq('data->>id', itemId.toString());
+        const { error } = await db.from(tableName).delete().eq('data->>id', itemId.toString());
+        
+        // MODIFIED: Catch RLS permission errors cleanly
+        if (error) {
+            alert("Permission Denied: You can only permanently delete your own protocols.");
+            return;
+        }
+        
+        if (tableName === 'reactions') {
+            const { data } = await db.from('reactions').select('*');
+            if (data) this.cloudReactions = data.map(row => { const rxn = row.data; rxn.owner_id = row.owner_id; return rxn; });
+        }
     },
 
-    // --- UTILITIES ---
     formatNum(num) {
       if (num === null || num === undefined || isNaN(num)) return (0).toFixed(this.globalSettings.decimals);
       const factor = Math.pow(10, this.globalSettings.decimals);

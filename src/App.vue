@@ -82,19 +82,29 @@ const signOut = async () => {
 </template>
 
 <style>
-/* Ensuring the grid behaves correctly. 
-  Column 1 is for the small calculators, Column 2 is for the big planners.
+/* MASTER GRID CONFIGURATION
+   The first column (Calculators) is now 420px.
+   The gap is increased to 25px for better visual separation.
 */
 .container {
   display: grid;
-  grid-template-columns: 350px 1fr;
-  gap: 20px;
+  grid-template-columns: 420px 1fr; 
+  gap: 25px;
   align-items: start;
+  max-width: 100%;
+  padding: 0 20px;
 }
 
-@media (max-width: 1000px) {
+/* Sidebar and Workspace internal alignment */
+.sidebar-col, .workspace-col {
+  min-width: 0; /* Prevents flex children from overflowing the grid */
+}
+
+/* Mobile Responsive: Collapse to single column on smaller screens */
+@media (max-width: 1200px) {
   .container {
     grid-template-columns: 1fr;
+    gap: 20px;
   }
   .sidebar-col, .workspace-col {
     grid-column: 1 / -1 !important;

@@ -67,12 +67,29 @@ export const useLabStore = defineStore('lab', {
   }),
   
   actions: {
+    // --- PERSIST UI STATE ---
+    saveWorkspaceState() {
+      const state = {
+        rxnIds: this.reactions.map(r => r.id),
+        matIds: this.matrices.map(m => m.id),
+        scrIds: this.reverseMatrices.map(s => s.id),
+        pltIds: this.wellPlates.map(p => p.id)
+      };
+      localStorage.setItem('lab_workspace_registry', JSON.stringify(state));
+    },
+
     async loadCloudInventory() {
       if (!this.user) return;
 
+      // Load Registry of what was open
+      const registryRaw = localStorage.getItem('lab_workspace_registry');
+      const registry = registryRaw ? JSON.parse(registryRaw) : { rxnIds: [], matIds: [], scrIds: [], pltIds: [] };
+
       // 1. Load Inventory
       const { data: invData } = await db.from('inventory').select('*');
-      if (invData) this.inventory = invData.map(row => row.item_data);
+      if (invData) {
+          this.inventory = invData.map(row => row.item_data);
+      }
 
       // 2. Load Reactions with owner_id injection
       const { data: rxnData } = await db.from('reactions').select('*');
@@ -82,7 +99,8 @@ export const useLabStore = defineStore('lab', {
               obj.owner_id = row.owner_id;
               return obj;
           });
-          // BUG FIX: Auto-load removed to allow clean workspace
+          // Restore open reactions based on the registry
+          this.reactions = this.cloudReactions.filter(r => registry.rxnIds.includes(r.id)).map(r => JSON.parse(JSON.stringify(r)));
       }
 
       // 3. Load Matrices with owner_id injection
@@ -93,7 +111,8 @@ export const useLabStore = defineStore('lab', {
               obj.owner_id = row.owner_id;
               return obj;
           });
-          // BUG FIX: Auto-load removed to allow clean workspace
+          // Restore open matrices based on the registry
+          this.matrices = this.cloudMatrices.filter(m => registry.matIds.includes(m.id)).map(m => JSON.parse(JSON.stringify(m)));
       }
 
       // 4. Load Screenings with owner_id injection
@@ -104,7 +123,8 @@ export const useLabStore = defineStore('lab', {
               obj.owner_id = row.owner_id;
               return obj;
           });
-          // BUG FIX: Auto-load removed to allow clean workspace
+          // Restore open screenings based on the registry
+          this.reverseMatrices = this.cloudReverseMatrices.filter(s => registry.scrIds.includes(s.id)).map(s => JSON.parse(JSON.stringify(s)));
       }
 
       // 5. Load Plates with owner_id injection
@@ -115,7 +135,8 @@ export const useLabStore = defineStore('lab', {
               obj.owner_id = row.owner_id;
               return obj;
           });
-          // BUG FIX: Auto-load removed to allow clean workspace
+          // Restore open plates based on the registry
+          this.wellPlates = this.cloudPlates.filter(p => registry.pltIds.includes(p.id)).map(p => JSON.parse(JSON.stringify(p)));
       }
 
       // 6. Load Journal Entries
@@ -150,6 +171,7 @@ export const useLabStore = defineStore('lab', {
             return;
         }
         
+        // Refresh local library cache for the specific table
         const { data } = await db.from(tableName).select('*');
         if (data) {
             const mapped = data.map(row => {
@@ -173,6 +195,7 @@ export const useLabStore = defineStore('lab', {
             return;
         }
         
+        // Refresh local library cache
         const { data } = await db.from(tableName).select('*');
         if (data) {
             const mapped = data.map(row => {

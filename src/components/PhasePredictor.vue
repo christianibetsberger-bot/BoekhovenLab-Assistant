@@ -14,7 +14,7 @@
       <div class="internal-section">
         <h3>1. Search Space & Inventory Config</h3>
         <p style="font-size: 0.8rem; opacity: 0.7; margin-bottom: 10px;">
-          Assign inventory stocks to the ternary coordinates.
+          Assign inventory stocks to the coordinates.
         </p>
         
         <div class="config-grid-complex">
@@ -180,13 +180,13 @@
       <div class="internal-section">
         <h3>3. Active Learning Engine</h3>
         <p class="engine-desc" style="font-size: 0.85rem; opacity: 0.8; margin-bottom: 20px;">
-          Define phase boundaries with automated suggestions.
+          Define phase boundaries with automated 96-well suggestions.
         </p>
         
         <div class="engine-actions-grid">
           <button class="action-btn auto-btn" @click="calculateNextExperiments" :disabled="isCalculating">
             <i class="fas" :class="isCalculating ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
-            <span>{{ isCalculating ? 'Calculating...' : 'Auto-Suggest' }}</span>
+            <span>{{ isCalculating ? 'Calculating...' : 'Auto-Suggest Plate' }}</span>
           </button>
 
           <button class="action-btn import-btn" @click="triggerFileInput">
@@ -205,52 +205,103 @@
         </div>
 
         <div class="suggestions-container" v-if="suggestions.length > 0">
-          <h4 class="priority-label">Next Priority Experiments:</h4>
-          <div class="suggestion-card" v-for="(sug, index) in suggestions" :key="index">
-            <div class="sug-data">
-              <div class="sug-id" v-if="sug.sampleId">ID: {{ sug.sampleId }}</div>
-              <strong>A:</strong> {{ sug.anion }} | <strong>B:</strong> {{ sug.cation }} | <strong>C:</strong> {{ sug.salt }}
-              <div v-if="sug.phase === 1" class="sug-hit-badge">HIT DETECTED IN FILE</div>
-            </div>
-            <button class="small success-btn" @click="importSuggestion(sug)">
-              <i class="fas fa-save"></i> Log Result
+          <div class="flex-between" style="margin-bottom: 10px;">
+            <h4 class="priority-label" style="margin-bottom: 0; border: none; padding: 0;">Target Queue:</h4>
+            <button class="small success-btn" @click="importAllSuggestions" style="width: auto; margin-top: 0; padding: 6px 12px;">
+              <i class="fas fa-save"></i> Log All Targets
             </button>
+          </div>
+          
+          <div style="max-height: 250px; overflow-y: auto; padding-right: 8px;">
+            <div class="suggestion-card" v-for="(sug, index) in suggestions" :key="index">
+              <div class="sug-data">
+                <div class="sug-id" v-if="sug.sampleId">ID: {{ sug.sampleId }}</div>
+                <strong>A:</strong> {{ sug.anion }} | <strong>B:</strong> {{ sug.cation }} | <strong>C:</strong> {{ sug.salt }}
+                <div v-if="sug.phase === 1" class="sug-hit-badge">HIT DETECTED IN FILE</div>
+              </div>
+              <button class="small success-btn" @click="importSuggestion(sug)">
+                <i class="fas fa-save"></i> Log Result
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      <div class="internal-section full-width-section" v-if="combinedPlateData.length > 0">
-        <h3>4. Wet Lab Mapping: 96-Well Plate View</h3>
+      <div class="internal-section full-width-section" v-if="existingPlateData.length > 0 || suggestions.length > 0">
+        <h3>4. Wet Lab Mapping: 96-Well Plate Views</h3>
         <p style="font-size: 0.8rem; opacity: 0.7; margin-bottom: 15px;">
           Sorted by Sample ID. <span style="color: #10b981; font-weight: bold;">Green = Hit</span>, 
           <span style="color: #ef4444; font-weight: bold;">Red = Miss</span>, 
-          <span style="color: #3b82f6; font-weight: bold;">Blue = Target</span>.
+          <span style="color: #3b82f6; font-weight: bold;">Blue = AI Target</span>.
         </p>
 
-        <div class="well-plate-wrapper">
-          <div class="well-plate">
-            <div class="plate-header-row">
-              <div class="plate-corner"></div>
-              <div class="plate-col-labels">
-                <div v-for="c in 12" :key="'col'+c" class="col-label">{{ c }}</div>
-              </div>
-            </div>
-            
-            <div v-for="(rowLabel, rIndex) in plateRows" :key="'row'+rIndex" class="plate-row-wrapper">
-              <div class="row-label">{{ rowLabel }}</div>
-              <div class="plate-row">
-                <div 
-                  v-for="cIndex in 12" 
-                  :key="'well'+rIndex+'-'+cIndex"
-                  class="well"
-                  :class="getWellStatusClass(rIndex, cIndex - 1)"
-                  :title="getWellTooltip(rIndex, cIndex - 1)"
-                >
-                  <span class="well-id">{{ getWellSample(rIndex, cIndex - 1)?.sampleId || '' }}</span>
+        <div style="display: flex; flex-wrap: wrap; gap: 20px; justify-content: center;">
+            <div class="well-plate-wrapper" v-if="existingPlateData.length > 0">
+              <h4 style="text-align: center; color: var(--primary, #3b82f6); margin-top: 0;">Known Data Map</h4>
+              <div class="well-plate">
+                <div class="plate-header-row">
+                  <div class="plate-corner"></div>
+                  <div class="plate-col-labels">
+                    <div v-for="c in 12" :key="'col'+c" class="col-label">{{ c }}</div>
+                  </div>
+                </div>
+                
+                <div v-for="(rowLabel, rIndex) in plateRows" :key="'row'+rIndex" class="plate-row-wrapper">
+                  <div class="row-label">{{ rowLabel }}</div>
+                  <div class="plate-row">
+                    <div 
+                      v-for="cIndex in 12" 
+                      :key="'well'+rIndex+'-'+cIndex"
+                      class="well"
+                      :class="getWellStatusClass(existingPlateData, rIndex, cIndex - 1)"
+                      :title="getWellTooltip(existingPlateData, rIndex, cIndex - 1)"
+                    >
+                      <span class="well-id">{{ getWellSample(existingPlateData, rIndex, cIndex - 1)?.sampleId || '' }}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+
+            <div class="well-plate-wrapper" v-if="suggestedPlateData.length > 0">
+              <h4 style="text-align: center; color: #8b5cf6; margin-top: 0;">AI Generated Plate</h4>
+              <div class="well-plate">
+                <div class="plate-header-row">
+                  <div class="plate-corner"></div>
+                  <div class="plate-col-labels">
+                    <div v-for="c in 12" :key="'col'+c" class="col-label">{{ c }}</div>
+                  </div>
+                </div>
+                
+                <div v-for="(rowLabel, rIndex) in plateRows" :key="'row'+rIndex" class="plate-row-wrapper">
+                  <div class="row-label">{{ rowLabel }}</div>
+                  <div class="plate-row">
+                    <div 
+                      v-for="cIndex in 12" 
+                      :key="'well'+rIndex+'-'+cIndex"
+                      class="well"
+                      :class="getWellStatusClass(suggestedPlateData, rIndex, cIndex - 1)"
+                      :title="getWellTooltip(suggestedPlateData, rIndex, cIndex - 1)"
+                    >
+                      <span class="well-id">{{ getWellSample(suggestedPlateData, rIndex, cIndex - 1)?.sampleId || '' }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed var(--border-color, #475569); display: flex; align-items: center; justify-content: center; gap: 10px;">
+                  <span style="font-size: 0.85rem; font-weight: bold; opacity: 0.7;">Send to Plate:</span>
+                  <select v-model="targetPlateId" style="width: 130px; padding: 6px; background: transparent; color: inherit; border: 1px solid var(--border-color, #475569); border-radius: 4px;">
+                      <option value="" disabled>Select Plate...</option>
+                      <option v-for="p in store.wellPlates" :key="p.id" :value="p.id">{{ p.name }}</option>
+                  </select>
+                  <input type="text" v-model="targetStartWell" placeholder="Start (e.g. A1)" style="width: 100px; padding: 6px; background: transparent; color: inherit; border: 1px solid var(--border-color, #475569); border-radius: 4px;">
+                  <button class="small" @click="exportSuggestionsToPlate" style="background: #8b5cf6; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">
+                      <i class="fas fa-arrow-down"></i> Export
+                  </button>
+              </div>
+
+            </div>
         </div>
       </div>
 
@@ -266,6 +317,10 @@ import Plotly from 'plotly.js-dist-min'
 
 const store = useLabStore()
 const activeDropdown = ref(null)
+
+// --- Added for Export to Store Plate ---
+const targetPlateId = ref('')
+const targetStartWell = ref('A1')
 
 // --- State ---
 const config = ref({ 
@@ -293,33 +348,69 @@ const filterBlockInventory = (query, scope) => {
     );
 }
 
-// --- Plate Logic ---
-const combinedPlateData = computed(() => {
-  const all = [...experiments.value, ...suggestions.value]
+// --- Plate Logic Updated for Two Boards ---
+const existingPlateData = computed(() => {
   const map = new Map();
-  all.forEach(item => map.set(item.sampleId, item));
+  experiments.value.forEach(item => map.set(item.sampleId, item));
   return Array.from(map.values()).sort((a, b) => Number(a.sampleId) - Number(b.sampleId));
 })
 
-const getWellSample = (rIndex, cIndex) => {
+const suggestedPlateData = computed(() => {
+  const map = new Map();
+  suggestions.value.forEach(item => map.set(item.sampleId, item));
+  return Array.from(map.values()).sort((a, b) => Number(a.sampleId) - Number(b.sampleId));
+})
+
+const getWellSample = (dataArray, rIndex, cIndex) => {
   const linearIndex = rIndex * 12 + cIndex
-  return combinedPlateData.value[linearIndex] || null
+  return dataArray[linearIndex] || null
 }
 
-const getWellStatusClass = (r, c) => {
-  const sample = getWellSample(r, c)
+const getWellStatusClass = (dataArray, r, c) => {
+  const sample = getWellSample(dataArray, r, c)
   if (!sample) return ''
   if (sample.phase === 1) return 'phase-hit'
   if (sample.phase === 0) return 'phase-miss'
   return 'phase-target'
 }
 
-const getWellTooltip = (r, c) => {
-  const s = getWellSample(r, c)
+const getWellTooltip = (dataArray, r, c) => {
+  const s = getWellSample(dataArray, r, c)
   if (!s) return 'Empty Well'
   const status = s.phase === 1 ? 'HIT' : (s.phase === 0 ? 'CLEAR' : 'AI TARGET')
   return `ID: ${s.sampleId} [${status}]\nA: ${s.anion} | B: ${s.cation} | C: ${s.salt}`
 }
+
+// --- Export Logic mimicking Matrix ---
+const exportSuggestionsToPlate = () => {
+    if (!targetPlateId.value || !targetStartWell.value) { alert("Please select a target plate and starting well."); return; }
+    const plate = store.wellPlates.find(p => p.id === targetPlateId.value);
+    if (!plate) return;
+    
+    const startWell = targetStartWell.value.toUpperCase().trim();
+    const match = startWell.match(/^([A-Z]+)(\d+)$/);
+    if (!match) { alert("Invalid well format. Use A1, B2, etc."); return; }
+    
+    let startRow = match[1].charCodeAt(0) - 65; 
+    let startCol = parseInt(match[2]) - 1;
+    
+    suggestions.value.forEach((sug, i) => {
+        let rOffset = Math.floor((startCol + i) / 12);
+        let cOffset = (startCol + i) % 12;
+
+        let targetR = startRow + rOffset;
+        let targetC = cOffset;
+        
+        // Standard 96 Well boundary limit 8x12
+        if (targetR < 8 && targetC < 12) {
+            let wId = String.fromCharCode(65 + targetR) + (targetC + 1);
+            let cellHtml = `<strong>AI Target [${sug.sampleId}]</strong><br>A: ${sug.anion} mM<br>B: ${sug.cation} mM<br>C: ${sug.salt} mM`;
+            plate.wells[wId] = cellHtml;
+        }
+    });
+    alert(`Successfully sent AI targets to Plate: ${plate.name} starting at ${startWell}`);
+}
+
 
 // --- Plotly Renderer ---
 const renderPlot = () => {
@@ -406,6 +497,16 @@ const importSuggestion = async (sug) => {
   }
 }
 
+const importAllSuggestions = async () => {
+  const payload = suggestions.value.map(sug => ({ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }));
+  const { data, error } = await db.from('phase_data').insert(payload).select()
+  if(!error && data) { 
+    experiments.value.push(...data); 
+    suggestions.value = []; 
+    clearImport() 
+  }
+}
+
 const triggerFileInput = () => { if (csvInput.value) csvInput.value.click() }
 
 const handleFileUpload = (event) => {
@@ -446,7 +547,8 @@ const calculateNextExperiments = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         config: config.value,
-        experiments: experiments.value
+        experiments: experiments.value,
+        n_suggestions: 96
       })
     });
     
@@ -470,61 +572,61 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* All CSS remains completely unchanged */
+/* All CSS remains completely unchanged structurally, just tightened */
 .module-card { display: flex; flex-direction: column; gap: 15px; }
 .predictor-internal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
 .internal-section h3 { font-size: 1.1rem; border-bottom: 1px solid var(--border-color, #e2e8f0); padding-bottom: 8px; margin-bottom: 15px; color: var(--primary, #3b82f6); }
 .full-width-section { grid-column: 1 / -1; }
 
-.config-grid-complex { display: grid; grid-template-columns: 1fr; gap: 12px; }
+/* Adjusted config grid to be horizontal/compact on wide screens */
+.config-grid-complex { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
 .input-group label { display: block; font-size: 0.85rem; margin-bottom: 4px; font-weight: bold; opacity: 0.8; }
 .input-group input { width: 100%; padding: 7px; border-radius: 6px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; }
 
 /* Inventory Styles */
 .inventory-select-box { border: 1px solid var(--border-color, #cbd5e1); padding: 7px 12px; background: transparent; color: inherit; cursor: pointer; border-radius: 6px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; min-height: 35px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-.inventory-dropdown { position: absolute; top: 100%; left: 0; z-index: 1000; background: white; border: 1px solid var(--border-color, #cbd5e1); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); width: 100%; min-width: 280px; border-radius: 8px; color: #333; overflow: hidden; }
-.dropdown-scope-selector { display: flex; gap: 10px; padding: 10px; background: #f1f5f9; border-bottom: 1px solid #e2e8f0; }
-.dropdown-search { padding: 10px; display: flex; gap: 5px; border-bottom: 1px solid #f1f5f9; }
+.inventory-dropdown { position: absolute; top: 100%; left: 0; z-index: 1000; background: var(--bg-color, white); border: 1px solid var(--border-color, #cbd5e1); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); width: 100%; min-width: 280px; border-radius: 8px; overflow: hidden; }
+.dropdown-scope-selector { display: flex; gap: 10px; padding: 10px; border-bottom: 1px solid var(--border-color, #e2e8f0); }
+.dropdown-search { padding: 10px; display: flex; gap: 5px; border-bottom: 1px solid var(--border-color, #f1f5f9); }
 .dropdown-results { overflow-y: auto; max-height: 200px; }
-.dropdown-item { padding: 10px 15px; cursor: pointer; font-size: 0.85rem; border-bottom: 1px solid #f8fafc; transition: background 0.2s; }
-.dropdown-item:hover { background: #eff6ff; color: #3b82f6; }
+.dropdown-item { padding: 10px 15px; cursor: pointer; font-size: 0.85rem; border-bottom: 1px solid var(--border-color, #f8fafc); transition: background 0.2s; }
+.dropdown-item:hover { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
 .truncate-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
 
 /* Ledger Styles */
 .ledger-table-container { max-height: 250px; overflow-y: auto; border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; }
 .ledger-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; table-layout: fixed; }
 .ledger-table th, .ledger-table td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color, #f1f5f9); }
-.ledger-table th { background: #f8fafc; font-weight: bold; position: sticky; top: 0; z-index: 5; }
+.ledger-table th { background: var(--summary-bg, #f8fafc); font-weight: bold; position: sticky; top: 0; z-index: 5; }
 
-/* Added input style for manual ledger rows */
-.small-input { width: 100%; max-width: 65px; padding: 4px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); font-size: 0.8rem; background: transparent; color: inherit; }
+/* Added important overrides to strictly adapt to dark mode */
+.small-input { width: 100%; max-width: 65px; padding: 4px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); font-size: 0.8rem; background-color: transparent !important; color: inherit !important; }
+.small-select { padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border-color, #ddd); font-size: 0.8rem; outline: none; background-color: transparent !important; color: inherit !important; }
+.bg-green-hit { background-color: rgba(16, 185, 129, 0.2) !important; color: #10b981 !important; font-weight: bold; border-color: #10b981; }
+.bg-red-miss { background-color: rgba(239, 68, 68, 0.2) !important; color: #ef4444 !important; border-color: #ef4444; }
 
-.small-select { padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border-color, #ddd); font-size: 0.8rem; outline: none; background: transparent; color: inherit; }
-.bg-green-hit { background: rgba(16, 185, 129, 0.15) !important; color: #064e3b; font-weight: bold; border-color: #10b981; }
-.bg-red-miss { background: rgba(239, 68, 68, 0.1) !important; color: #7f1d1d; border-color: #ef4444; }
+/* Visualization Area - Fixed height slightly reduced to save bulk, added overflow hidden */
+.plot-area { height: 380px; background: #000; border-radius: 12px; border: 1px solid var(--border-color, #e2e8f0); padding: 15px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); overflow: hidden; }
 
-/* Visualization Area */
-.plot-area { height: 480px; background: #000; border-radius: 12px; border: 1px solid var(--border-color, #e2e8f0); padding: 15px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); overflow: hidden; }
-
-/* Engine Actions Redesign */
+/* Engine Actions */
 .engine-actions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
 .action-btn { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: all 0.2s; border: none; font-size: 0.95rem; }
 .auto-btn { background: #3b82f6; color: white; box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.3); }
 .auto-btn:hover:not(:disabled) { background: #2563eb; transform: translateY(-1px); }
-.import-btn { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
-.import-btn:hover { background: #e2e8f0; }
+.import-btn { background: var(--summary-bg, #f1f5f9); color: inherit; border: 1px solid var(--border-color, #cbd5e1); }
+.import-btn:hover { filter: brightness(0.9); }
 
-.imported-file-badge { background: #f0f9ff; border: 1px solid #bae6fd; padding: 12px; border-radius: 8px; margin-bottom: 20px; color: #0369a1; }
+.imported-file-badge { background: rgba(59, 130, 246, 0.1); border: 1px solid #bae6fd; padding: 12px; border-radius: 8px; margin-bottom: 20px; color: #0369a1; }
 .clear-btn { background: transparent; border: none; color: #ef4444; cursor: pointer; padding: 4px; border-radius: 4px; }
 
-.priority-label { margin-bottom: 12px; color: #1e3a8a; border-bottom: 2px solid #eff6ff; padding-bottom: 6px; font-size: 0.95rem; }
-.suggestion-card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 15px; margin-bottom: 12px; background: white; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+.priority-label { margin-bottom: 12px; color: var(--primary, #1e3a8a); border-bottom: 2px solid var(--border-color, #eff6ff); padding-bottom: 6px; font-size: 0.95rem; }
+.suggestion-card { border: 1px solid var(--border-color, #e2e8f0); border-radius: 10px; padding: 15px; margin-bottom: 12px; background: var(--bg-color, white); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
 .sug-id { font-size: 0.75rem; color: #94a3b8; font-weight: bold; margin-bottom: 5px; }
 .sug-hit-badge { color: #10b981; font-weight: 800; font-size: 0.7rem; margin-top: 5px; background: rgba(16, 185, 129, 0.1); padding: 2px 6px; border-radius: 4px; display: inline-block; }
 .success-btn { background: #10b981; color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 10px; }
 
 /* 96-Well Plate Map Styles */
-.well-plate-wrapper { display: flex; justify-content: center; padding: 30px 0; background: #0f172a; border-radius: 16px; box-shadow: inset 0 4px 10px rgba(0,0,0,0.3); }
+.well-plate-wrapper { display: flex; flex-direction: column; justify-content: center; padding: 20px 30px; background: #0f172a; border-radius: 16px; box-shadow: inset 0 4px 10px rgba(0,0,0,0.3); }
 .well-plate { display: inline-flex; flex-direction: column; gap: 10px; }
 .plate-header-row { display: flex; align-items: center; gap: 12px; }
 .plate-col-labels { display: flex; gap: 12px; }
@@ -544,5 +646,5 @@ onMounted(() => {
 @keyframes pulse-blue { 0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.6); } 70% { box-shadow: 0 0 0 8px rgba(59,130,246,0); } 100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); } }
 
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
-.checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; cursor: pointer; color: #475569; font-weight: bold; }
+.checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; cursor: pointer; font-weight: bold; }
 </style>

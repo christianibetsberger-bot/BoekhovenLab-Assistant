@@ -14,7 +14,7 @@
       <div class="internal-section">
         <h3>1. Search Space & Inventory Config</h3>
         <p style="font-size: 0.8rem; opacity: 0.7; margin-bottom: 10px;">
-          Assign inventory stocks to the coordinates.
+          Assign inventory stocks to the ternary coordinates.
         </p>
         
         <div class="config-grid-complex">
@@ -170,8 +170,8 @@
         </div>
       </div>
 
-      <div class="internal-section" style="display: flex; flex-direction: column;">
-        <h3>Phase Map (3D Scatter)</h3>
+      <div class="internal-section full-width-section" style="display: flex; flex-direction: column;">
+        <h3>Phase Map (3D Space)</h3>
         <div class="plot-area">
           <div id="phase-ternary-plot" style="width: 100%; height: 100%;"></div>
         </div>
@@ -180,13 +180,13 @@
       <div class="internal-section">
         <h3>3. Active Learning Engine</h3>
         <p class="engine-desc" style="font-size: 0.85rem; opacity: 0.8; margin-bottom: 20px;">
-          Define phase boundaries with automated 96-well suggestions.
+          Define phase boundaries with automated suggestions.
         </p>
         
         <div class="engine-actions-grid">
           <button class="action-btn auto-btn" @click="calculateNextExperiments" :disabled="isCalculating">
             <i class="fas" :class="isCalculating ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
-            <span>{{ isCalculating ? 'Calculating...' : 'Auto-Suggest Plate' }}</span>
+            <span>{{ isCalculating ? 'Calculating...' : 'Auto-Suggest' }}</span>
           </button>
 
           <button class="action-btn import-btn" @click="triggerFileInput">
@@ -205,11 +205,17 @@
         </div>
 
         <div class="suggestions-container" v-if="suggestions.length > 0">
-          <h4 class="priority-label">Plate Generated Successfully</h4>
-          <p style="font-size: 0.8rem; margin-bottom: 10px;">Targets are visualized on the 3D plot and plate map below.</p>
-          <button class="small success-btn" @click="importAllSuggestions">
-            <i class="fas fa-save"></i> Log All Targets to Ledger
-          </button>
+          <h4 class="priority-label">Next Priority Experiments:</h4>
+          <div class="suggestion-card" v-for="(sug, index) in suggestions" :key="index">
+            <div class="sug-data">
+              <div class="sug-id" v-if="sug.sampleId">ID: {{ sug.sampleId }}</div>
+              <strong>A:</strong> {{ sug.anion }} | <strong>B:</strong> {{ sug.cation }} | <strong>C:</strong> {{ sug.salt }}
+              <div v-if="sug.phase === 1" class="sug-hit-badge">HIT DETECTED IN FILE</div>
+            </div>
+            <button class="small success-btn" @click="importSuggestion(sug)">
+              <i class="fas fa-save"></i> Log Result
+            </button>
+          </div>
         </div>
       </div>
 
@@ -218,7 +224,7 @@
         <p style="font-size: 0.8rem; opacity: 0.7; margin-bottom: 15px;">
           Sorted by Sample ID. <span style="color: #10b981; font-weight: bold;">Green = Hit</span>, 
           <span style="color: #ef4444; font-weight: bold;">Red = Miss</span>, 
-          <span style="color: #3b82f6; font-weight: bold;">Blue = AI Target</span>.
+          <span style="color: #3b82f6; font-weight: bold;">Blue = Target</span>.
         </p>
 
         <div class="well-plate-wrapper">
@@ -315,32 +321,32 @@ const getWellTooltip = (r, c) => {
   return `ID: ${s.sampleId} [${status}]\nA: ${s.anion} | B: ${s.cation} | C: ${s.salt}`
 }
 
-// --- Plotly Renderer (Updated to 3D Scatter) ---
+// --- Plotly Renderer ---
 const renderPlot = () => {
   const plotDiv = document.getElementById('phase-ternary-plot')
   if (!plotDiv) return
 
   const traceCoacervate = { 
     type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
-    name: 'Hit (1)', marker: { color: '#10b981', size: 8, symbol: 'circle', line: { color: '#064e3b', width: 1 } } 
+    name: 'Hit (1)', marker: { color: '#10b981', size: 6, symbol: 'circle', line: { color: '#064e3b', width: 1 } } 
   }
   const traceClear = { 
     type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
-    name: 'Clear (0)', marker: { color: '#ef4444', size: 5, symbol: 'circle', line: { color: '#7f1d1d', width: 1 } } 
+    name: 'Clear (0)', marker: { color: '#ef4444', size: 4, symbol: 'circle', line: { color: '#7f1d1d', width: 1 } } 
   }
   const traceUnknown = { 
     type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
-    name: 'Untested', marker: { color: '#94a3b8', size: 4, symbol: 'circle' } 
+    name: 'Untested', marker: { color: '#94a3b8', size: 3, symbol: 'circle' } 
   }
   const traceTarget = { 
     type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
-    name: 'Target', marker: { color: '#3b82f6', size: 6, symbol: 'cross', line: { color: '#1e3a8a', width: 1 } } 
+    name: 'Target', marker: { color: '#3b82f6', size: 5, symbol: 'cross', line: { color: '#1e3a8a', width: 1 } } 
   }
 
   const allData = [...experiments.value, ...suggestions.value]
 
   allData.forEach(exp => {
-    const label = `ID: ${exp.sampleId || 'Manual'}<br>A: ${exp.anion}<br>B: ${exp.cation}<br>C: ${exp.salt}`
+    const label = `ID: ${exp.sampleId || 'Manual'} | A: ${exp.anion} | B: ${exp.cation} | C: ${exp.salt}`
     
     if (exp.phase === 1) { 
         traceCoacervate.x.push(exp.anion); traceCoacervate.y.push(exp.cation); traceCoacervate.z.push(exp.salt); traceCoacervate.text.push(label) 
@@ -355,12 +361,11 @@ const renderPlot = () => {
 
   const layout = {
     scene: {
-      xaxis: { title: config.value.anionName + ' (mM)', backgroundcolor: "#0f172a", gridcolor: "#334155", showbackground: true, zerolinecolor: "#475569" },
-      yaxis: { title: config.value.cationName + ' (mM)', backgroundcolor: "#0f172a", gridcolor: "#334155", showbackground: true, zerolinecolor: "#475569" },
-      zaxis: { title: config.value.saltName + ' (mM)', backgroundcolor: "#0f172a", gridcolor: "#334155", showbackground: true, zerolinecolor: "#475569" }
+      xaxis: { title: config.value.anionName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd' }, titlefont: { color: '#ffffff' } },
+      yaxis: { title: config.value.cationName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd' }, titlefont: { color: '#ffffff' } },
+      zaxis: { title: config.value.saltName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd' }, titlefont: { color: '#ffffff' } }
     },
     paper_bgcolor: '#000000',
-    plot_bgcolor: '#000000',
     margin: { l: 0, r: 0, b: 0, t: 0 },
     showlegend: true,
     legend: { orientation: "h", y: 0.05, x: 0.5, xanchor: 'center', font: { color: '#ffffff' } }
@@ -392,24 +397,12 @@ const removeRow = async (index, exp) => {
   renderPlot();
 }
 
-// Kept untouched as requested, though largely superceded by importAllSuggestions
 const importSuggestion = async (sug) => {
   const { data, error } = await db.from('phase_data').insert([{ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }]).select()
   if(!error && data) { 
     experiments.value.push(data[0]); 
     suggestions.value = suggestions.value.filter(s => s.sampleId !== sug.sampleId); 
     if(suggestions.value.length === 0) clearImport() 
-  }
-}
-
-// Added bulk import function to satisfy handling all 96
-const importAllSuggestions = async () => {
-  const payload = suggestions.value.map(sug => ({ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }));
-  const { data, error } = await db.from('phase_data').insert(payload).select()
-  if(!error && data) { 
-    experiments.value.push(...data); 
-    suggestions.value = []; 
-    clearImport() 
   }
 }
 
@@ -453,8 +446,7 @@ const calculateNextExperiments = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         config: config.value,
-        experiments: experiments.value,
-        n_suggestions: 96 // Note: Requires python backend update to handle this if dynamically assigned
+        experiments: experiments.value
       })
     });
     
@@ -486,10 +478,10 @@ onMounted(() => {
 
 .config-grid-complex { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .input-group label { display: block; font-size: 0.85rem; margin-bottom: 4px; font-weight: bold; opacity: 0.8; }
-.input-group input { width: 100%; padding: 7px; border-radius: 6px; border: 1px solid var(--border-color, #cbd5e1); background: var(--bg-color, white); }
+.input-group input { width: 100%; padding: 7px; border-radius: 6px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; }
 
 /* Inventory Styles */
-.inventory-select-box { border: 1px solid var(--border-color, #cbd5e1); padding: 7px 12px; background: var(--bg-color, white); cursor: pointer; border-radius: 6px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; min-height: 35px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.inventory-select-box { border: 1px solid var(--border-color, #cbd5e1); padding: 7px 12px; background: transparent; color: inherit; cursor: pointer; border-radius: 6px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; min-height: 35px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 .inventory-dropdown { position: absolute; top: 100%; left: 0; z-index: 1000; background: white; border: 1px solid var(--border-color, #cbd5e1); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); width: 100%; min-width: 280px; border-radius: 8px; color: #333; overflow: hidden; }
 .dropdown-scope-selector { display: flex; gap: 10px; padding: 10px; background: #f1f5f9; border-bottom: 1px solid #e2e8f0; }
 .dropdown-search { padding: 10px; display: flex; gap: 5px; border-bottom: 1px solid #f1f5f9; }
@@ -500,19 +492,19 @@ onMounted(() => {
 
 /* Ledger Styles */
 .ledger-table-container { max-height: 250px; overflow-y: auto; border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; }
-.ledger-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.ledger-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; table-layout: fixed; }
 .ledger-table th, .ledger-table td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color, #f1f5f9); }
 .ledger-table th { background: #f8fafc; font-weight: bold; position: sticky; top: 0; z-index: 5; }
 
 /* Added input style for manual ledger rows */
-.small-input { width: 100%; max-width: 65px; padding: 4px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); font-size: 0.8rem; }
+.small-input { width: 100%; max-width: 65px; padding: 4px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); font-size: 0.8rem; background: transparent; color: inherit; }
 
-.small-select { padding: 5px 8px; border-radius: 6px; border: 1px solid #ddd; font-size: 0.8rem; outline: none; }
+.small-select { padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border-color, #ddd); font-size: 0.8rem; outline: none; background: transparent; color: inherit; }
 .bg-green-hit { background: rgba(16, 185, 129, 0.15) !important; color: #064e3b; font-weight: bold; border-color: #10b981; }
 .bg-red-miss { background: rgba(239, 68, 68, 0.1) !important; color: #7f1d1d; border-color: #ef4444; }
 
 /* Visualization Area */
-.plot-area { height: 480px; background: #000; border-radius: 12px; border: 1px solid var(--border-color, #e2e8f0); padding: 15px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); }
+.plot-area { height: 480px; background: #000; border-radius: 12px; border: 1px solid var(--border-color, #e2e8f0); padding: 15px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); overflow: hidden; }
 
 /* Engine Actions Redesign */
 .engine-actions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }

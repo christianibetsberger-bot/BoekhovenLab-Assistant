@@ -14,7 +14,7 @@
       <div class="internal-section">
         <h3>1. Search Space & Inventory Config</h3>
         <p style="font-size: 0.8rem; opacity: 0.7; margin-bottom: 10px;">
-          Assign inventory stocks to the ternary coordinates.
+          Assign inventory stocks to the coordinates.
         </p>
         
         <div class="config-grid-complex">
@@ -171,7 +171,7 @@
       </div>
 
       <div class="internal-section" style="display: flex; flex-direction: column;">
-        <h3>Phase Map (Ternary Diagram)</h3>
+        <h3>Phase Map (3D Scatter)</h3>
         <div class="plot-area">
           <div id="phase-ternary-plot" style="width: 100%; height: 100%;"></div>
         </div>
@@ -180,13 +180,13 @@
       <div class="internal-section">
         <h3>3. Active Learning Engine</h3>
         <p class="engine-desc" style="font-size: 0.85rem; opacity: 0.8; margin-bottom: 20px;">
-          Define phase boundaries with automated suggestions.
+          Define phase boundaries with automated 96-well suggestions.
         </p>
         
         <div class="engine-actions-grid">
           <button class="action-btn auto-btn" @click="calculateNextExperiments" :disabled="isCalculating">
             <i class="fas" :class="isCalculating ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
-            <span>{{ isCalculating ? 'Calculating...' : 'Auto-Suggest' }}</span>
+            <span>{{ isCalculating ? 'Calculating...' : 'Auto-Suggest Plate' }}</span>
           </button>
 
           <button class="action-btn import-btn" @click="triggerFileInput">
@@ -205,17 +205,11 @@
         </div>
 
         <div class="suggestions-container" v-if="suggestions.length > 0">
-          <h4 class="priority-label">Next Priority Experiments:</h4>
-          <div class="suggestion-card" v-for="(sug, index) in suggestions.slice(0, 3)" :key="index">
-            <div class="sug-data">
-              <div class="sug-id" v-if="sug.sampleId">ID: {{ sug.sampleId }}</div>
-              <strong>A:</strong> {{ sug.anion }} | <strong>B:</strong> {{ sug.cation }} | <strong>C:</strong> {{ sug.salt }}
-              <div v-if="sug.phase === 1" class="sug-hit-badge">HIT DETECTED IN FILE</div>
-            </div>
-            <button class="small success-btn" @click="importSuggestion(sug)">
-              <i class="fas fa-save"></i> Log Result
-            </button>
-          </div>
+          <h4 class="priority-label">Plate Generated Successfully</h4>
+          <p style="font-size: 0.8rem; margin-bottom: 10px;">Targets are visualized on the 3D plot and plate map below.</p>
+          <button class="small success-btn" @click="importAllSuggestions">
+            <i class="fas fa-save"></i> Log All Targets to Ledger
+          </button>
         </div>
       </div>
 
@@ -224,7 +218,7 @@
         <p style="font-size: 0.8rem; opacity: 0.7; margin-bottom: 15px;">
           Sorted by Sample ID. <span style="color: #10b981; font-weight: bold;">Green = Hit</span>, 
           <span style="color: #ef4444; font-weight: bold;">Red = Miss</span>, 
-          <span style="color: #3b82f6; font-weight: bold;">Blue = Target</span>.
+          <span style="color: #3b82f6; font-weight: bold;">Blue = AI Target</span>.
         </p>
 
         <div class="well-plate-wrapper">
@@ -321,98 +315,55 @@ const getWellTooltip = (r, c) => {
   return `ID: ${s.sampleId} [${status}]\nA: ${s.anion} | B: ${s.cation} | C: ${s.salt}`
 }
 
-// --- Ternary Math ---
-const normalizeToTernary = (anion, cation, salt) => {
-  const aScaled = Number(anion) / config.value.anionMax
-  const cScaled = Number(cation) / config.value.cationMax
-  const sScaled = Number(salt) / config.value.saltMax
-  const total = aScaled + cScaled + sScaled || 1 
-  return { a: aScaled / total, b: cScaled / total, c: sScaled / total }
-}
-
-const makeAccurateTicks = (maxVal) => {
-  const vals = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
-  return { tickvals: vals, ticktext: vals.map(v => (v * maxVal).toFixed(1)) }
-}
-
-// --- Plotly Renderer ---
+// --- Plotly Renderer (Updated to 3D Scatter) ---
 const renderPlot = () => {
   const plotDiv = document.getElementById('phase-ternary-plot')
   if (!plotDiv) return
 
   const traceCoacervate = { 
-    type: 'scatterternary', mode: 'markers', a: [], b: [], c: [], text: [], 
-    name: 'Hit (1)', marker: { color: '#10b981', size: 18, symbol: 'star', line: { color: '#064e3b', width: 2 } } 
+    type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
+    name: 'Hit (1)', marker: { color: '#10b981', size: 8, symbol: 'circle', line: { color: '#064e3b', width: 1 } } 
   }
   const traceClear = { 
-    type: 'scatterternary', mode: 'markers', a: [], b: [], c: [], text: [], 
-    name: 'Clear (0)', marker: { color: '#ef4444', size: 11, symbol: 'circle', line: { color: '#7f1d1d', width: 1 } } 
+    type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
+    name: 'Clear (0)', marker: { color: '#ef4444', size: 5, symbol: 'circle', line: { color: '#7f1d1d', width: 1 } } 
   }
   const traceUnknown = { 
-    type: 'scatterternary', mode: 'markers', a: [], b: [], c: [], text: [], 
-    name: 'Untested', marker: { color: '#94a3b8', size: 8, symbol: 'circle' } 
+    type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
+    name: 'Untested', marker: { color: '#94a3b8', size: 4, symbol: 'circle' } 
   }
   const traceTarget = { 
-    type: 'scatterternary', mode: 'markers', a: [], b: [], c: [], text: [], 
-    name: 'Target', marker: { color: '#3b82f6', size: 14, symbol: 'cross-thin', line: { color: '#1e3a8a', width: 2 } } 
+    type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
+    name: 'Target', marker: { color: '#3b82f6', size: 6, symbol: 'cross', line: { color: '#1e3a8a', width: 1 } } 
   }
 
   const allData = [...experiments.value, ...suggestions.value]
 
   allData.forEach(exp => {
-    const coords = normalizeToTernary(exp.anion, exp.cation, exp.salt)
-    const label = `ID: ${exp.sampleId || 'Manual'} | A: ${exp.anion} | B: ${exp.cation} | C: ${exp.salt}`
+    const label = `ID: ${exp.sampleId || 'Manual'}<br>A: ${exp.anion}<br>B: ${exp.cation}<br>C: ${exp.salt}`
     
     if (exp.phase === 1) { 
-        traceCoacervate.a.push(coords.a); traceCoacervate.b.push(coords.b); traceCoacervate.c.push(coords.c); traceCoacervate.text.push(label) 
+        traceCoacervate.x.push(exp.anion); traceCoacervate.y.push(exp.cation); traceCoacervate.z.push(exp.salt); traceCoacervate.text.push(label) 
     } else if (exp.phase === 0) { 
-        traceClear.a.push(coords.a); traceClear.b.push(coords.b); traceClear.c.push(coords.c); traceClear.text.push(label) 
+        traceClear.x.push(exp.anion); traceClear.y.push(exp.cation); traceClear.z.push(exp.salt); traceClear.text.push(label) 
     } else if (exp.sampleId > 0 && !experiments.value.some(e => e.sampleId === exp.sampleId)) {
-        traceTarget.a.push(coords.a); traceTarget.b.push(coords.b); traceTarget.c.push(coords.c); traceTarget.text.push(label)
+        traceTarget.x.push(exp.anion); traceTarget.y.push(exp.cation); traceTarget.z.push(exp.salt); traceTarget.text.push(label)
     } else {
-        traceUnknown.a.push(coords.a); traceUnknown.b.push(coords.b); traceUnknown.c.push(coords.c); traceUnknown.text.push(label)
+        traceUnknown.x.push(exp.anion); traceUnknown.y.push(exp.cation); traceUnknown.z.push(exp.salt); traceUnknown.text.push(label)
     }
   })
 
   const layout = {
-    ternary: {
-      sum: 1,
-      // Vertex titles strictly suppressed
-      aaxis: { title: { text: '' }, ...makeAccurateTicks(config.value.anionMax), gridcolor: '#444444', tickfont: { color: '#dddddd' }, linecolor: '#888888' },
-      baxis: { title: { text: '' }, ...makeAccurateTicks(config.value.cationMax), gridcolor: '#444444', tickfont: { color: '#dddddd' }, linecolor: '#888888' },
-      caxis: { title: { text: '' }, ...makeAccurateTicks(config.value.saltMax), gridcolor: '#444444', tickfont: { color: '#dddddd' }, linecolor: '#888888' },
-      bgcolor: '#000000'
+    scene: {
+      xaxis: { title: config.value.anionName + ' (mM)', backgroundcolor: "#0f172a", gridcolor: "#334155", showbackground: true, zerolinecolor: "#475569" },
+      yaxis: { title: config.value.cationName + ' (mM)', backgroundcolor: "#0f172a", gridcolor: "#334155", showbackground: true, zerolinecolor: "#475569" },
+      zaxis: { title: config.value.saltName + ' (mM)', backgroundcolor: "#0f172a", gridcolor: "#334155", showbackground: true, zerolinecolor: "#475569" }
     },
-    annotations: [
-      { 
-        // Component A: Left Side - perfectly aligned along the axis
-        text: `<b>${config.value.anionName} (mM)</b>`, 
-        textangle: -60, x: 0.18, y: 0.5, 
-        showarrow: false, xref: 'paper', yref: 'paper', 
-        xanchor: 'right', yanchor: 'middle',
-        font: { size: 14, color: '#ffffff' } 
-      },
-      { 
-        // Component B: Bottom Side - perfectly aligned along the axis
-        text: `<b>${config.value.cationName} (mM)</b>`, 
-        textangle: 0, x: 0.5, y: -0.08, 
-        showarrow: false, xref: 'paper', yref: 'paper', 
-        xanchor: 'center', yanchor: 'top',
-        font: { size: 14, color: '#ffffff' } 
-      },
-      { 
-        // Component C: Right Side - perfectly aligned along the axis
-        text: `<b>${config.value.saltName} (mM)</b>`, 
-        textangle: 60, x: 0.82, y: 0.5, 
-        showarrow: false, xref: 'paper', yref: 'paper', 
-        xanchor: 'left', yanchor: 'middle',
-        font: { size: 14, color: '#ffffff' } 
-      }
-    ],
     paper_bgcolor: '#000000',
-    margin: { l: 80, r: 80, b: 80, t: 60 },
+    plot_bgcolor: '#000000',
+    margin: { l: 0, r: 0, b: 0, t: 0 },
     showlegend: true,
-    legend: { orientation: "h", y: -0.15, x: 0.5, xanchor: 'center', font: { color: '#ffffff' } }
+    legend: { orientation: "h", y: 0.05, x: 0.5, xanchor: 'center', font: { color: '#ffffff' } }
   }
 
   Plotly.react('phase-ternary-plot', [traceCoacervate, traceClear, traceUnknown, traceTarget], layout, { displayModeBar: false, responsive: true })
@@ -441,12 +392,24 @@ const removeRow = async (index, exp) => {
   renderPlot();
 }
 
+// Kept untouched as requested, though largely superceded by importAllSuggestions
 const importSuggestion = async (sug) => {
   const { data, error } = await db.from('phase_data').insert([{ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }]).select()
   if(!error && data) { 
     experiments.value.push(data[0]); 
     suggestions.value = suggestions.value.filter(s => s.sampleId !== sug.sampleId); 
     if(suggestions.value.length === 0) clearImport() 
+  }
+}
+
+// Added bulk import function to satisfy handling all 96
+const importAllSuggestions = async () => {
+  const payload = suggestions.value.map(sug => ({ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }));
+  const { data, error } = await db.from('phase_data').insert(payload).select()
+  if(!error && data) { 
+    experiments.value.push(...data); 
+    suggestions.value = []; 
+    clearImport() 
   }
 }
 
@@ -490,7 +453,8 @@ const calculateNextExperiments = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         config: config.value,
-        experiments: experiments.value
+        experiments: experiments.value,
+        n_suggestions: 96 // Note: Requires python backend update to handle this if dynamically assigned
       })
     });
     

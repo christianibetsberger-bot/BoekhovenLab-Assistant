@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { useLabStore } from '../stores/labStore'
+import { db } from '../services/supabase' // Using your Supabase client
 import * as XLSX from 'xlsx'
 import html2pdf from 'html2pdf.js'
 
@@ -9,7 +10,31 @@ const journalEditor = ref(null)
 
 // --- Computed Properties ---
 const activeJournalEntry = computed(() => store.journal.entries.find(e => e.id === store.journal.activeId))
-const sortedJournalEntries = computed(() => [...store.journal.entries].sort((a, b) => new Date(b.date) - new Date(a.date)))
+const sortedJournalEntries = computed(() => [...store.journal.entries].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)))
+
+// --- Auto-Save Logic (Debounced to prevent spamming DB) ---
+let saveTimeout;
+const saveToDb = () => {
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(async () => {
+        // Only save to DB if it's a valid Supabase UUID (string)
+        if (activeJournalEntry.value && activeJournalEntry.value.id && typeof activeJournalEntry.value.id === 'string') {
+            // Map the Vue state into your JSONB 'data' column format
+            await db.from('journals').update({
+                data: {
+                    content: activeJournalEntry.value.content,
+                    expId: activeJournalEntry.value.expId,
+                    date: activeJournalEntry.value.date
+                }
+            }).eq('id', activeJournalEntry.value.id);
+        }
+    }, 1000); // Saves 1 second after you stop typing
+}
+
+// Watchers for Title and Date changes
+const updateHeaderAndSave = () => {
+    saveToDb();
+}
 
 // --- Methods ---
 const formatDoc = (cmd, value = null) => {
@@ -21,6 +46,7 @@ const formatDoc = (cmd, value = null) => {
 const updateRtfContent = () => {
     if (activeJournalEntry.value && journalEditor.value) {
         activeJournalEntry.value.content = journalEditor.value.innerHTML;
+        saveToDb(); // Trigger auto-save
     }
 }
 
@@ -30,21 +56,66 @@ const syncEditor = () => {
     }
 }
 
-const addJournalEntry = () => {
-    const newId = store.journal.nextId++;
+const addJournalEntry = async () => {
+    const { data: { user } } = await db.auth.getUser();
+    if (!user) {
+        alert("Authentication error: Please log in to save entries.");
+        return;
+    }
+
     const today = new Date().toISOString().split('T')[0];
-    store.journal.entries.unshift({
-        id: newId,
-        expId: 'EXP-' + String(newId).padStart(3, '0'),
-        date: today,
-        content: ''
-    });
-    store.journal.activeId = newId;
-    nextTick(() => syncEditor());
+    const newExpId = 'EXP-' + String(store.journal.entries.length + 1).padStart(3, '0');
+
+    // Insert into your specific 'journals' table structure
+    const { data, error } = await db.from('journals').insert([{
+        owner_id: user.id,
+        scope: 'Personal', // Assuming journal entries are personal by default
+        data: {
+            expId: newExpId,
+            date: today,
+            content: ''
+        }
+    }]).select();
+
+    if (!error && data && data[0]) {
+        store.journal.entries.unshift({
+            id: data[0].id,
+            expId: data[0].data.expId,
+            date: data[0].data.date,
+            content: data[0].data.content,
+            created_at: data[0].created_at
+        });
+        store.journal.activeId = data[0].id;
+        nextTick(() => syncEditor());
+    } else {
+        console.error("Error creating entry:", error);
+    }
 }
 
-const deleteJournalEntry = (id) => {
+const deleteJournalEntry = async (id) => {
     if(confirm("Are you sure you want to delete this journal entry?")) {
+        // Cancel any pending saves so they don't block the delete
+        clearTimeout(saveTimeout); 
+        
+        // If the ID is a string, it's a Supabase UUID. If not, it's old local storage data.
+        if (typeof id === 'string') {
+            // Delete from Supabase AND return the deleted row to confirm it worked
+            const { data, error } = await db.from('journals').delete().eq('id', id).select();
+            
+            if (error) {
+                console.error("Server delete failed:", error);
+                alert("Failed to delete from database. See console for details.");
+                return;
+            }
+
+            // If Supabase returns empty data, the RLS policy blocked the deletion
+            if (!data || data.length === 0) {
+                alert("Database blocked the deletion! You need to add the DELETE policy in the Supabase SQL Editor.");
+                return;
+            }
+        }
+        
+        // Unconditionally remove from local state so the UI updates instantly
         const idx = store.journal.entries.findIndex(e => e.id === id);
         if (idx !== -1) {
             store.journal.entries.splice(idx, 1);
@@ -142,6 +213,42 @@ const exportJournal = (type) => {
         XLSX.writeFile(wb, filename + '.xlsx');
     }
 }
+
+// --- Fetch from Supabase on Mount ---
+onMounted(async () => {
+    const { data: { user } } = await db.auth.getUser();
+    
+    if (user) {
+        const { data, error } = await db.from('journals')
+            .select('*')
+            .eq('owner_id', user.id)
+            .order('created_at', { ascending: false });
+            
+        if (!error && data) {
+            // Because your local store might have old integer-based entries, 
+            // we filter them out and only replace with fresh Supabase data
+            const cloudEntries = data.map(row => ({
+                id: row.id,
+                expId: row.data?.expId || 'Untitled',
+                date: row.data?.date || '',
+                content: row.data?.content || '',
+                created_at: row.created_at
+            }));
+
+            // Merge cloud entries with any existing local entries (if needed)
+            // Or strictly overwrite to ensure clean state
+            const localEntries = store.journal.entries.filter(e => typeof e.id !== 'string');
+            store.journal.entries = [...cloudEntries, ...localEntries];
+            
+            if (store.journal.entries.length > 0) {
+                store.journal.activeId = store.journal.entries[0].id;
+                nextTick(() => syncEditor());
+            }
+        } else if (error) {
+            console.error("Failed to load journal entries from server:", error);
+        }
+    }
+});
 </script>
 
 <template>
@@ -170,11 +277,11 @@ const exportJournal = (type) => {
             <div class="journal-editor-header">
                 <div style="flex-grow: 1; min-width: 150px;">
                     <label style="font-weight: bold; font-size: 0.85rem; opacity: 0.7; text-transform: uppercase;">Running No. / Exp ID</label>
-                    <input type="text" v-model="activeJournalEntry.expId" placeholder="CTI-114" style="font-size: 1.1rem; font-weight: bold; color: var(--primary); border: none; border-bottom: 2px solid var(--primary); border-radius: 0; background: transparent; padding-left: 0;">
+                    <input type="text" v-model="activeJournalEntry.expId" @input="updateHeaderAndSave" placeholder="CTI-114" style="font-size: 1.1rem; font-weight: bold; color: var(--primary); border: none; border-bottom: 2px solid var(--primary); border-radius: 0; background: transparent; padding-left: 0;">
                 </div>
                 <div style="width: 150px;">
                     <label style="font-weight: bold; font-size: 0.85rem; opacity: 0.7; text-transform: uppercase;">Date</label>
-                    <input type="date" v-model="activeJournalEntry.date">
+                    <input type="date" v-model="activeJournalEntry.date" @change="updateHeaderAndSave">
                 </div>
                 <div style="display: flex; align-items: flex-end; gap: 8px;">
                     <button class="small" @click="exportJournal('pdf')" title="Export to PDF"><i class="fas fa-file-pdf"></i></button>

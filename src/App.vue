@@ -15,6 +15,7 @@ import InventoryManager from './components/InventoryManager.vue'
 import ReactionPlan from './components/ReactionPlan.vue'
 import MatrixPlanner from './components/MatrixPlanner.vue'
 import ScreeningPlanner from './components/ScreeningPlanner.vue'
+import PhasePredictor from './components/PhasePredictor.vue'
 
 // --- Plate & Archive Management ---
 import WellPlateEditor from './components/WellPlateEditor.vue'
@@ -72,12 +73,14 @@ const signOut = async () => {
           <StandardStock />
           <SequenceCalc />
           <ArchiveManager />
-          <InventoryManager /> </div>
+          <InventoryManager />
+        </div>
 
         <div class="workspace-col" style="grid-column: 2; display: flex; flex-direction: column; gap: 20px;">
           <ReactionPlan />
           <MatrixPlanner />
           <ScreeningPlanner />
+          <PhasePredictor />
           <WellPlateEditor />
         </div>
 

@@ -485,7 +485,7 @@ const calculateNextExperiments = async () => {
   clearImport();
   
   try {
-    const response = await fetch('/api/suggest-experiments', {
+    const response = await fetch('https://experiment-backend-s71q.onrender.com/api/suggest-experiments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

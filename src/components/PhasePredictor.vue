@@ -160,7 +160,19 @@
 
       <div class="col-right">
         <div class="internal-section" style="display: flex; flex-direction: column;">
-          <h3>3. Phase Map (3D Space)</h3>
+          <div class="flex-between" style="margin-bottom: 10px;">
+            <h3 style="margin: 0; border: none; padding: 0;">3. Phase Map (3D Space)</h3>
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <label v-if="boundaryData" class="checkbox-label">
+                <input type="checkbox" v-model="showBoundary" @change="renderPlot"> Show Surface
+              </label>
+              <button class="small" @click="calculateBoundary" :disabled="isCalculatingBoundary" style="background: rgba(59, 130, 246, 0.1); color: #3b82f6; border: 1px solid #3b82f6; margin: 0;">
+                <i class="fas" :class="isCalculatingBoundary ? 'fa-spinner fa-spin' : 'fa-cube'"></i>
+                {{ isCalculatingBoundary ? 'Modeling...' : 'Map 3D Boundary' }}
+              </button>
+            </div>
+          </div>
+
           <div class="plot-area">
             <div id="phase-ternary-plot" style="width: 100%; height: 100%;"></div>
           </div>
@@ -295,6 +307,10 @@ const experiments = ref([])
 const suggestions = ref([])
 const isCalculating = ref(false)
 const csvInput = ref(null)
+
+const boundaryData = ref(null)
+const isCalculatingBoundary = ref(false)
+const showBoundary = ref(true)
 
 const plateRows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 
@@ -453,6 +469,28 @@ const renderPlot = () => {
     }
   })
 
+  const traces = [traceCoacervate, traceClear, traceUnknown, traceTarget];
+
+  // Inject the AI Boundary Surface
+  if (boundaryData.value && showBoundary.value) {
+      const traceSurface = {
+          type: 'isosurface',
+          x: boundaryData.value.x,
+          y: boundaryData.value.y,
+          z: boundaryData.value.z,
+          value: boundaryData.value.prob,
+          isomin: 0.45,  // We only want to draw the surface where probability is around 50%
+          isomax: 0.55,
+          surface: { show: true, count: 2, fill: 0.7 }, // 0.7 makes it beautifully translucent
+          colorscale: 'Blues',
+          caps: { x: {show: false}, y: {show: false}, z: {show: false} },
+          name: 'AI Phase Boundary',
+          showscale: false,
+          hoverinfo: 'none'
+      };
+      traces.push(traceSurface);
+  }
+
   const layout = {
     scene: {
       xaxis: { title: config.value.anionName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } },
@@ -465,7 +503,7 @@ const renderPlot = () => {
     legend: { orientation: "h", y: 0.05, x: 0.5, xanchor: 'center', font: { color: '#ffffff', size: 10 } }
   }
 
-  Plotly.react('phase-ternary-plot', [traceCoacervate, traceClear, traceUnknown, traceTarget], layout, { displayModeBar: false, responsive: true })
+  Plotly.react('phase-ternary-plot', traces, layout, { displayModeBar: false, responsive: true })
 }
 
 watch([experiments, suggestions, config], () => { renderPlot() }, { deep: true })
@@ -498,12 +536,14 @@ const clearLedger = async () => {
      const { error } = await db.from('phase_data').delete().in('id', idsToDelete);
      if (!error) {
          experiments.value = [];
+         boundaryData.value = null;
          renderPlot();
      } else {
          alert("Failed to clear database.");
      }
   } else {
      experiments.value = [];
+     boundaryData.value = null;
      renderPlot();
   }
 }
@@ -528,7 +568,7 @@ const importAllSuggestions = async () => {
   }
 }
 
-// --- NEW MACHIAVELLIAN CSV INJECTION ---
+// --- CSV INJECTION ---
 const triggerFileInput = () => { if (csvInput.value) csvInput.value.click() }
 
 const handleFileUpload = (event) => {
@@ -581,6 +621,34 @@ const handleFileUpload = (event) => {
     }
   }
   reader.readAsText(file)
+}
+
+const calculateBoundary = async () => {
+  const validExps = experiments.value.filter(e => e.phase !== -1);
+  const phases = new Set(validExps.map(e => e.phase));
+  if (phases.size < 2) {
+      alert("You need at least one Hit and one Clear logged to map a boundary.");
+      return;
+  }
+
+  isCalculatingBoundary.value = true;
+  try {
+    const response = await fetch('https://experiment-backend-s71q.onrender.com/api/phase-boundary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: config.value, experiments: experiments.value })
+    });
+    
+    if (!response.ok) throw new Error('Boundary calculation failed.');
+    
+    boundaryData.value = await response.json();
+    renderPlot();
+  } catch (err) {
+    console.error(err);
+    alert("Failed to calculate boundary. Ensure the backend is running.");
+  } finally {
+    isCalculatingBoundary.value = false;
+  }
 }
 
 const calculateNextExperiments = async () => {

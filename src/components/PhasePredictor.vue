@@ -150,7 +150,7 @@
               <button class="small" @click="triggerFileInput" style="background: var(--summary-bg, #f1f5f9); color: inherit; border: 1px solid var(--border-color, #cbd5e1);">
                 <i class="fas fa-file-csv"></i> Import Historical CSV
               </button>
-              <input type="file" ref="csvInput" accept=".csv" style="display: none" @change="handleFileUpload" />
+              <input type="file" id="hidden-csv-input" accept=".csv" style="display: none" @change="handleFileUpload" />
             </div>
             
             <button class="small danger-btn" @click="clearLedger"><i class="fas fa-trash-alt"></i> Reset All Memory</button>
@@ -306,7 +306,6 @@ const config = ref({
 const experiments = ref([])
 const suggestions = ref([])
 const isCalculating = ref(false)
-const csvInput = ref(null)
 
 const boundaryData = ref(null)
 const isCalculatingBoundary = ref(false)
@@ -471,7 +470,7 @@ const renderPlot = () => {
 
   const traces = [traceCoacervate, traceClear, traceUnknown, traceTarget];
 
-  // FIX: Structurally corrected Plotly Isosurface object to prevent rendering crashes
+  // CORRECTED PLOTLY ISOSURFACE: Removed invalid properties and added Fire Gradient
   if (boundaryData.value && showBoundary.value) {
       const traceSurface = {
           type: 'isosurface',
@@ -482,8 +481,8 @@ const renderPlot = () => {
           isomin: 0.45,
           isomax: 0.55,
           surface: { show: true, count: 2 },
-          opacity: 0.6,
-          colorscale: 'YlOrRd', // Implemented the requested Fire gradient!
+          opacity: 0.6, // Valid transparency syntax
+          colorscale: 'YlOrRd', // The requested Fire LUT Gradient!
           caps: { x: {show: false}, y: {show: false}, z: {show: false} },
           name: 'Phase Boundary (50%)',
           showscale: false,
@@ -569,23 +568,35 @@ const importAllSuggestions = async () => {
   }
 }
 
-// --- DYNAMIC MACHIAVELLIAN CSV INJECTION ---
-const triggerFileInput = () => { if (csvInput.value) csvInput.value.click() }
+// --- BULLETPROOF NATIVE CSV INJECTION ---
+const triggerFileInput = () => { 
+  const el = document.getElementById('hidden-csv-input');
+  if (el) el.click(); 
+}
 
 const handleFileUpload = (event) => {
-  const file = event.target.files[0]; if (!file) return;
+  const input = event.target || event.srcElement;
+  if (!input || !input.files || input.files.length === 0) return;
+  
+  const file = input.files[0];
+  if (!file || !(file instanceof Blob)) {
+     alert("Browser failed to provide a valid File object. Please try again.");
+     return;
+  }
+  
   const reader = new FileReader();
   
   reader.onload = async (e) => {
     const text = e.target.result; 
+    // Strip carriage returns and empty lines
     const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
     if (lines.length < 2) return;
     
-    // Dynamic Delimiter Detection
+    // Dynamic Delimiter
     const delimiter = lines[0].includes(';') ? ';' : ',';
     
-    // Dynamic Header Mapping (Immune to empty Index columns or shifted Pandas exports)
-    const headers = lines[0].split(delimiter).map(s => s.trim().toLowerCase());
+    // Clean headers completely to map columns safely
+    const headers = lines[0].split(delimiter).map(s => s.trim().replace(/^["']|["']$/g, '').toLowerCase());
     
     let idxId = headers.findIndex(h => h === '' || h === 'index' || h === 'sampleid');
     let idxA = headers.indexOf('anion');
@@ -593,7 +604,6 @@ const handleFileUpload = (event) => {
     let idxC = headers.indexOf('salt');
     let idxPhase = headers.indexOf('phase');
     
-    // Safety Fallbacks
     if (idxId === -1) idxId = 0;
     if (idxA === -1) idxA = 1;
     if (idxB === -1) idxB = 2;
@@ -603,7 +613,11 @@ const handleFileUpload = (event) => {
     const newKnowns = [];
     
     for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(delimiter);
+      const rowText = lines[i].trim();
+      if(!rowText) continue;
+      
+      const cols = rowText.split(delimiter).map(c => c.trim().replace(/^["']|["']$/g, ''));
+      
       if (cols.length > Math.max(idxA, idxB, idxC, idxPhase)) { 
           let sId = parseInt(cols[idxId], 10);
           let a = parseFloat(cols[idxA]);
@@ -614,7 +628,6 @@ const handleFileUpload = (event) => {
           if (isNaN(sId)) sId = Math.floor(Math.random() * 9000); 
           if (isNaN(a) || isNaN(b) || isNaN(c) || isNaN(rawPhase)) continue;
 
-          // STRICT FILTER: Only load historical tested data
           if (rawPhase === 1 || rawPhase === 0) {
               newKnowns.push({ 
                   sampleId: sId, 
@@ -626,13 +639,12 @@ const handleFileUpload = (event) => {
           }
       }
     }
-    event.target.value = ''; 
+    input.value = ''; // Reset input to allow re-upload
 
     if (newKnowns.length > 0) {
         const uniqueToInsert = [];
         const seenIds = new Set(experiments.value.map(exp => exp.sampleId));
 
-        // Deduplicate ruthlessly within the CSV itself to prevent Supabase constraint crashes
         for (let k of newKnowns) {
             if (!seenIds.has(k.sampleId)) {
                 uniqueToInsert.push(k);
@@ -656,7 +668,9 @@ const handleFileUpload = (event) => {
         alert("No valid tested points (Phase 1 or 0) were found in the uploaded CSV.");
     }
   }
-  reader.readAsText(file)
+  
+  reader.onerror = () => { alert("Failed to read the file."); };
+  reader.readAsText(file);
 }
 
 const calculateBoundary = async () => {

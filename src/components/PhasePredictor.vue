@@ -145,7 +145,7 @@
           </div>
           <div class="flex-between">
             <button class="small mt-2" @click="addManualRow"><i class="fas fa-plus"></i> Add Manual Data</button>
-            <button class="small mt-2 danger-btn" @click="clearLedger"><i class="fas fa-trash-alt"></i> Reset Predictor Memory</button>
+            <button class="small mt-2 danger-btn" @click="clearLedger"><i class="fas fa-trash-alt"></i> Reset All Memory</button>
           </div>
         </div>
       </div>
@@ -498,18 +498,18 @@ const removeRow = async (index, exp) => {
   renderPlot();
 }
 
-// Scoped Memory Wipe Logic
+// STRICT SCOPED CLEAR: Only targets IDs currently mapped to this module's ledger
 const clearLedger = async () => {
-  if (!confirm("Are you sure you want to wipe all known data for this predictor?")) return;
+  if (!confirm("Are you sure you want to wipe all known data for this predictor? This will permanently delete this module's memory.")) return;
   
-  const idsToDelete = experiments.value.filter(e => e.id).map(e => e.id);
+  const idsToDelete = experiments.value.map(e => e.id).filter(id => id);
   if (idsToDelete.length > 0) {
      const { error } = await db.from('phase_data').delete().in('id', idsToDelete);
      if (!error) {
-        experiments.value = [];
-        renderPlot();
+         experiments.value = [];
+         renderPlot();
      } else {
-        alert("Failed to clear database.");
+         alert("Failed to clear database.");
      }
   } else {
      experiments.value = [];
@@ -517,59 +517,29 @@ const clearLedger = async () => {
   }
 }
 
-// Smart Upsert Logic for Single Target
 const importSuggestion = async (sug) => {
-  const existing = experiments.value.find(e => e.sampleId === sug.sampleId);
-  if (existing && existing.id) {
-     const { error } = await db.from('phase_data')
-        .update({ phase: sug.phase, anion: sug.anion, cation: sug.cation, salt: sug.salt })
-        .eq('id', existing.id);
-     if (!error) {
-         existing.phase = sug.phase;
-         existing.anion = sug.anion;
-         existing.cation = sug.cation;
-         existing.salt = sug.salt;
-     }
-  } else {
-     const { data, error } = await db.from('phase_data')
-        .insert([{ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }])
-        .select();
-     if (!error && data && data.length > 0) experiments.value.push(data[0]);
+  const { error } = await db.from('phase_data').insert([{ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }]);
+  if(!error) { 
+    await fetchExperiments(); // GUARANTEES locking the data into local memory
+    suggestions.value = suggestions.value.filter(s => s.sampleId !== sug.sampleId); 
+    if(suggestions.value.length === 0) clearImport() 
   }
-  suggestions.value = suggestions.value.filter(s => s.sampleId !== sug.sampleId); 
-  if(suggestions.value.length === 0) clearImport();
-  renderPlot();
 }
 
-// Smart Upsert Logic for Entire Queue
 const importAllSuggestions = async () => {
-  for (const sug of suggestions.value) {
-    const existing = experiments.value.find(e => e.sampleId === sug.sampleId);
-    if (existing && existing.id) {
-       const { error } = await db.from('phase_data')
-          .update({ phase: sug.phase, anion: sug.anion, cation: sug.cation, salt: sug.salt })
-          .eq('id', existing.id);
-       if (!error) {
-          existing.phase = sug.phase;
-          existing.anion = sug.anion;
-          existing.cation = sug.cation;
-          existing.salt = sug.salt;
-       }
-    } else {
-       const { data, error } = await db.from('phase_data')
-          .insert([{ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }])
-          .select();
-       if (!error && data && data.length > 0) experiments.value.push(data[0]);
-    }
+  const payload = suggestions.value.map(sug => ({ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }));
+  const { error } = await db.from('phase_data').insert(payload);
+  if(!error) { 
+    await fetchExperiments(); // GUARANTEES locking the data into local memory before predicting
+    suggestions.value = []; 
+    clearImport() 
+  } else {
+    alert("Error logging data to Supabase.");
   }
-  suggestions.value = []; 
-  clearImport();
-  renderPlot();
 }
 
 const triggerFileInput = () => { if (csvInput.value) csvInput.value.click() }
 
-// Strict Tested Filter
 const handleFileUpload = (event) => {
   const file = event.target.files[0]; if (!file) return;
   importedFileName.value = file.name;
@@ -583,6 +553,7 @@ const handleFileUpload = (event) => {
           let rawPhase = parseInt(cols[4]);
           let phaseVal = isNaN(rawPhase) ? -1 : rawPhase; 
           
+          // STRICT FILTER: Only extract tested points into memory queue
           if (phaseVal === 1 || phaseVal === 0) {
               newSuggestions.push({ 
                   sampleId: parseInt(cols[0], 10), 
@@ -605,7 +576,8 @@ const calculateNextExperiments = async () => {
   isCalculating.value = true; 
   clearImport();
   
-  let maxId = 8999;
+  // Dynamically find the highest Sample ID so the next plate stacks properly
+  let maxId = 8999; // Base starting point if no data exists
   experiments.value.forEach(e => {
     if (e.sampleId && !isNaN(e.sampleId) && e.sampleId > maxId) {
       maxId = e.sampleId;

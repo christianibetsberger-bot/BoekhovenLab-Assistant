@@ -143,9 +143,17 @@
               </tbody>
             </table>
           </div>
-          <div class="flex-between">
-            <button class="small mt-2" @click="addManualRow"><i class="fas fa-plus"></i> Add Manual Data</button>
-            <button class="small mt-2 danger-btn" @click="clearLedger"><i class="fas fa-trash-alt"></i> Reset All Memory</button>
+          <div class="flex-between" style="margin-top: 10px;">
+            <div style="display: flex; gap: 10px;">
+              <button class="small" @click="addManualRow"><i class="fas fa-plus"></i> Add Manual Data</button>
+              
+              <button class="small" @click="triggerFileInput" style="background: var(--summary-bg, #f1f5f9); color: inherit; border: 1px solid var(--border-color, #cbd5e1);">
+                <i class="fas fa-file-csv"></i> Import Historical CSV
+              </button>
+              <input type="file" ref="csvInput" accept=".csv" style="display: none" @change="handleFileUpload" />
+            </div>
+            
+            <button class="small danger-btn" @click="clearLedger"><i class="fas fa-trash-alt"></i> Reset All Memory</button>
           </div>
         </div>
       </div>
@@ -173,30 +181,16 @@
             </div>
           </div>
 
-          <div class="engine-actions-grid">
-            <button class="action-btn auto-btn" @click="calculateNextExperiments" :disabled="isCalculating">
-              <i class="fas" :class="isCalculating ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
-              <span>{{ isCalculating ? 'Calculating...' : 'Auto-Suggest Plate' }}</span>
-            </button>
-            <button class="action-btn import-btn" @click="triggerFileInput">
-              <i class="fas fa-file-csv"></i> <span>Import CSV</span>
-            </button>
-            <input type="file" ref="csvInput" accept=".csv" style="display: none" @change="handleFileUpload" />
-          </div>
-
-          <div v-if="importedFileName" class="imported-file-badge">
-            <div class="flex-between">
-              <span class="truncate-text"><i class="fas fa-file-csv"></i> {{ importedFileName }}</span>
-              <button class="clear-btn" @click="clearImport" title="Clear Import"><i class="fas fa-times"></i></button>
-            </div>
-            <div style="font-size: 0.7rem; margin-top: 4px; opacity: 0.8;">{{ totalImportedCount }} valid memory coordinates loaded.</div>
-          </div>
+          <button class="action-btn auto-btn" @click="calculateNextExperiments" :disabled="isCalculating" style="width: 100%; margin-bottom: 10px;">
+            <i class="fas" :class="isCalculating ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
+            <span>{{ isCalculating ? 'Calculating...' : 'Auto-Suggest AI Plate' }}</span>
+          </button>
 
           <div class="suggestions-container" v-if="suggestions.length > 0">
             <div class="flex-between" style="margin-bottom: 5px;">
-              <h4 class="priority-label" style="margin-bottom: 0; border: none; padding: 0;">Target Queue:</h4>
+              <h4 class="priority-label" style="margin-bottom: 0; border: none; padding: 0;">AI Target Queue:</h4>
               <button class="small success-btn" @click="importAllSuggestions" style="width: auto; margin-top: 0; padding: 6px 12px;">
-                <i class="fas fa-save"></i> Log All
+                <i class="fas fa-save"></i> Log All Targets
               </button>
             </div>
             <div style="max-height: 150px; overflow-y: auto; padding-right: 8px; font-size: 0.8rem;">
@@ -219,7 +213,7 @@
       <div class="flex-between" style="border-bottom: 1px solid var(--border-color, #e2e8f0); padding-bottom: 8px; margin-bottom: 15px;">
         <h3 style="margin: 0; border: none; padding: 0;">5. Wet Lab Mapping: 96-Well Plates</h3>
         <div v-if="suggestedPlateData.length > 0" class="export-controls">
-            <span style="font-size: 0.85rem; font-weight: bold; opacity: 0.7;">Export with Volumes:</span>
+            <span style="font-size: 0.85rem; font-weight: bold; opacity: 0.7;">Export AI Targets with Volumes:</span>
             <select v-model="targetPlateId" class="compact-select">
                 <option value="" disabled>Select Plate...</option>
                 <option v-for="p in store.wellPlates" :key="p.id" :value="p.id">{{ p.name }}</option>
@@ -253,7 +247,7 @@
           </div>
 
           <div class="well-plate-wrapper" v-if="suggestedPlateData.length > 0">
-            <h4 style="text-align: center; color: #8b5cf6; margin-top: 0; font-size: 0.9rem;">AI / CSV Target Plate</h4>
+            <h4 style="text-align: center; color: #8b5cf6; margin-top: 0; font-size: 0.9rem;">AI Generated Plate</h4>
             <div class="well-plate">
               <div class="plate-header-row">
                 <div class="plate-corner"></div>
@@ -303,8 +297,6 @@ const isCalculating = ref(false)
 const csvInput = ref(null)
 
 const plateRows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
-const importedFileName = ref('')
-const totalImportedCount = ref(0)
 
 // --- Helper Math ---
 const getMM = (val, unit) => {
@@ -498,7 +490,6 @@ const removeRow = async (index, exp) => {
   renderPlot();
 }
 
-// STRICT SCOPED CLEAR: Only targets IDs currently mapped to this module's ledger
 const clearLedger = async () => {
   if (!confirm("Are you sure you want to wipe all known data for this predictor? This will permanently delete this module's memory.")) return;
   
@@ -517,12 +508,12 @@ const clearLedger = async () => {
   }
 }
 
+// --- AI SUGGESTION LOGGING ---
 const importSuggestion = async (sug) => {
   const { error } = await db.from('phase_data').insert([{ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }]);
   if(!error) { 
-    await fetchExperiments(); // GUARANTEES locking the data into local memory
+    await fetchExperiments(); 
     suggestions.value = suggestions.value.filter(s => s.sampleId !== sug.sampleId); 
-    if(suggestions.value.length === 0) clearImport() 
   }
 }
 
@@ -530,32 +521,33 @@ const importAllSuggestions = async () => {
   const payload = suggestions.value.map(sug => ({ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }));
   const { error } = await db.from('phase_data').insert(payload);
   if(!error) { 
-    await fetchExperiments(); // GUARANTEES locking the data into local memory before predicting
+    await fetchExperiments(); 
     suggestions.value = []; 
-    clearImport() 
   } else {
-    alert("Error logging data to Supabase.");
+    alert("Error logging AI targets to Supabase.");
   }
 }
 
+// --- NEW MACHIAVELLIAN CSV INJECTION ---
 const triggerFileInput = () => { if (csvInput.value) csvInput.value.click() }
 
 const handleFileUpload = (event) => {
   const file = event.target.files[0]; if (!file) return;
-  importedFileName.value = file.name;
   const reader = new FileReader();
-  reader.onload = (e) => {
-    const text = e.target.result; const lines = text.split('\n').filter(line => line.trim() !== '');
-    const newSuggestions = [];
+  reader.onload = async (e) => {
+    const text = e.target.result; 
+    const lines = text.split('\n').filter(line => line.trim() !== '');
+    const newKnowns = [];
+    
     for (let i = 1; i < lines.length; i++) {
       const cols = lines[i].split(',');
       if (cols.length >= 4) { 
           let rawPhase = parseInt(cols[4]);
           let phaseVal = isNaN(rawPhase) ? -1 : rawPhase; 
           
-          // STRICT FILTER: Only extract tested points into memory queue
+          // STRICT FILTER: Only load historical tested data
           if (phaseVal === 1 || phaseVal === 0) {
-              newSuggestions.push({ 
+              newKnowns.push({ 
                   sampleId: parseInt(cols[0], 10), 
                   anion: Number(parseFloat(cols[1]).toFixed(2)), 
                   cation: Number(parseFloat(cols[2]).toFixed(2)), 
@@ -565,19 +557,37 @@ const handleFileUpload = (event) => {
           }
       }
     }
-    totalImportedCount.value = newSuggestions.length; suggestions.value = newSuggestions; event.target.value = '';
+    event.target.value = ''; // Reset input
+
+    if (newKnowns.length > 0) {
+        // Prevent Supabase constraint collisions by filtering out IDs already in our memory
+        const existingIds = new Set(experiments.value.map(exp => exp.sampleId));
+        const toInsert = newKnowns.filter(k => !existingIds.has(k.sampleId));
+
+        if (toInsert.length > 0) {
+            const { error } = await db.from('phase_data').insert(toInsert);
+            if (!error) {
+                await fetchExperiments();
+                alert(`Successfully imported ${toInsert.length} historical data points into the Ledger!`);
+            } else {
+                console.error("Supabase Error:", error);
+                alert("Error logging CSV data to Supabase. Check console.");
+            }
+        } else {
+            alert("All tested points in this CSV are already loaded in the Ledger.");
+        }
+    } else {
+        alert("No tested points (Phase 1 or 0) were found in the uploaded CSV.");
+    }
   }
   reader.readAsText(file)
 }
 
-const clearImport = () => { importedFileName.value = ''; totalImportedCount.value = 0; suggestions.value = [] }
-
 const calculateNextExperiments = async () => {
   isCalculating.value = true; 
-  clearImport();
+  suggestions.value = []; // Clear existing AI targets
   
-  // Dynamically find the highest Sample ID so the next plate stacks properly
-  let maxId = 8999; // Base starting point if no data exists
+  let maxId = 8999; 
   experiments.value.forEach(e => {
     if (e.sampleId && !isNaN(e.sampleId) && e.sampleId > maxId) {
       maxId = e.sampleId;
@@ -660,11 +670,9 @@ onMounted(() => {
 .plot-area { height: 280px; background: #000; border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0); padding: 5px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); overflow: hidden; }
 
 /* Buttons & Engine */
-.engine-actions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
 .action-btn { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: all 0.2s; border: none; font-size: 0.85rem; }
 .auto-btn { background: #3b82f6; color: white; box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3); }
 .auto-btn:hover:not(:disabled) { background: #2563eb; transform: translateY(-1px); }
-.import-btn { background: var(--summary-bg, #f1f5f9); color: inherit; border: 1px solid var(--border-color, #cbd5e1); }
 .clear-btn { background: transparent; border: none; color: #ef4444; cursor: pointer; padding: 2px; border-radius: 4px; }
 .success-btn { background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
 .danger-btn { background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid #ef4444; }

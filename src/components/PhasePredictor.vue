@@ -40,8 +40,8 @@
                       <button class="small" @click="config.anionName = config.anionSearchQuery; activeDropdown = null; renderPlot()">Text</button>
                     </div>
                     <div class="dropdown-results">
-                      <div v-for="inv in filterBlockInventory(config.anionSearchQuery, config.anionSearchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="config.anionName = '[' + inv.code + '] ' + inv.name; activeDropdown = null; renderPlot()">
-                        [{{ inv.code }}] {{ inv.name }}
+                      <div v-for="inv in filterBlockInventory(config.anionSearchQuery, config.anionSearchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="selectInventory('anion', inv)">
+                        [{{ inv.code }}] {{ inv.name }} ({{inv.stock}} {{inv.stockUnit || 'µM'}})
                       </div>
                     </div>
                   </div>
@@ -69,8 +69,8 @@
                       <button class="small" @click="config.cationName = config.cationSearchQuery; activeDropdown = null; renderPlot()">Text</button>
                     </div>
                     <div class="dropdown-results">
-                      <div v-for="inv in filterBlockInventory(config.cationSearchQuery, config.cationSearchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="config.cationName = '[' + inv.code + '] ' + inv.name; activeDropdown = null; renderPlot()">
-                        [{{ inv.code }}] {{ inv.name }}
+                      <div v-for="inv in filterBlockInventory(config.cationSearchQuery, config.cationSearchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="selectInventory('cation', inv)">
+                        [{{ inv.code }}] {{ inv.name }} ({{inv.stock}} {{inv.stockUnit || 'µM'}})
                       </div>
                     </div>
                   </div>
@@ -98,8 +98,8 @@
                       <button class="small" @click="config.saltName = config.saltSearchQuery; activeDropdown = null; renderPlot()">Text</button>
                     </div>
                     <div class="dropdown-results">
-                      <div v-for="inv in filterBlockInventory(config.saltSearchQuery, config.saltSearchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="config.saltName = '[' + inv.code + '] ' + inv.name; activeDropdown = null; renderPlot()">
-                        [{{ inv.code }}] {{ inv.name }}
+                      <div v-for="inv in filterBlockInventory(config.saltSearchQuery, config.saltSearchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="selectInventory('salt', inv)">
+                        [{{ inv.code }}] {{ inv.name }} ({{inv.stock}} {{inv.stockUnit || 'µM'}})
                       </div>
                     </div>
                   </div>
@@ -142,7 +142,10 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+          <div class="flex-between">
             <button class="small mt-2" @click="addManualRow"><i class="fas fa-plus"></i> Add Manual Data</button>
+            <button class="small mt-2 danger-btn" @click="clearLedger"><i class="fas fa-trash-alt"></i> Reset All Memory</button>
           </div>
         </div>
       </div>
@@ -186,7 +189,7 @@
               <span class="truncate-text"><i class="fas fa-file-csv"></i> {{ importedFileName }}</span>
               <button class="clear-btn" @click="clearImport" title="Clear Import"><i class="fas fa-times"></i></button>
             </div>
-            <div style="font-size: 0.7rem; margin-top: 4px; opacity: 0.8;">{{ totalImportedCount }} coordinates loaded.</div>
+            <div style="font-size: 0.7rem; margin-top: 4px; opacity: 0.8;">{{ totalImportedCount }} valid memory coordinates loaded.</div>
           </div>
 
           <div class="suggestions-container" v-if="suggestions.length > 0">
@@ -303,12 +306,46 @@ const plateRows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 const importedFileName = ref('')
 const totalImportedCount = ref(0)
 
+// --- Helper Math ---
+const getMM = (val, unit) => {
+    if (!val) return 0;
+    let m = 1;
+    if (unit === 'M') m = 1000;
+    else if (unit === 'mM') m = 1;
+    else if (unit === 'µM') m = 1e-3;
+    else if (unit === 'nM') m = 1e-6;
+    else if (unit === 'mg/mL' || unit === 'µg/µL') m = 1;
+    else if (unit === 'ng/µL') m = 1e-3;
+    else if (unit === 'X') m = 1;
+    else if (unit === '%') m = 10;
+    return val * m;
+}
+
+const selectInventory = (type, inv) => {
+    const stockInMM = getMM(inv.stock, inv.stockUnit || 'µM');
+    if (type === 'anion') {
+        config.value.anionName = `[${inv.code}] ${inv.name}`;
+        config.value.stockAnion = stockInMM;
+    } else if (type === 'cation') {
+        config.value.cationName = `[${inv.code}] ${inv.name}`;
+        config.value.stockCation = stockInMM;
+    } else if (type === 'salt') {
+        config.value.saltName = `[${inv.code}] ${inv.name}`;
+        config.value.stockSalt = stockInMM;
+    }
+    activeDropdown.value = null;
+    renderPlot();
+}
+
 const filterBlockInventory = (query, scope) => {
     const term = query ? query.toLowerCase() : '';
     const targetScope = scope || 'Global';
     return store.inventory.filter(item => 
         (item.scope === targetScope || (!item.scope && targetScope === 'Global')) &&
-        ((!term) || (item.name && item.name.toLowerCase().includes(term)) || (item.code && item.code.toLowerCase().includes(term)))
+        ((!term) || 
+         (item.name && item.name.toLowerCase().includes(term)) || 
+         (item.code && item.code.toLowerCase().includes(term)) ||
+         (item.cas && item.cas.toLowerCase().includes(term)))
     );
 }
 
@@ -367,9 +404,10 @@ const exportSuggestionsToPlate = () => {
             let wId = String.fromCharCode(65 + targetR) + (targetC + 1);
             
             // Volume Calculations (Target Vol * Target Conc / Stock Conc)
-            let vA = ((sug.anion * config.value.targetVolume) / config.value.stockAnion).toFixed(2);
-            let vB = ((sug.cation * config.value.targetVolume) / config.value.stockCation).toFixed(2);
-            let vC = ((sug.salt * config.value.targetVolume) / config.value.stockSalt).toFixed(2);
+            let vA = config.value.stockAnion > 0 ? ((sug.anion * config.value.targetVolume) / config.value.stockAnion).toFixed(2) : 0;
+            let vB = config.value.stockCation > 0 ? ((sug.cation * config.value.targetVolume) / config.value.stockCation).toFixed(2) : 0;
+            let vC = config.value.stockSalt > 0 ? ((sug.salt * config.value.targetVolume) / config.value.stockSalt).toFixed(2) : 0;
+            
             let vTotalStocks = parseFloat(vA) + parseFloat(vB) + parseFloat(vC);
             let vWater = (config.value.targetVolume - vTotalStocks).toFixed(2);
             
@@ -460,6 +498,17 @@ const removeRow = async (index, exp) => {
   renderPlot();
 }
 
+const clearLedger = async () => {
+  if (!confirm("Are you sure you want to wipe all known data? This will delete all memory from the database.")) return;
+  const { error } = await db.from('phase_data').delete().not('id', 'is', null);
+  if (!error) {
+    experiments.value = [];
+    renderPlot();
+  } else {
+    alert("Failed to clear database.");
+  }
+}
+
 const importSuggestion = async (sug) => {
   const { data, error } = await db.from('phase_data').insert([{ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }]).select()
   if(!error && data) { 
@@ -493,13 +542,17 @@ const handleFileUpload = (event) => {
       if (cols.length >= 4) { 
           let rawPhase = parseInt(cols[4]);
           let phaseVal = isNaN(rawPhase) ? -1 : rawPhase; 
-          newSuggestions.push({ 
-              sampleId: parseInt(cols[0], 10), 
-              anion: Number(parseFloat(cols[1]).toFixed(2)), 
-              cation: Number(parseFloat(cols[2]).toFixed(2)), 
-              salt: Number(parseFloat(cols[3]).toFixed(1)), 
-              phase: phaseVal 
-          }) 
+          
+          // STRICT FILTER: Only extract tested points into memory
+          if (phaseVal === 1 || phaseVal === 0) {
+              newSuggestions.push({ 
+                  sampleId: parseInt(cols[0], 10), 
+                  anion: Number(parseFloat(cols[1]).toFixed(2)), 
+                  cation: Number(parseFloat(cols[2]).toFixed(2)), 
+                  salt: Number(parseFloat(cols[3]).toFixed(1)), 
+                  phase: phaseVal 
+              }) 
+          }
       }
     }
     totalImportedCount.value = newSuggestions.length; suggestions.value = newSuggestions; event.target.value = '';
@@ -604,6 +657,8 @@ onMounted(() => {
 .import-btn { background: var(--summary-bg, #f1f5f9); color: inherit; border: 1px solid var(--border-color, #cbd5e1); }
 .clear-btn { background: transparent; border: none; color: #ef4444; cursor: pointer; padding: 2px; border-radius: 4px; }
 .success-btn { background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+.danger-btn { background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid #ef4444; }
+.danger-btn:hover { background: #ef4444; color: white; }
 
 /* Side-by-Side Plates Grid */
 .plates-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; align-items: start; }

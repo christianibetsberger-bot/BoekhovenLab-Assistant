@@ -294,13 +294,12 @@ const activeDropdown = ref(null)
 const targetPlateId = ref('')
 const targetStartWell = ref('A1')
 
-// --- State ---
 const config = ref({ 
   anionName: 'Compound A', anionMax: 6, stockAnion: 100, anionSearchQuery: '', anionSearchScope: 'Global',
   cationName: 'Compound B', cationMax: 6, stockCation: 100, cationSearchQuery: '', cationSearchScope: 'Global',
   saltName: 'Compound C', saltMax: 200, stockSalt: 1000, saltSearchQuery: '', saltSearchScope: 'Global',
-  targetVolume: 100, // µL
-  strategy: 'safe' // The Active Learning strategy toggle
+  targetVolume: 100,
+  strategy: 'safe' 
 })
 
 const experiments = ref([])
@@ -313,7 +312,6 @@ const showBoundary = ref(true)
 
 const plateRows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 
-// --- Helper Math ---
 const getMM = (val, unit) => {
     if (!val) return 0;
     let m = 1;
@@ -410,7 +408,6 @@ const exportSuggestionsToPlate = () => {
         if (targetR < 8 && targetC < 12) {
             let wId = String.fromCharCode(65 + targetR) + (targetC + 1);
             
-            // Volume Calculations (Target Vol * Target Conc / Stock Conc)
             let vA = config.value.stockAnion > 0 ? ((sug.anion * config.value.targetVolume) / config.value.stockAnion).toFixed(2) : 0;
             let vB = config.value.stockCation > 0 ? ((sug.cation * config.value.targetVolume) / config.value.stockCation).toFixed(2) : 0;
             let vC = config.value.stockSalt > 0 ? ((sug.salt * config.value.targetVolume) / config.value.stockSalt).toFixed(2) : 0;
@@ -470,22 +467,27 @@ const renderPlot = () => {
 
   const traces = [traceCoacervate, traceClear, traceUnknown, traceTarget];
 
-  // CORRECTED PLOTLY ISOSURFACE: Removed invalid properties and added Fire Gradient
+  // VIOLENT PROXY STRIPPING & EXPANDED VISIBILITY FOR WEBGL
   if (boundaryData.value && showBoundary.value) {
+      const rawX = [...boundaryData.value.x];
+      const rawY = [...boundaryData.value.y];
+      const rawZ = [...boundaryData.value.z];
+      const rawProb = [...boundaryData.value.prob];
+
       const traceSurface = {
           type: 'isosurface',
-          x: boundaryData.value.x,
-          y: boundaryData.value.y,
-          z: boundaryData.value.z,
-          value: boundaryData.value.prob,
-          isomin: 0.45,
-          isomax: 0.55,
-          surface: { show: true, count: 2 },
-          opacity: 0.6, // Valid transparency syntax
-          colorscale: 'YlOrRd', // The requested Fire LUT Gradient!
+          x: rawX,
+          y: rawY,
+          z: rawZ,
+          value: rawProb,
+          isomin: 0.1, // Expanded net to catch all slopes
+          isomax: 0.9,
+          surface: { show: true, count: 5 }, // 5 contour shells
+          opacity: 0.6,
+          colorscale: 'YlOrRd', // The requested Fire LUT
           caps: { x: {show: false}, y: {show: false}, z: {show: false} },
-          name: 'Phase Boundary (50%)',
-          showscale: false,
+          name: 'AI Phase Boundary',
+          showscale: true, // Display legend to confirm rendering
           hoverinfo: 'none'
       };
       traces.push(traceSurface);
@@ -548,7 +550,6 @@ const clearLedger = async () => {
   }
 }
 
-// --- AI SUGGESTION LOGGING ---
 const importSuggestion = async (sug) => {
   const { error } = await db.from('phase_data').insert([{ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }]);
   if(!error) { 
@@ -568,7 +569,6 @@ const importAllSuggestions = async () => {
   }
 }
 
-// --- BULLETPROOF NATIVE CSV INJECTION ---
 const triggerFileInput = () => { 
   const el = document.getElementById('hidden-csv-input');
   if (el) el.click(); 
@@ -588,14 +588,10 @@ const handleFileUpload = (event) => {
   
   reader.onload = async (e) => {
     const text = e.target.result; 
-    // Strip carriage returns and empty lines
     const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
     if (lines.length < 2) return;
     
-    // Dynamic Delimiter
     const delimiter = lines[0].includes(';') ? ';' : ',';
-    
-    // Clean headers completely to map columns safely
     const headers = lines[0].split(delimiter).map(s => s.trim().replace(/^["']|["']$/g, '').toLowerCase());
     
     let idxId = headers.findIndex(h => h === '' || h === 'index' || h === 'sampleid');
@@ -639,7 +635,7 @@ const handleFileUpload = (event) => {
           }
       }
     }
-    input.value = ''; // Reset input to allow re-upload
+    input.value = ''; 
 
     if (newKnowns.length > 0) {
         const uniqueToInsert = [];
@@ -703,7 +699,7 @@ const calculateBoundary = async () => {
 
 const calculateNextExperiments = async () => {
   isCalculating.value = true; 
-  suggestions.value = []; // Clear existing AI targets
+  suggestions.value = []; 
   
   let maxId = 8999; 
   experiments.value.forEach(e => {

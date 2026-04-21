@@ -46,8 +46,9 @@
                     </div>
                   </div>
                 </div>
-                <input type="number" v-model="config.anionMax" @change="renderPlot" style="flex: 0.7;" title="Max Target (mM)" placeholder="Max mM" />
-                <input type="number" v-model="config.stockAnion" style="flex: 0.7;" title="Stock Conc (mM)" placeholder="Stock mM" />
+                <input type="number" v-model="config.anionMin" @change="renderPlot" style="flex: 0.5;" title="Min Target (mM)" placeholder="Min" />
+                <input type="number" v-model="config.anionMax" @change="renderPlot" style="flex: 0.5;" title="Max Target (mM)" placeholder="Max" />
+                <input type="number" v-model="config.stockAnion" style="flex: 0.7;" title="Stock Conc (mM)" placeholder="Stock" />
               </div>
             </div>
             
@@ -75,8 +76,9 @@
                     </div>
                   </div>
                 </div>
-                <input type="number" v-model="config.cationMax" @change="renderPlot" style="flex: 0.7;" title="Max Target (mM)" placeholder="Max mM" />
-                <input type="number" v-model="config.stockCation" style="flex: 0.7;" title="Stock Conc (mM)" placeholder="Stock mM" />
+                <input type="number" v-model="config.cationMin" @change="renderPlot" style="flex: 0.5;" title="Min Target (mM)" placeholder="Min" />
+                <input type="number" v-model="config.cationMax" @change="renderPlot" style="flex: 0.5;" title="Max Target (mM)" placeholder="Max" />
+                <input type="number" v-model="config.stockCation" style="flex: 0.7;" title="Stock Conc (mM)" placeholder="Stock" />
               </div>
             </div>
             
@@ -104,8 +106,9 @@
                     </div>
                   </div>
                 </div>
-                <input type="number" v-model="config.saltMax" @change="renderPlot" style="flex: 0.7;" title="Max Target (mM)" placeholder="Max mM" />
-                <input type="number" v-model="config.stockSalt" style="flex: 0.7;" title="Stock Conc (mM)" placeholder="Stock mM" />
+                <input type="number" v-model="config.saltMin" @change="renderPlot" style="flex: 0.5;" title="Min Target (mM)" placeholder="Min" />
+                <input type="number" v-model="config.saltMax" @change="renderPlot" style="flex: 0.5;" title="Max Target (mM)" placeholder="Max" />
+                <input type="number" v-model="config.stockSalt" style="flex: 0.7;" title="Stock Conc (mM)" placeholder="Stock" />
               </div>
             </div>
           </div>
@@ -146,13 +149,11 @@
           <div class="flex-between" style="margin-top: 10px;">
             <div style="display: flex; gap: 10px;">
               <button class="small" @click="addManualRow"><i class="fas fa-plus"></i> Add Manual Data</button>
-              
               <button class="small" @click="triggerFileInput" style="background: var(--summary-bg, #f1f5f9); color: inherit; border: 1px solid var(--border-color, #cbd5e1);">
                 <i class="fas fa-file-csv"></i> Import Historical CSV
               </button>
-              <input type="file" id="hidden-csv-input" accept=".csv" style="display: none" @change="handleFileUpload" />
+              <input type="file" id="hidden-csv-input" accept=".csv" style="display: none" />
             </div>
-            
             <button class="small danger-btn" @click="clearLedger"><i class="fas fa-trash-alt"></i> Reset All Memory</button>
           </div>
         </div>
@@ -172,7 +173,6 @@
               </button>
             </div>
           </div>
-
           <div class="plot-area">
             <div id="phase-ternary-plot" style="width: 100%; height: 100%;"></div>
           </div>
@@ -180,7 +180,6 @@
 
         <div class="internal-section">
           <h3>4. Active Learning Engine</h3>
-
           <div style="margin-bottom: 15px; padding: 10px; background: rgba(59, 130, 246, 0.05); border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px;">
             <label style="display: block; font-size: 0.85rem; font-weight: bold; margin-bottom: 8px; color: var(--primary, #3b82f6);">Sampling Strategy:</label>
             <div style="display: flex; gap: 15px;">
@@ -294,10 +293,11 @@ const activeDropdown = ref(null)
 const targetPlateId = ref('')
 const targetStartWell = ref('A1')
 
+// --- State ---
 const config = ref({ 
-  anionName: 'Compound A', anionMax: 6, stockAnion: 100, anionSearchQuery: '', anionSearchScope: 'Global',
-  cationName: 'Compound B', cationMax: 6, stockCation: 100, cationSearchQuery: '', cationSearchScope: 'Global',
-  saltName: 'Compound C', saltMax: 200, stockSalt: 1000, saltSearchQuery: '', saltSearchScope: 'Global',
+  anionName: 'Compound A', anionMin: 0, anionMax: 6, stockAnion: 100, anionInv: null, anionSearchQuery: '', anionSearchScope: 'Global',
+  cationName: 'Compound B', cationMin: 0, cationMax: 6, stockCation: 100, cationInv: null, cationSearchQuery: '', cationSearchScope: 'Global',
+  saltName: 'Compound C', saltMin: 0, saltMax: 200, stockSalt: 1000, saltInv: null, saltSearchQuery: '', saltSearchScope: 'Global',
   targetVolume: 100,
   strategy: 'safe' 
 })
@@ -312,6 +312,7 @@ const showBoundary = ref(true)
 
 const plateRows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 
+// --- Helper Math ---
 const getMM = (val, unit) => {
     if (!val) return 0;
     let m = 1;
@@ -331,12 +332,15 @@ const selectInventory = (type, inv) => {
     if (type === 'anion') {
         config.value.anionName = `[${inv.code}] ${inv.name}`;
         config.value.stockAnion = stockInMM;
+        config.value.anionInv = inv;
     } else if (type === 'cation') {
         config.value.cationName = `[${inv.code}] ${inv.name}`;
         config.value.stockCation = stockInMM;
+        config.value.cationInv = inv;
     } else if (type === 'salt') {
         config.value.saltName = `[${inv.code}] ${inv.name}`;
         config.value.stockSalt = stockInMM;
+        config.value.saltInv = inv;
     }
     activeDropdown.value = null;
     renderPlot();
@@ -397,6 +401,12 @@ const exportSuggestionsToPlate = () => {
     
     let startRow = match[1].charCodeAt(0) - 65; 
     let startCol = parseInt(match[2]) - 1;
+
+    // Helper to generate the exact Andrew+ span structure
+    const getInventoryTag = (inv, vol, targetConc) => {
+        if (!inv) return `<strong>Unknown Component:</strong> ${vol} µL (${targetConc} mM)<br>`;
+        return `&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${inv.code}] ${inv.name} (${store.formatNum(inv.stock)} ${inv.stockUnit || 'µM'})&nbsp;<i class="fas fa-times" style="cursor:pointer; margin-left:4px; opacity: 0.7;" onclick="let ce = this.closest('[contenteditable]'); this.parentElement.remove(); if(ce) ce.dispatchEvent(new Event('input', {bubbles: true}));" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7"></i></span>&nbsp; ${vol} µL (${targetConc} mM)<br>`;
+    };
     
     suggestions.value.forEach((sug, i) => {
         let rOffset = Math.floor((startCol + i) / 12);
@@ -417,11 +427,13 @@ const exportSuggestionsToPlate = () => {
             
             let warningHtml = vWater < 0 ? `<br><span style="color:#ef4444; font-size:0.7rem;">⚠️ Vol Exceeds Limit</span>` : '';
 
-            let cellHtml = `<strong>AI Target [${sug.sampleId}]</strong><br>
-                            A: ${vA} µL<br>
-                            B: ${vB} µL<br>
-                            C: ${vC} µL<br>
-                            H2O: ${vWater} µL${warningHtml}`;
+            // Generate HTML using the deeply integrated Inventory references
+            let cellHtml = `<strong style="color: var(--primary);">AI Target [${sug.sampleId}]</strong><br>
+                            ${getInventoryTag(config.value.anionInv, vA, sug.anion)}
+                            ${getInventoryTag(config.value.cationInv, vB, sug.cation)}
+                            ${getInventoryTag(config.value.saltInv, vC, sug.salt)}
+                            <strong>MQ H₂O:</strong> ${vWater} µL${warningHtml}`;
+                            
             plate.wells[wId] = cellHtml;
         }
     });
@@ -467,7 +479,6 @@ const renderPlot = () => {
 
   const traces = [traceCoacervate, traceClear, traceUnknown, traceTarget];
 
-  // VIOLENT PROXY STRIPPING & EXPANDED VISIBILITY FOR WEBGL
   if (boundaryData.value && showBoundary.value) {
       const rawX = [...boundaryData.value.x];
       const rawY = [...boundaryData.value.y];
@@ -480,14 +491,14 @@ const renderPlot = () => {
           y: rawY,
           z: rawZ,
           value: rawProb,
-          isomin: 0.1, // Expanded net to catch all slopes
+          isomin: 0.1, 
           isomax: 0.9,
-          surface: { show: true, count: 5 }, // 5 contour shells
+          surface: { show: true, count: 5 },
           opacity: 0.6,
-          colorscale: 'YlOrRd', // The requested Fire LUT
+          colorscale: 'YlOrRd', 
           caps: { x: {show: false}, y: {show: false}, z: {show: false} },
           name: 'AI Phase Boundary',
-          showscale: true, // Display legend to confirm rendering
+          showscale: true, 
           hoverinfo: 'none'
       };
       traces.push(traceSurface);
@@ -495,9 +506,9 @@ const renderPlot = () => {
 
   const layout = {
     scene: {
-      xaxis: { title: config.value.anionName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } },
-      yaxis: { title: config.value.cationName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } },
-      zaxis: { title: config.value.saltName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } }
+      xaxis: { range: [config.value.anionMin, config.value.anionMax], title: config.value.anionName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } },
+      yaxis: { range: [config.value.cationMin, config.value.cationMax], title: config.value.cationName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } },
+      zaxis: { range: [config.value.saltMin, config.value.saltMax], title: config.value.saltName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } }
     },
     paper_bgcolor: '#000000',
     margin: { l: 0, r: 0, b: 0, t: 0 },
@@ -569,104 +580,104 @@ const importAllSuggestions = async () => {
   }
 }
 
+onMounted(() => {
+  // Setup native file input listener once
+  const input = document.getElementById('hidden-csv-input');
+  if (input) {
+    input.addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      
+      reader.onload = async (e) => {
+        const text = e.target.result; 
+        const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+        if (lines.length < 2) return;
+        
+        const delimiter = lines[0].includes(';') ? ';' : ',';
+        const headers = lines[0].split(delimiter).map(s => s.trim().replace(/^["']|["']$/g, '').toLowerCase());
+        
+        let idxId = headers.findIndex(h => h === '' || h === 'index' || h === 'sampleid');
+        let idxA = headers.indexOf('anion');
+        let idxB = headers.indexOf('cation');
+        let idxC = headers.indexOf('salt');
+        let idxPhase = headers.indexOf('phase');
+        
+        if (idxId === -1) idxId = 0;
+        if (idxA === -1) idxA = 1;
+        if (idxB === -1) idxB = 2;
+        if (idxC === -1) idxC = 3;
+        if (idxPhase === -1) idxPhase = 4;
+        
+        const newKnowns = [];
+        
+        for (let i = 1; i < lines.length; i++) {
+          const rowText = lines[i].trim();
+          if(!rowText) continue;
+          
+          const cols = rowText.split(delimiter).map(c => c.trim().replace(/^["']|["']$/g, ''));
+          
+          if (cols.length > Math.max(idxA, idxB, idxC, idxPhase)) { 
+              let sId = parseInt(cols[idxId], 10);
+              let a = parseFloat(cols[idxA]);
+              let b = parseFloat(cols[idxB]);
+              let c = parseFloat(cols[idxC]);
+              let rawPhase = parseInt(cols[idxPhase], 10); 
+              
+              if (isNaN(sId)) sId = Math.floor(Math.random() * 9000); 
+              if (isNaN(a) || isNaN(b) || isNaN(c) || isNaN(rawPhase)) continue;
+
+              if (rawPhase === 1 || rawPhase === 0) {
+                  newKnowns.push({ 
+                      sampleId: sId, 
+                      anion: Number(a.toFixed(2)), 
+                      cation: Number(b.toFixed(2)), 
+                      salt: Number(c.toFixed(1)), 
+                      phase: rawPhase 
+                  }) 
+              }
+          }
+        }
+        input.value = ''; 
+
+        if (newKnowns.length > 0) {
+            const uniqueToInsert = [];
+            const seenIds = new Set(experiments.value.map(exp => exp.sampleId));
+
+            for (let k of newKnowns) {
+                if (!seenIds.has(k.sampleId)) {
+                    uniqueToInsert.push(k);
+                    seenIds.add(k.sampleId);
+                }
+            }
+
+            if (uniqueToInsert.length > 0) {
+                const { error } = await db.from('phase_data').insert(uniqueToInsert);
+                if (!error) {
+                    await fetchExperiments();
+                    alert(`Successfully imported ${uniqueToInsert.length} historical data points into the Ledger!`);
+                } else {
+                    console.error("Supabase Error:", error);
+                    alert("Error logging CSV data to Supabase. Check console.");
+                }
+            } else {
+                alert("All tested points in this CSV are already loaded in the Ledger.");
+            }
+        } else {
+            alert("No valid tested points (Phase 1 or 0) were found in the uploaded CSV.");
+        }
+      };
+      
+      reader.onerror = () => { alert("Failed to read the file."); };
+      reader.readAsText(file);
+    });
+  }
+})
+
 const triggerFileInput = () => { 
   const el = document.getElementById('hidden-csv-input');
   if (el) el.click(); 
-}
-
-const handleFileUpload = (event) => {
-  const input = event.target || event.srcElement;
-  if (!input || !input.files || input.files.length === 0) return;
-  
-  const file = input.files[0];
-  if (!file || !(file instanceof Blob)) {
-     alert("Browser failed to provide a valid File object. Please try again.");
-     return;
-  }
-  
-  const reader = new FileReader();
-  
-  reader.onload = async (e) => {
-    const text = e.target.result; 
-    const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
-    if (lines.length < 2) return;
-    
-    const delimiter = lines[0].includes(';') ? ';' : ',';
-    const headers = lines[0].split(delimiter).map(s => s.trim().replace(/^["']|["']$/g, '').toLowerCase());
-    
-    let idxId = headers.findIndex(h => h === '' || h === 'index' || h === 'sampleid');
-    let idxA = headers.indexOf('anion');
-    let idxB = headers.indexOf('cation');
-    let idxC = headers.indexOf('salt');
-    let idxPhase = headers.indexOf('phase');
-    
-    if (idxId === -1) idxId = 0;
-    if (idxA === -1) idxA = 1;
-    if (idxB === -1) idxB = 2;
-    if (idxC === -1) idxC = 3;
-    if (idxPhase === -1) idxPhase = 4;
-    
-    const newKnowns = [];
-    
-    for (let i = 1; i < lines.length; i++) {
-      const rowText = lines[i].trim();
-      if(!rowText) continue;
-      
-      const cols = rowText.split(delimiter).map(c => c.trim().replace(/^["']|["']$/g, ''));
-      
-      if (cols.length > Math.max(idxA, idxB, idxC, idxPhase)) { 
-          let sId = parseInt(cols[idxId], 10);
-          let a = parseFloat(cols[idxA]);
-          let b = parseFloat(cols[idxB]);
-          let c = parseFloat(cols[idxC]);
-          let rawPhase = parseInt(cols[idxPhase], 10); 
-          
-          if (isNaN(sId)) sId = Math.floor(Math.random() * 9000); 
-          if (isNaN(a) || isNaN(b) || isNaN(c) || isNaN(rawPhase)) continue;
-
-          if (rawPhase === 1 || rawPhase === 0) {
-              newKnowns.push({ 
-                  sampleId: sId, 
-                  anion: Number(a.toFixed(2)), 
-                  cation: Number(b.toFixed(2)), 
-                  salt: Number(c.toFixed(1)), 
-                  phase: rawPhase 
-              }) 
-          }
-      }
-    }
-    input.value = ''; 
-
-    if (newKnowns.length > 0) {
-        const uniqueToInsert = [];
-        const seenIds = new Set(experiments.value.map(exp => exp.sampleId));
-
-        for (let k of newKnowns) {
-            if (!seenIds.has(k.sampleId)) {
-                uniqueToInsert.push(k);
-                seenIds.add(k.sampleId);
-            }
-        }
-
-        if (uniqueToInsert.length > 0) {
-            const { error } = await db.from('phase_data').insert(uniqueToInsert);
-            if (!error) {
-                await fetchExperiments();
-                alert(`Successfully imported ${uniqueToInsert.length} historical data points into the Ledger!`);
-            } else {
-                console.error("Supabase Error:", error);
-                alert("Error logging CSV data to Supabase. Check console.");
-            }
-        } else {
-            alert("All tested points in this CSV are already loaded in the Ledger.");
-        }
-    } else {
-        alert("No valid tested points (Phase 1 or 0) were found in the uploaded CSV.");
-    }
-  }
-  
-  reader.onerror = () => { alert("Failed to read the file."); };
-  reader.readAsText(file);
 }
 
 const calculateBoundary = async () => {

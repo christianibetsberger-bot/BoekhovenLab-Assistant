@@ -145,7 +145,7 @@
           </div>
           <div class="flex-between">
             <button class="small mt-2" @click="addManualRow"><i class="fas fa-plus"></i> Add Manual Data</button>
-            <button class="small mt-2 danger-btn" @click="clearLedger"><i class="fas fa-trash-alt"></i> Reset All Memory</button>
+            <button class="small mt-2 danger-btn" @click="clearLedger"><i class="fas fa-trash-alt"></i> Reset Predictor Memory</button>
           </div>
         </div>
       </div>
@@ -498,38 +498,78 @@ const removeRow = async (index, exp) => {
   renderPlot();
 }
 
+// Scoped Memory Wipe Logic
 const clearLedger = async () => {
-  if (!confirm("Are you sure you want to wipe all known data? This will delete all memory from the database.")) return;
-  const { error } = await db.from('phase_data').delete().not('id', 'is', null);
-  if (!error) {
-    experiments.value = [];
-    renderPlot();
+  if (!confirm("Are you sure you want to wipe all known data for this predictor?")) return;
+  
+  const idsToDelete = experiments.value.filter(e => e.id).map(e => e.id);
+  if (idsToDelete.length > 0) {
+     const { error } = await db.from('phase_data').delete().in('id', idsToDelete);
+     if (!error) {
+        experiments.value = [];
+        renderPlot();
+     } else {
+        alert("Failed to clear database.");
+     }
   } else {
-    alert("Failed to clear database.");
+     experiments.value = [];
+     renderPlot();
   }
 }
 
+// Smart Upsert Logic for Single Target
 const importSuggestion = async (sug) => {
-  const { data, error } = await db.from('phase_data').insert([{ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }]).select()
-  if(!error && data) { 
-    experiments.value.push(data[0]); 
-    suggestions.value = suggestions.value.filter(s => s.sampleId !== sug.sampleId); 
-    if(suggestions.value.length === 0) clearImport() 
+  const existing = experiments.value.find(e => e.sampleId === sug.sampleId);
+  if (existing && existing.id) {
+     const { error } = await db.from('phase_data')
+        .update({ phase: sug.phase, anion: sug.anion, cation: sug.cation, salt: sug.salt })
+        .eq('id', existing.id);
+     if (!error) {
+         existing.phase = sug.phase;
+         existing.anion = sug.anion;
+         existing.cation = sug.cation;
+         existing.salt = sug.salt;
+     }
+  } else {
+     const { data, error } = await db.from('phase_data')
+        .insert([{ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }])
+        .select();
+     if (!error && data && data.length > 0) experiments.value.push(data[0]);
   }
+  suggestions.value = suggestions.value.filter(s => s.sampleId !== sug.sampleId); 
+  if(suggestions.value.length === 0) clearImport();
+  renderPlot();
 }
 
+// Smart Upsert Logic for Entire Queue
 const importAllSuggestions = async () => {
-  const payload = suggestions.value.map(sug => ({ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }));
-  const { data, error } = await db.from('phase_data').insert(payload).select()
-  if(!error && data) { 
-    experiments.value.push(...data); 
-    suggestions.value = []; 
-    clearImport() 
+  for (const sug of suggestions.value) {
+    const existing = experiments.value.find(e => e.sampleId === sug.sampleId);
+    if (existing && existing.id) {
+       const { error } = await db.from('phase_data')
+          .update({ phase: sug.phase, anion: sug.anion, cation: sug.cation, salt: sug.salt })
+          .eq('id', existing.id);
+       if (!error) {
+          existing.phase = sug.phase;
+          existing.anion = sug.anion;
+          existing.cation = sug.cation;
+          existing.salt = sug.salt;
+       }
+    } else {
+       const { data, error } = await db.from('phase_data')
+          .insert([{ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }])
+          .select();
+       if (!error && data && data.length > 0) experiments.value.push(data[0]);
+    }
   }
+  suggestions.value = []; 
+  clearImport();
+  renderPlot();
 }
 
 const triggerFileInput = () => { if (csvInput.value) csvInput.value.click() }
 
+// Strict Tested Filter
 const handleFileUpload = (event) => {
   const file = event.target.files[0]; if (!file) return;
   importedFileName.value = file.name;
@@ -543,7 +583,6 @@ const handleFileUpload = (event) => {
           let rawPhase = parseInt(cols[4]);
           let phaseVal = isNaN(rawPhase) ? -1 : rawPhase; 
           
-          // STRICT FILTER: Only extract tested points into memory
           if (phaseVal === 1 || phaseVal === 0) {
               newSuggestions.push({ 
                   sampleId: parseInt(cols[0], 10), 
@@ -566,8 +605,7 @@ const calculateNextExperiments = async () => {
   isCalculating.value = true; 
   clearImport();
   
-  // Dynamically find the highest Sample ID so the next plate stacks properly
-  let maxId = 8999; // Base starting point if no data exists
+  let maxId = 8999;
   experiments.value.forEach(e => {
     if (e.sampleId && !isNaN(e.sampleId) && e.sampleId > maxId) {
       maxId = e.sampleId;

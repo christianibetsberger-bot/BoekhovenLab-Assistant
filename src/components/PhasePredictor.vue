@@ -471,6 +471,7 @@ const renderPlot = () => {
 
   const traces = [traceCoacervate, traceClear, traceUnknown, traceTarget];
 
+  // FIX: Structurally corrected Plotly Isosurface object to prevent rendering crashes
   if (boundaryData.value && showBoundary.value) {
       const traceSurface = {
           type: 'isosurface',
@@ -478,12 +479,13 @@ const renderPlot = () => {
           y: boundaryData.value.y,
           z: boundaryData.value.z,
           value: boundaryData.value.prob,
-          isomin: 0.4,
-          isomax: 0.6,
-          surface: { show: true, count: 3, fill: 0.7 },
-          colorscale: 'Blues',
+          isomin: 0.45,
+          isomax: 0.55,
+          surface: { show: true, count: 2 },
+          opacity: 0.6,
+          colorscale: 'YlOrRd', // Implemented the requested Fire gradient!
           caps: { x: {show: false}, y: {show: false}, z: {show: false} },
-          name: 'AI Phase Boundary',
+          name: 'Phase Boundary (50%)',
           showscale: false,
           hoverinfo: 'none'
       };
@@ -517,7 +519,7 @@ const updateExperiment = async (exp) => {
   await db.from('phase_data').update({ phase: exp.phase, anion: exp.anion, cation: exp.cation, salt: exp.salt }).eq('id', exp.id); renderPlot()
 }
 
-const addManualRow = () => { experiments.value.push({ sampleId: Math.floor(Math.random() * 500), anion: 0, cation: 0, salt: 0, phase: -1 }) }
+const addManualRow = () => { experiments.value.push({ sampleId: Math.floor(Math.random() * 9000), anion: 0, cation: 0, salt: 0, phase: -1 }) }
 
 const removeRow = async (index, exp) => {
   experiments.value.splice(index, 1);
@@ -567,32 +569,50 @@ const importAllSuggestions = async () => {
   }
 }
 
-// --- MACHIAVELLIAN CSV INJECTION ---
+// --- DYNAMIC MACHIAVELLIAN CSV INJECTION ---
 const triggerFileInput = () => { if (csvInput.value) csvInput.value.click() }
 
 const handleFileUpload = (event) => {
   const file = event.target.files[0]; if (!file) return;
   const reader = new FileReader();
+  
   reader.onload = async (e) => {
     const text = e.target.result; 
-    const lines = text.split('\n').filter(line => line.trim() !== '');
+    const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
     if (lines.length < 2) return;
     
-    // Dynamic Delimiter Detection (Solves European Excel CSV issues)
+    // Dynamic Delimiter Detection
     const delimiter = lines[0].includes(';') ? ';' : ',';
+    
+    // Dynamic Header Mapping (Immune to empty Index columns or shifted Pandas exports)
+    const headers = lines[0].split(delimiter).map(s => s.trim().toLowerCase());
+    
+    let idxId = headers.findIndex(h => h === '' || h === 'index' || h === 'sampleid');
+    let idxA = headers.indexOf('anion');
+    let idxB = headers.indexOf('cation');
+    let idxC = headers.indexOf('salt');
+    let idxPhase = headers.indexOf('phase');
+    
+    // Safety Fallbacks
+    if (idxId === -1) idxId = 0;
+    if (idxA === -1) idxA = 1;
+    if (idxB === -1) idxB = 2;
+    if (idxC === -1) idxC = 3;
+    if (idxPhase === -1) idxPhase = 4;
+    
     const newKnowns = [];
     
     for (let i = 1; i < lines.length; i++) {
       const cols = lines[i].split(delimiter);
-      if (cols.length >= 5) { 
-          let sId = parseInt(cols[0], 10);
-          let a = parseFloat(cols[1]);
-          let b = parseFloat(cols[2]);
-          let c = parseFloat(cols[3]);
-          let rawPhase = parseInt(cols[4], 10); 
+      if (cols.length > Math.max(idxA, idxB, idxC, idxPhase)) { 
+          let sId = parseInt(cols[idxId], 10);
+          let a = parseFloat(cols[idxA]);
+          let b = parseFloat(cols[idxB]);
+          let c = parseFloat(cols[idxC]);
+          let rawPhase = parseInt(cols[idxPhase], 10); 
           
-          // Ruthlessly filter out NaN strings that crash the Supabase integration
-          if (isNaN(sId) || isNaN(a) || isNaN(b) || isNaN(c) || isNaN(rawPhase)) continue;
+          if (isNaN(sId)) sId = Math.floor(Math.random() * 9000); 
+          if (isNaN(a) || isNaN(b) || isNaN(c) || isNaN(rawPhase)) continue;
 
           // STRICT FILTER: Only load historical tested data
           if (rawPhase === 1 || rawPhase === 0) {
@@ -609,14 +629,22 @@ const handleFileUpload = (event) => {
     event.target.value = ''; 
 
     if (newKnowns.length > 0) {
-        const existingIds = new Set(experiments.value.map(exp => exp.sampleId));
-        const toInsert = newKnowns.filter(k => !existingIds.has(k.sampleId));
+        const uniqueToInsert = [];
+        const seenIds = new Set(experiments.value.map(exp => exp.sampleId));
 
-        if (toInsert.length > 0) {
-            const { error } = await db.from('phase_data').insert(toInsert);
+        // Deduplicate ruthlessly within the CSV itself to prevent Supabase constraint crashes
+        for (let k of newKnowns) {
+            if (!seenIds.has(k.sampleId)) {
+                uniqueToInsert.push(k);
+                seenIds.add(k.sampleId);
+            }
+        }
+
+        if (uniqueToInsert.length > 0) {
+            const { error } = await db.from('phase_data').insert(uniqueToInsert);
             if (!error) {
                 await fetchExperiments();
-                alert(`Successfully imported ${toInsert.length} historical data points into the Ledger!`);
+                alert(`Successfully imported ${uniqueToInsert.length} historical data points into the Ledger!`);
             } else {
                 console.error("Supabase Error:", error);
                 alert("Error logging CSV data to Supabase. Check console.");
@@ -625,7 +653,7 @@ const handleFileUpload = (event) => {
             alert("All tested points in this CSV are already loaded in the Ledger.");
         }
     } else {
-        alert("No tested points (Phase 1 or 0) were found in the uploaded CSV.");
+        alert("No valid tested points (Phase 1 or 0) were found in the uploaded CSV.");
     }
   }
   reader.readAsText(file)

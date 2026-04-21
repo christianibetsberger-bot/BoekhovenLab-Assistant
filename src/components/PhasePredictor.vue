@@ -471,7 +471,6 @@ const renderPlot = () => {
 
   const traces = [traceCoacervate, traceClear, traceUnknown, traceTarget];
 
-  // Inject the AI Boundary Surface
   if (boundaryData.value && showBoundary.value) {
       const traceSurface = {
           type: 'isosurface',
@@ -479,9 +478,9 @@ const renderPlot = () => {
           y: boundaryData.value.y,
           z: boundaryData.value.z,
           value: boundaryData.value.prob,
-          isomin: 0.45,  // We only want to draw the surface where probability is around 50%
-          isomax: 0.55,
-          surface: { show: true, count: 2, fill: 0.7 }, // 0.7 makes it beautifully translucent
+          isomin: 0.4,
+          isomax: 0.6,
+          surface: { show: true, count: 3, fill: 0.7 },
           colorscale: 'Blues',
           caps: { x: {show: false}, y: {show: false}, z: {show: false} },
           name: 'AI Phase Boundary',
@@ -568,7 +567,7 @@ const importAllSuggestions = async () => {
   }
 }
 
-// --- CSV INJECTION ---
+// --- MACHIAVELLIAN CSV INJECTION ---
 const triggerFileInput = () => { if (csvInput.value) csvInput.value.click() }
 
 const handleFileUpload = (event) => {
@@ -577,30 +576,39 @@ const handleFileUpload = (event) => {
   reader.onload = async (e) => {
     const text = e.target.result; 
     const lines = text.split('\n').filter(line => line.trim() !== '');
+    if (lines.length < 2) return;
+    
+    // Dynamic Delimiter Detection (Solves European Excel CSV issues)
+    const delimiter = lines[0].includes(';') ? ';' : ',';
     const newKnowns = [];
     
     for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(',');
-      if (cols.length >= 4) { 
-          let rawPhase = parseInt(cols[4]);
-          let phaseVal = isNaN(rawPhase) ? -1 : rawPhase; 
+      const cols = lines[i].split(delimiter);
+      if (cols.length >= 5) { 
+          let sId = parseInt(cols[0], 10);
+          let a = parseFloat(cols[1]);
+          let b = parseFloat(cols[2]);
+          let c = parseFloat(cols[3]);
+          let rawPhase = parseInt(cols[4], 10); 
           
+          // Ruthlessly filter out NaN strings that crash the Supabase integration
+          if (isNaN(sId) || isNaN(a) || isNaN(b) || isNaN(c) || isNaN(rawPhase)) continue;
+
           // STRICT FILTER: Only load historical tested data
-          if (phaseVal === 1 || phaseVal === 0) {
+          if (rawPhase === 1 || rawPhase === 0) {
               newKnowns.push({ 
-                  sampleId: parseInt(cols[0], 10), 
-                  anion: Number(parseFloat(cols[1]).toFixed(2)), 
-                  cation: Number(parseFloat(cols[2]).toFixed(2)), 
-                  salt: Number(parseFloat(cols[3]).toFixed(1)), 
-                  phase: phaseVal 
+                  sampleId: sId, 
+                  anion: Number(a.toFixed(2)), 
+                  cation: Number(b.toFixed(2)), 
+                  salt: Number(c.toFixed(1)), 
+                  phase: rawPhase 
               }) 
           }
       }
     }
-    event.target.value = ''; // Reset input
+    event.target.value = ''; 
 
     if (newKnowns.length > 0) {
-        // Prevent Supabase constraint collisions by filtering out IDs already in our memory
         const existingIds = new Set(experiments.value.map(exp => exp.sampleId));
         const toInsert = newKnowns.filter(k => !existingIds.has(k.sampleId));
 

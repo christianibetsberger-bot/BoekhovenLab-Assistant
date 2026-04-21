@@ -2,311 +2,260 @@
   <div class="card module-card" @click="activeDropdown = null">
     <div class="full-width-header">
       <h2 style="display: flex; align-items: center; gap: 10px;">
-        <i class="fas fa-microscope"></i> Active Learning Phase Predictor
+        <i class="fas fa-brain"></i> Active Learning Phase Predictor
       </h2>
       <p style="font-size: 0.85rem; opacity: 0.8; margin-top: 5px;">
-        Map your chemical phase space using smart experimental design.
+        Map chemical phase space and calculate pipetting volumes using smart experimental design.
       </p>
     </div>
 
-    <div class="predictor-internal-grid">
+    <div class="layout-columns">
       
-      <div class="internal-section">
-        <h3>1. Search Space & Inventory Config</h3>
-        <p style="font-size: 0.8rem; opacity: 0.7; margin-bottom: 10px;">
-          Assign inventory stocks to the coordinates.
-        </p>
-        
-        <div class="config-grid-complex">
-          <div class="input-group">
-            <label>Component A (Anion)</label>
-            <div style="display: flex; gap: 5px; align-items: flex-end;">
-              <div style="flex: 2; position: relative;" @click.stop>
-                <div 
-                  @click="activeDropdown = activeDropdown === 'anion' ? null : 'anion'" 
-                  class="inventory-select-box"
-                >
-                  <span class="truncate-text">{{ config.anionName || 'Search inventory...' }}</span>
-                  <i class="fas fa-search" style="font-size: 0.7rem; opacity: 0.5;"></i>
-                </div>
-                <div v-if="activeDropdown === 'anion'" class="inventory-dropdown">
-                  <div class="dropdown-scope-selector">
-                    <label class="checkbox-label"><input type="radio" value="Global" v-model="config.anionSearchScope"> Global</label>
-                    <label class="checkbox-label"><input type="radio" value="Personal" v-model="config.anionSearchScope"> Personal</label>
-                  </div>
-                  <div class="dropdown-search">
-                    <input type="text" v-model="config.anionSearchQuery" placeholder="Filter inventory..." @click.stop>
-                    <button class="small" @click="config.anionName = config.anionSearchQuery; activeDropdown = null; renderPlot()">Use Text</button>
-                  </div>
-                  <div class="dropdown-results">
-                    <div 
-                      v-for="inv in filterBlockInventory(config.anionSearchQuery, config.anionSearchScope)" 
-                      :key="inv.id" 
-                      class="dropdown-item"
-                      @mousedown.prevent="config.anionName = '[' + inv.code + '] ' + inv.name; activeDropdown = null; renderPlot()"
-                    >
-                      [{{ inv.code }}] {{ inv.name }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <input type="number" v-model="config.anionMax" @change="renderPlot" style="flex: 0.8;" title="Max Concentration (mM)" placeholder="Max mM" />
-            </div>
-          </div>
-          
-          <div class="input-group">
-            <label>Component B (Cation)</label>
-            <div style="display: flex; gap: 5px; align-items: flex-end;">
-              <div style="flex: 2; position: relative;" @click.stop>
-                <div 
-                  @click="activeDropdown = activeDropdown === 'cation' ? null : 'cation'" 
-                  class="inventory-select-box"
-                >
-                  <span class="truncate-text">{{ config.cationName || 'Search inventory...' }}</span>
-                  <i class="fas fa-search" style="font-size: 0.7rem; opacity: 0.5;"></i>
-                </div>
-                <div v-if="activeDropdown === 'cation'" class="inventory-dropdown">
-                  <div class="dropdown-scope-selector">
-                    <label class="checkbox-label"><input type="radio" value="Global" v-model="config.cationSearchScope"> Global</label>
-                    <label class="checkbox-label"><input type="radio" value="Personal" v-model="config.cationSearchScope"> Personal</label>
-                  </div>
-                  <div class="dropdown-search">
-                    <input type="text" v-model="config.cationSearchQuery" placeholder="Filter inventory..." @click.stop>
-                    <button class="small" @click="config.cationName = config.cationSearchQuery; activeDropdown = null; renderPlot()">Use Text</button>
-                  </div>
-                  <div class="dropdown-results">
-                    <div 
-                      v-for="inv in filterBlockInventory(config.cationSearchQuery, config.cationSearchScope)" 
-                      :key="inv.id" 
-                      class="dropdown-item"
-                      @mousedown.prevent="config.cationName = '[' + inv.code + '] ' + inv.name; activeDropdown = null; renderPlot()"
-                    >
-                      [{{ inv.code }}] {{ inv.name }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <input type="number" v-model="config.cationMax" @change="renderPlot" style="flex: 0.8;" title="Max Concentration (mM)" placeholder="Max mM" />
-            </div>
-          </div>
-          
-          <div class="input-group">
-            <label>Component C (Salt/Buffer)</label>
-            <div style="display: flex; gap: 5px; align-items: flex-end;">
-              <div style="flex: 2; position: relative;" @click.stop>
-                <div 
-                  @click="activeDropdown = activeDropdown === 'salt' ? null : 'salt'" 
-                  class="inventory-select-box"
-                >
-                  <span class="truncate-text">{{ config.saltName || 'Search inventory...' }}</span>
-                  <i class="fas fa-search" style="font-size: 0.7rem; opacity: 0.5;"></i>
-                </div>
-                <div v-if="activeDropdown === 'salt'" class="inventory-dropdown">
-                  <div class="dropdown-scope-selector">
-                    <label class="checkbox-label"><input type="radio" value="Global" v-model="config.saltSearchScope"> Global</label>
-                    <label class="checkbox-label"><input type="radio" value="Personal" v-model="config.saltSearchScope"> Personal</label>
-                  </div>
-                  <div class="dropdown-search">
-                    <input type="text" v-model="config.saltSearchQuery" placeholder="Filter inventory..." @click.stop>
-                    <button class="small" @click="config.saltName = config.saltSearchQuery; activeDropdown = null; renderPlot()">Use Text</button>
-                  </div>
-                  <div class="dropdown-results">
-                    <div 
-                      v-for="inv in filterBlockInventory(config.saltSearchQuery, config.saltSearchScope)" 
-                      :key="inv.id" 
-                      class="dropdown-item"
-                      @mousedown.prevent="config.saltName = '[' + inv.code + '] ' + inv.name; activeDropdown = null; renderPlot()"
-                    >
-                      [{{ inv.code }}] {{ inv.name }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <input type="number" v-model="config.saltMax" @change="renderPlot" style="flex: 0.8;" title="Max Concentration (mM)" placeholder="Max mM" />
-            </div>
-          </div>
-        </div>
-
-        <h3 class="mt-4">2. Experiment Ledger</h3>
-        <div class="ledger-table-container">
-          <table class="ledger-table">
-            <thead>
-              <tr>
-                <th>A (mM)</th>
-                <th>B (mM)</th>
-                <th>C (mM)</th>
-                <th>Result</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(exp, index) in experiments" :key="exp.id || index">
-                <td><input type="number" v-model="exp.anion" @change="updateExperiment(exp)" class="small-input" /></td>
-                <td><input type="number" v-model="exp.cation" @change="updateExperiment(exp)" class="small-input" /></td>
-                <td><input type="number" v-model="exp.salt" @change="updateExperiment(exp)" class="small-input" /></td>
-                <td>
-                  <select 
-                    v-model="exp.phase" 
-                    @change="updateExperiment(exp)" 
-                    class="small-select" 
-                    :class="{'bg-green-hit': exp.phase === 1, 'bg-red-miss': exp.phase === 0}"
-                  >
-                    <option :value="-1">Untested</option>
-                    <option :value="0">Clear</option>
-                    <option :value="1">Coacervate</option>
-                  </select>
-                </td>
-                <td>
-                  <button class="clear-btn" @click="removeRow(index, exp)" title="Remove Row">
-                    <i class="fas fa-trash"></i>
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <button class="small mt-2" @click="addManualRow">
-            <i class="fas fa-plus"></i> Add Manual Data Point
-          </button>
-        </div>
-      </div>
-
-      <div class="internal-section full-width-section" style="display: flex; flex-direction: column;">
-        <h3>Phase Map (3D Space)</h3>
-        <div class="plot-area">
-          <div id="phase-ternary-plot" style="width: 100%; height: 100%;"></div>
-        </div>
-      </div>
-
-      <div class="internal-section">
-        <h3>3. Active Learning Engine</h3>
-        <p class="engine-desc" style="font-size: 0.85rem; opacity: 0.8; margin-bottom: 20px;">
-          Define phase boundaries with automated 96-well suggestions.
-        </p>
-        
-        <div class="engine-actions-grid">
-          <button class="action-btn auto-btn" @click="calculateNextExperiments" :disabled="isCalculating">
-            <i class="fas" :class="isCalculating ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
-            <span>{{ isCalculating ? 'Calculating...' : 'Auto-Suggest Plate' }}</span>
-          </button>
-
-          <button class="action-btn import-btn" @click="triggerFileInput">
-            <i class="fas fa-file-csv"></i>
-            <span>Import CSV</span>
-          </button>
-          <input type="file" ref="csvInput" accept=".csv" style="display: none" @change="handleFileUpload" />
-        </div>
-
-        <div v-if="importedFileName" class="imported-file-badge">
+      <div class="col-left">
+        <div class="internal-section">
           <div class="flex-between">
-            <span class="truncate-text"><i class="fas fa-file-csv"></i> {{ importedFileName }}</span>
-            <button class="clear-btn" @click="clearImport" title="Clear Import"><i class="fas fa-times"></i></button>
-          </div>
-          <div style="font-size: 0.7rem; margin-top: 4px; opacity: 0.8;">{{ totalImportedCount }} coordinates loaded.</div>
-        </div>
-
-        <div class="suggestions-container" v-if="suggestions.length > 0">
-          <div class="flex-between" style="margin-bottom: 10px;">
-            <h4 class="priority-label" style="margin-bottom: 0; border: none; padding: 0;">Target Queue:</h4>
-            <button class="small success-btn" @click="importAllSuggestions" style="width: auto; margin-top: 0; padding: 6px 12px;">
-              <i class="fas fa-save"></i> Log All Targets
-            </button>
+            <h3>1. Search Space & Volumes</h3>
+            <div class="target-vol-input">
+              <label>Target Well Vol (µL):</label>
+              <input type="number" v-model="config.targetVolume" @change="renderPlot" title="Total Volume per well in µL" />
+            </div>
           </div>
           
-          <div style="max-height: 250px; overflow-y: auto; padding-right: 8px;">
-            <div class="suggestion-card" v-for="(sug, index) in suggestions" :key="index">
-              <div class="sug-data">
-                <div class="sug-id" v-if="sug.sampleId">ID: {{ sug.sampleId }}</div>
-                <strong>A:</strong> {{ sug.anion }} | <strong>B:</strong> {{ sug.cation }} | <strong>C:</strong> {{ sug.salt }}
-                <div v-if="sug.phase === 1" class="sug-hit-badge">HIT DETECTED IN FILE</div>
-                <div v-else-if="sug.phase === 0" style="color: #ef4444; font-size: 0.7rem; font-weight: bold; margin-top: 5px;">CLEAR DETECTED IN FILE</div>
-                <div v-else style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; margin-top: 5px;">UNTESTED POINT</div>
+          <div class="config-grid-complex">
+            <div class="input-group">
+              <label>Component A (Anion)</label>
+              <div style="display: flex; gap: 5px; align-items: flex-end;">
+                <div style="flex: 2; position: relative;" @click.stop>
+                  <div @click="activeDropdown = activeDropdown === 'anion' ? null : 'anion'" class="inventory-select-box">
+                    <span class="truncate-text">{{ config.anionName || 'Search inventory...' }}</span>
+                    <i class="fas fa-search" style="font-size: 0.7rem; opacity: 0.5;"></i>
+                  </div>
+                  <div v-if="activeDropdown === 'anion'" class="inventory-dropdown">
+                    <div class="dropdown-scope-selector">
+                      <label class="checkbox-label"><input type="radio" value="Global" v-model="config.anionSearchScope"> Global</label>
+                      <label class="checkbox-label"><input type="radio" value="Personal" v-model="config.anionSearchScope"> Personal</label>
+                    </div>
+                    <div class="dropdown-search">
+                      <input type="text" v-model="config.anionSearchQuery" placeholder="Filter inventory..." @click.stop>
+                      <button class="small" @click="config.anionName = config.anionSearchQuery; activeDropdown = null; renderPlot()">Text</button>
+                    </div>
+                    <div class="dropdown-results">
+                      <div v-for="inv in filterBlockInventory(config.anionSearchQuery, config.anionSearchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="config.anionName = '[' + inv.code + '] ' + inv.name; activeDropdown = null; renderPlot()">
+                        [{{ inv.code }}] {{ inv.name }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <input type="number" v-model="config.anionMax" @change="renderPlot" style="flex: 0.7;" title="Max Target (mM)" placeholder="Max mM" />
+                <input type="number" v-model="config.stockAnion" style="flex: 0.7;" title="Stock Conc (mM)" placeholder="Stock mM" />
               </div>
-              <button class="small success-btn" @click="importSuggestion(sug)">
-                <i class="fas fa-save"></i> Log Result
+            </div>
+            
+            <div class="input-group">
+              <label>Component B (Cation)</label>
+              <div style="display: flex; gap: 5px; align-items: flex-end;">
+                <div style="flex: 2; position: relative;" @click.stop>
+                  <div @click="activeDropdown = activeDropdown === 'cation' ? null : 'cation'" class="inventory-select-box">
+                    <span class="truncate-text">{{ config.cationName || 'Search inventory...' }}</span>
+                    <i class="fas fa-search" style="font-size: 0.7rem; opacity: 0.5;"></i>
+                  </div>
+                  <div v-if="activeDropdown === 'cation'" class="inventory-dropdown">
+                    <div class="dropdown-scope-selector">
+                      <label class="checkbox-label"><input type="radio" value="Global" v-model="config.cationSearchScope"> Global</label>
+                      <label class="checkbox-label"><input type="radio" value="Personal" v-model="config.cationSearchScope"> Personal</label>
+                    </div>
+                    <div class="dropdown-search">
+                      <input type="text" v-model="config.cationSearchQuery" placeholder="Filter inventory..." @click.stop>
+                      <button class="small" @click="config.cationName = config.cationSearchQuery; activeDropdown = null; renderPlot()">Text</button>
+                    </div>
+                    <div class="dropdown-results">
+                      <div v-for="inv in filterBlockInventory(config.cationSearchQuery, config.cationSearchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="config.cationName = '[' + inv.code + '] ' + inv.name; activeDropdown = null; renderPlot()">
+                        [{{ inv.code }}] {{ inv.name }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <input type="number" v-model="config.cationMax" @change="renderPlot" style="flex: 0.7;" title="Max Target (mM)" placeholder="Max mM" />
+                <input type="number" v-model="config.stockCation" style="flex: 0.7;" title="Stock Conc (mM)" placeholder="Stock mM" />
+              </div>
+            </div>
+            
+            <div class="input-group">
+              <label>Component C (Salt/Buffer)</label>
+              <div style="display: flex; gap: 5px; align-items: flex-end;">
+                <div style="flex: 2; position: relative;" @click.stop>
+                  <div @click="activeDropdown = activeDropdown === 'salt' ? null : 'salt'" class="inventory-select-box">
+                    <span class="truncate-text">{{ config.saltName || 'Search inventory...' }}</span>
+                    <i class="fas fa-search" style="font-size: 0.7rem; opacity: 0.5;"></i>
+                  </div>
+                  <div v-if="activeDropdown === 'salt'" class="inventory-dropdown">
+                    <div class="dropdown-scope-selector">
+                      <label class="checkbox-label"><input type="radio" value="Global" v-model="config.saltSearchScope"> Global</label>
+                      <label class="checkbox-label"><input type="radio" value="Personal" v-model="config.saltSearchScope"> Personal</label>
+                    </div>
+                    <div class="dropdown-search">
+                      <input type="text" v-model="config.saltSearchQuery" placeholder="Filter inventory..." @click.stop>
+                      <button class="small" @click="config.saltName = config.saltSearchQuery; activeDropdown = null; renderPlot()">Text</button>
+                    </div>
+                    <div class="dropdown-results">
+                      <div v-for="inv in filterBlockInventory(config.saltSearchQuery, config.saltSearchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="config.saltName = '[' + inv.code + '] ' + inv.name; activeDropdown = null; renderPlot()">
+                        [{{ inv.code }}] {{ inv.name }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <input type="number" v-model="config.saltMax" @change="renderPlot" style="flex: 0.7;" title="Max Target (mM)" placeholder="Max mM" />
+                <input type="number" v-model="config.stockSalt" style="flex: 0.7;" title="Stock Conc (mM)" placeholder="Stock mM" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="internal-section" style="flex-grow: 1;">
+          <h3>2. Experiment Ledger</h3>
+          <div class="ledger-table-container">
+            <table class="ledger-table">
+              <thead>
+                <tr>
+                  <th>A (mM)</th>
+                  <th>B (mM)</th>
+                  <th>C (mM)</th>
+                  <th>Result</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(exp, index) in experiments" :key="exp.id || index">
+                  <td><input type="number" v-model="exp.anion" @change="updateExperiment(exp)" class="small-input" /></td>
+                  <td><input type="number" v-model="exp.cation" @change="updateExperiment(exp)" class="small-input" /></td>
+                  <td><input type="number" v-model="exp.salt" @change="updateExperiment(exp)" class="small-input" /></td>
+                  <td>
+                    <select v-model="exp.phase" @change="updateExperiment(exp)" class="small-select" :class="{'bg-green-hit': exp.phase === 1, 'bg-red-miss': exp.phase === 0}">
+                      <option :value="-1">Untested</option>
+                      <option :value="0">Clear</option>
+                      <option :value="1">Coacervate</option>
+                    </select>
+                  </td>
+                  <td>
+                    <button class="clear-btn" @click="removeRow(index, exp)" title="Remove Row"><i class="fas fa-trash"></i></button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <button class="small mt-2" @click="addManualRow"><i class="fas fa-plus"></i> Add Manual Data</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-right">
+        <div class="internal-section" style="display: flex; flex-direction: column;">
+          <h3>3. Phase Map (3D Space)</h3>
+          <div class="plot-area">
+            <div id="phase-ternary-plot" style="width: 100%; height: 100%;"></div>
+          </div>
+        </div>
+
+        <div class="internal-section">
+          <h3>4. Active Learning Engine</h3>
+          <div class="engine-actions-grid">
+            <button class="action-btn auto-btn" @click="calculateNextExperiments" :disabled="isCalculating">
+              <i class="fas" :class="isCalculating ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
+              <span>{{ isCalculating ? 'Calculating...' : 'Auto-Suggest Plate' }}</span>
+            </button>
+            <button class="action-btn import-btn" @click="triggerFileInput">
+              <i class="fas fa-file-csv"></i> <span>Import CSV</span>
+            </button>
+            <input type="file" ref="csvInput" accept=".csv" style="display: none" @change="handleFileUpload" />
+          </div>
+
+          <div v-if="importedFileName" class="imported-file-badge">
+            <div class="flex-between">
+              <span class="truncate-text"><i class="fas fa-file-csv"></i> {{ importedFileName }}</span>
+              <button class="clear-btn" @click="clearImport" title="Clear Import"><i class="fas fa-times"></i></button>
+            </div>
+            <div style="font-size: 0.7rem; margin-top: 4px; opacity: 0.8;">{{ totalImportedCount }} coordinates loaded.</div>
+          </div>
+
+          <div class="suggestions-container" v-if="suggestions.length > 0">
+            <div class="flex-between" style="margin-bottom: 5px;">
+              <h4 class="priority-label" style="margin-bottom: 0; border: none; padding: 0;">Target Queue:</h4>
+              <button class="small success-btn" @click="importAllSuggestions" style="width: auto; margin-top: 0; padding: 6px 12px;">
+                <i class="fas fa-save"></i> Log All
               </button>
             </div>
+            <div style="max-height: 150px; overflow-y: auto; padding-right: 8px; font-size: 0.8rem;">
+              <div class="suggestion-card" v-for="(sug, index) in suggestions" :key="index" style="padding: 10px;">
+                <div class="flex-between">
+                  <div>
+                    <span class="sug-id" v-if="sug.sampleId">ID: {{ sug.sampleId }}</span>
+                    A: {{ sug.anion }} | B: {{ sug.cation }} | C: {{ sug.salt }}
+                  </div>
+                  <button class="small success-btn" @click="importSuggestion(sug)" style="width: auto; margin:0; padding: 4px 8px;">Log</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
+    </div>
 
-      <div class="internal-section full-width-section" v-if="existingPlateData.length > 0 || suggestions.length > 0">
-        <h3>4. Wet Lab Mapping: 96-Well Plate Views</h3>
-        <p style="font-size: 0.8rem; opacity: 0.7; margin-bottom: 15px;">
-          Sorted by Sample ID. <span style="color: #10b981; font-weight: bold;">Green = Hit</span>, 
-          <span style="color: #ef4444; font-weight: bold;">Red = Miss</span>, 
-          <span style="color: #3b82f6; font-weight: bold;">Blue = AI Target</span>.
-        </p>
-
-        <div style="display: flex; flex-wrap: wrap; gap: 20px; justify-content: center;">
-            <div class="well-plate-wrapper" v-if="existingPlateData.length > 0">
-              <h4 style="text-align: center; color: var(--primary, #3b82f6); margin-top: 0;">Known Data Map</h4>
-              <div class="well-plate">
-                <div class="plate-header-row">
-                  <div class="plate-corner"></div>
-                  <div class="plate-col-labels">
-                    <div v-for="c in 12" :key="'col'+c" class="col-label">{{ c }}</div>
-                  </div>
-                </div>
-                
-                <div v-for="(rowLabel, rIndex) in plateRows" :key="'row'+rIndex" class="plate-row-wrapper">
-                  <div class="row-label">{{ rowLabel }}</div>
-                  <div class="plate-row">
-                    <div 
-                      v-for="cIndex in 12" 
-                      :key="'well'+rIndex+'-'+cIndex"
-                      class="well"
-                      :class="getWellStatusClass(existingPlateData, rIndex, cIndex - 1)"
-                      :title="getWellTooltip(existingPlateData, rIndex, cIndex - 1)"
-                    >
-                      <span class="well-id">{{ getWellSample(existingPlateData, rIndex, cIndex - 1)?.sampleId || '' }}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="well-plate-wrapper" v-if="suggestedPlateData.length > 0">
-              <h4 style="text-align: center; color: #8b5cf6; margin-top: 0;">AI Generated Plate</h4>
-              <div class="well-plate">
-                <div class="plate-header-row">
-                  <div class="plate-corner"></div>
-                  <div class="plate-col-labels">
-                    <div v-for="c in 12" :key="'col'+c" class="col-label">{{ c }}</div>
-                  </div>
-                </div>
-                
-                <div v-for="(rowLabel, rIndex) in plateRows" :key="'row'+rIndex" class="plate-row-wrapper">
-                  <div class="row-label">{{ rowLabel }}</div>
-                  <div class="plate-row">
-                    <div 
-                      v-for="cIndex in 12" 
-                      :key="'well'+rIndex+'-'+cIndex"
-                      class="well"
-                      :class="getWellStatusClass(suggestedPlateData, rIndex, cIndex - 1)"
-                      :title="getWellTooltip(suggestedPlateData, rIndex, cIndex - 1)"
-                    >
-                      <span class="well-id">{{ getWellSample(suggestedPlateData, rIndex, cIndex - 1)?.sampleId || '' }}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed var(--border-color, #475569); display: flex; align-items: center; justify-content: center; gap: 10px;">
-                  <span style="font-size: 0.85rem; font-weight: bold; opacity: 0.7;">Send to Plate:</span>
-                  <select v-model="targetPlateId" style="width: 130px; padding: 6px; background: transparent; color: inherit; border: 1px solid var(--border-color, #475569); border-radius: 4px;">
-                      <option value="" disabled>Select Plate...</option>
-                      <option v-for="p in store.wellPlates" :key="p.id" :value="p.id">{{ p.name }}</option>
-                  </select>
-                  <input type="text" v-model="targetStartWell" placeholder="Start (e.g. A1)" style="width: 100px; padding: 6px; background: transparent; color: inherit; border: 1px solid var(--border-color, #475569); border-radius: 4px;">
-                  <button class="small" @click="exportSuggestionsToPlate" style="background: #8b5cf6; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">
-                      <i class="fas fa-arrow-down"></i> Export
-                  </button>
-              </div>
-
-            </div>
+    <div class="internal-section full-width-section" v-if="existingPlateData.length > 0 || suggestions.length > 0">
+      <div class="flex-between" style="border-bottom: 1px solid var(--border-color, #e2e8f0); padding-bottom: 8px; margin-bottom: 15px;">
+        <h3 style="margin: 0; border: none; padding: 0;">5. Wet Lab Mapping: 96-Well Plates</h3>
+        <div v-if="suggestedPlateData.length > 0" class="export-controls">
+            <span style="font-size: 0.85rem; font-weight: bold; opacity: 0.7;">Export with Volumes:</span>
+            <select v-model="targetPlateId" class="compact-select">
+                <option value="" disabled>Select Plate...</option>
+                <option v-for="p in store.wellPlates" :key="p.id" :value="p.id">{{ p.name }}</option>
+            </select>
+            <input type="text" v-model="targetStartWell" placeholder="A1" class="compact-input">
+            <button class="small" @click="exportSuggestionsToPlate" style="background: #8b5cf6; color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer;">
+                <i class="fas fa-arrow-down"></i> Send
+            </button>
         </div>
       </div>
 
+      <div class="plates-grid">
+          <div class="well-plate-wrapper" v-if="existingPlateData.length > 0">
+            <h4 style="text-align: center; color: #3b82f6; margin-top: 0; font-size: 0.9rem;">Known Data Map</h4>
+            <div class="well-plate">
+              <div class="plate-header-row">
+                <div class="plate-corner"></div>
+                <div class="plate-col-labels">
+                  <div v-for="c in 12" :key="'col'+c" class="col-label">{{ c }}</div>
+                </div>
+              </div>
+              <div v-for="(rowLabel, rIndex) in plateRows" :key="'row'+rIndex" class="plate-row-wrapper">
+                <div class="row-label">{{ rowLabel }}</div>
+                <div class="plate-row">
+                  <div v-for="cIndex in 12" :key="'well'+rIndex+'-'+cIndex" class="well" :class="getWellStatusClass(existingPlateData, rIndex, cIndex - 1)" :title="getWellTooltip(existingPlateData, rIndex, cIndex - 1)">
+                    <span class="well-id">{{ getWellSample(existingPlateData, rIndex, cIndex - 1)?.sampleId || '' }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="well-plate-wrapper" v-if="suggestedPlateData.length > 0">
+            <h4 style="text-align: center; color: #8b5cf6; margin-top: 0; font-size: 0.9rem;">AI / CSV Target Plate</h4>
+            <div class="well-plate">
+              <div class="plate-header-row">
+                <div class="plate-corner"></div>
+                <div class="plate-col-labels">
+                  <div v-for="c in 12" :key="'col'+c" class="col-label">{{ c }}</div>
+                </div>
+              </div>
+              <div v-for="(rowLabel, rIndex) in plateRows" :key="'row'+rIndex" class="plate-row-wrapper">
+                <div class="row-label">{{ rowLabel }}</div>
+                <div class="plate-row">
+                  <div v-for="cIndex in 12" :key="'well'+rIndex+'-'+cIndex" class="well" :class="getWellStatusClass(suggestedPlateData, rIndex, cIndex - 1)" :title="getWellTooltip(suggestedPlateData, rIndex, cIndex - 1)">
+                    <span class="well-id">{{ getWellSample(suggestedPlateData, rIndex, cIndex - 1)?.sampleId || '' }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+      </div>
     </div>
   </div>
 </template>
@@ -325,9 +274,10 @@ const targetStartWell = ref('A1')
 
 // --- State ---
 const config = ref({ 
-  anionName: 'Compound A', anionMax: 6, anionSearchQuery: '', anionSearchScope: 'Global',
-  cationName: 'Compound B', cationMax: 6, cationSearchQuery: '', cationSearchScope: 'Global',
-  saltName: 'Compound C', saltMax: 200, saltSearchQuery: '', saltSearchScope: 'Global'
+  anionName: 'Compound A', anionMax: 6, stockAnion: 100, anionSearchQuery: '', anionSearchScope: 'Global',
+  cationName: 'Compound B', cationMax: 6, stockCation: 100, cationSearchQuery: '', cationSearchScope: 'Global',
+  saltName: 'Compound C', saltMax: 200, stockSalt: 1000, saltSearchQuery: '', saltSearchScope: 'Global',
+  targetVolume: 100 // µL
 })
 
 const experiments = ref([])
@@ -401,11 +351,25 @@ const exportSuggestionsToPlate = () => {
         
         if (targetR < 8 && targetC < 12) {
             let wId = String.fromCharCode(65 + targetR) + (targetC + 1);
-            let cellHtml = `<strong>AI Target [${sug.sampleId}]</strong><br>A: ${sug.anion} mM<br>B: ${sug.cation} mM<br>C: ${sug.salt} mM`;
+            
+            // Volume Calculations (Target Vol * Target Conc / Stock Conc)
+            let vA = ((sug.anion * config.value.targetVolume) / config.value.stockAnion).toFixed(2);
+            let vB = ((sug.cation * config.value.targetVolume) / config.value.stockCation).toFixed(2);
+            let vC = ((sug.salt * config.value.targetVolume) / config.value.stockSalt).toFixed(2);
+            let vTotalStocks = parseFloat(vA) + parseFloat(vB) + parseFloat(vC);
+            let vWater = (config.value.targetVolume - vTotalStocks).toFixed(2);
+            
+            let warningHtml = vWater < 0 ? `<br><span style="color:#ef4444; font-size:0.7rem;">⚠️ Vol Exceeds Limit</span>` : '';
+
+            let cellHtml = `<strong>AI Target [${sug.sampleId}]</strong><br>
+                            A: ${vA} µL<br>
+                            B: ${vB} µL<br>
+                            C: ${vC} µL<br>
+                            H2O: ${vWater} µL${warningHtml}`;
             plate.wells[wId] = cellHtml;
         }
     });
-    alert(`Successfully sent AI targets to Plate: ${plate.name} starting at ${startWell}`);
+    alert(`Successfully sent pipetting volumes to Plate: ${plate.name} starting at ${startWell}`);
 }
 
 const renderPlot = () => {
@@ -414,19 +378,19 @@ const renderPlot = () => {
 
   const traceCoacervate = { 
     type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
-    name: 'Hit (1)', marker: { color: '#10b981', size: 6, symbol: 'circle', line: { color: '#064e3b', width: 1 } } 
+    name: 'Hit (1)', marker: { color: '#10b981', size: 5, symbol: 'circle', line: { color: '#064e3b', width: 1 } } 
   }
   const traceClear = { 
     type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
-    name: 'Clear (0)', marker: { color: '#ef4444', size: 4, symbol: 'circle', line: { color: '#7f1d1d', width: 1 } } 
+    name: 'Clear (0)', marker: { color: '#ef4444', size: 3, symbol: 'circle', line: { color: '#7f1d1d', width: 1 } } 
   }
   const traceUnknown = { 
     type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
-    name: 'Untested', marker: { color: '#94a3b8', size: 3, symbol: 'circle' } 
+    name: 'Untested', marker: { color: '#94a3b8', size: 2, symbol: 'circle' } 
   }
   const traceTarget = { 
     type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
-    name: 'Target', marker: { color: '#3b82f6', size: 5, symbol: 'cross', line: { color: '#1e3a8a', width: 1 } } 
+    name: 'Target', marker: { color: '#3b82f6', size: 4, symbol: 'cross', line: { color: '#1e3a8a', width: 1 } } 
   }
 
   const allData = [...experiments.value, ...suggestions.value]
@@ -447,14 +411,14 @@ const renderPlot = () => {
 
   const layout = {
     scene: {
-      xaxis: { title: config.value.anionName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd' }, titlefont: { color: '#ffffff' } },
-      yaxis: { title: config.value.cationName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd' }, titlefont: { color: '#ffffff' } },
-      zaxis: { title: config.value.saltName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd' }, titlefont: { color: '#ffffff' } }
+      xaxis: { title: config.value.anionName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } },
+      yaxis: { title: config.value.cationName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } },
+      zaxis: { title: config.value.saltName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } }
     },
     paper_bgcolor: '#000000',
     margin: { l: 0, r: 0, b: 0, t: 0 },
     showlegend: true,
-    legend: { orientation: "h", y: 0.05, x: 0.5, xanchor: 'center', font: { color: '#ffffff' } }
+    legend: { orientation: "h", y: 0.05, x: 0.5, xanchor: 'center', font: { color: '#ffffff', size: 10 } }
   }
 
   Plotly.react('phase-ternary-plot', [traceCoacervate, traceClear, traceUnknown, traceTarget], layout, { displayModeBar: false, responsive: true })
@@ -503,7 +467,6 @@ const importAllSuggestions = async () => {
 
 const triggerFileInput = () => { if (csvInput.value) csvInput.value.click() }
 
-// --- UPDATED CSV LOGIC ---
 const handleFileUpload = (event) => {
   const file = event.target.files[0]; if (!file) return;
   importedFileName.value = file.name;
@@ -514,10 +477,8 @@ const handleFileUpload = (event) => {
     for (let i = 1; i < lines.length; i++) {
       const cols = lines[i].split(',');
       if (cols.length >= 4) { 
-          // Adapted phase mapping: 1 = coacervate, 0 = clear, -1 = untested
           let rawPhase = parseInt(cols[4]);
           let phaseVal = isNaN(rawPhase) ? -1 : rawPhase; 
-          
           newSuggestions.push({ 
               sampleId: parseInt(cols[0], 10), 
               anion: Number(parseFloat(cols[1]).toFixed(2)), 
@@ -569,59 +530,84 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.module-card { display: flex; flex-direction: column; gap: 15px; }
-.predictor-internal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-.internal-section h3 { font-size: 1.1rem; border-bottom: 1px solid var(--border-color, #e2e8f0); padding-bottom: 8px; margin-bottom: 15px; color: var(--primary, #3b82f6); }
-.full-width-section { grid-column: 1 / -1; }
-.config-grid-complex { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-.input-group label { display: block; font-size: 0.85rem; margin-bottom: 4px; font-weight: bold; opacity: 0.8; }
-.input-group input { width: 100%; padding: 7px; border-radius: 6px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; }
-.inventory-select-box { border: 1px solid var(--border-color, #cbd5e1); padding: 7px 12px; background: transparent; color: inherit; cursor: pointer; border-radius: 6px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; min-height: 35px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-.inventory-dropdown { position: absolute; top: 100%; left: 0; z-index: 1000; background: var(--bg-color, white); border: 1px solid var(--border-color, #cbd5e1); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); width: 100%; min-width: 280px; border-radius: 8px; overflow: hidden; }
-.dropdown-scope-selector { display: flex; gap: 10px; padding: 10px; border-bottom: 1px solid var(--border-color, #e2e8f0); }
-.dropdown-search { padding: 10px; display: flex; gap: 5px; border-bottom: 1px solid var(--border-color, #f1f5f9); }
-.dropdown-results { overflow-y: auto; max-height: 200px; }
-.dropdown-item { padding: 10px 15px; cursor: pointer; font-size: 0.85rem; border-bottom: 1px solid var(--border-color, #f8fafc); transition: background 0.2s; }
+.module-card { display: flex; flex-direction: column; gap: 10px; }
+
+/* 2-Column Condensed Grid */
+.layout-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+@media (max-width: 1024px) { .layout-columns { grid-template-columns: 1fr; } }
+
+.col-left { display: flex; flex-direction: column; gap: 15px; }
+.col-right { display: flex; flex-direction: column; gap: 15px; }
+
+.internal-section h3 { font-size: 1.05rem; border-bottom: 1px solid var(--border-color, #e2e8f0); padding-bottom: 6px; margin-bottom: 10px; color: var(--primary, #3b82f6); }
+.full-width-section { width: 100%; margin-top: 5px; }
+
+/* Inputs and Config */
+.target-vol-input { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: bold; }
+.target-vol-input input { width: 80px; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; }
+.config-grid-complex { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.input-group label { display: block; font-size: 0.8rem; margin-bottom: 4px; font-weight: bold; opacity: 0.8; }
+.input-group input { width: 100%; padding: 6px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; font-size: 0.85rem; }
+.inventory-select-box { border: 1px solid var(--border-color, #cbd5e1); padding: 6px 10px; background: transparent; color: inherit; cursor: pointer; border-radius: 4px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; min-height: 32px; }
+
+/* Dropdown */
+.inventory-dropdown { position: absolute; top: 100%; left: 0; z-index: 1000; background: var(--bg-color, white); border: 1px solid var(--border-color, #cbd5e1); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); width: 100%; min-width: 250px; border-radius: 6px; overflow: hidden; }
+.dropdown-scope-selector { display: flex; gap: 10px; padding: 8px; border-bottom: 1px solid var(--border-color, #e2e8f0); }
+.dropdown-search { padding: 8px; display: flex; gap: 5px; border-bottom: 1px solid var(--border-color, #f1f5f9); }
+.dropdown-results { overflow-y: auto; max-height: 150px; }
+.dropdown-item { padding: 8px 12px; cursor: pointer; font-size: 0.8rem; border-bottom: 1px solid var(--border-color, #f8fafc); transition: background 0.2s; }
 .dropdown-item:hover { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
-.truncate-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
-.ledger-table-container { max-height: 250px; overflow-y: auto; border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; }
-.ledger-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; table-layout: fixed; }
-.ledger-table th, .ledger-table td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color, #f1f5f9); }
+.truncate-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+
+/* Ledger Table */
+.ledger-table-container { max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; }
+.ledger-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; table-layout: fixed; }
+.ledger-table th, .ledger-table td { padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color, #f1f5f9); }
 .ledger-table th { background: var(--summary-bg, #f8fafc); font-weight: bold; position: sticky; top: 0; z-index: 5; }
-.small-input { width: 100%; max-width: 65px; padding: 4px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); font-size: 0.8rem; background-color: transparent !important; color: inherit !important; }
-.small-select { padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border-color, #ddd); font-size: 0.8rem; outline: none; background-color: transparent !important; color: inherit !important; }
+.small-input { width: 100%; padding: 4px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); font-size: 0.8rem; background-color: transparent !important; color: inherit !important; }
+.small-select { padding: 4px; border-radius: 4px; border: 1px solid var(--border-color, #ddd); font-size: 0.8rem; outline: none; background-color: transparent !important; color: inherit !important; }
 .bg-green-hit { background-color: rgba(16, 185, 129, 0.2) !important; color: #10b981 !important; font-weight: bold; border-color: #10b981; }
 .bg-red-miss { background-color: rgba(239, 68, 68, 0.2) !important; color: #ef4444 !important; border-color: #ef4444; }
-.plot-area { height: 380px; background: #000; border-radius: 12px; border: 1px solid var(--border-color, #e2e8f0); padding: 15px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); overflow: hidden; }
-.engine-actions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
-.action-btn { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: all 0.2s; border: none; font-size: 0.95rem; }
-.auto-btn { background: #3b82f6; color: white; box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.3); }
+
+/* Plot Area */
+.plot-area { height: 280px; background: #000; border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0); padding: 5px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); overflow: hidden; }
+
+/* Buttons & Engine */
+.engine-actions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.action-btn { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: all 0.2s; border: none; font-size: 0.85rem; }
+.auto-btn { background: #3b82f6; color: white; box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3); }
 .auto-btn:hover:not(:disabled) { background: #2563eb; transform: translateY(-1px); }
 .import-btn { background: var(--summary-bg, #f1f5f9); color: inherit; border: 1px solid var(--border-color, #cbd5e1); }
-.import-btn:hover { filter: brightness(0.9); }
-.imported-file-badge { background: rgba(59, 130, 246, 0.1); border: 1px solid #bae6fd; padding: 12px; border-radius: 8px; margin-bottom: 20px; color: #0369a1; }
-.clear-btn { background: transparent; border: none; color: #ef4444; cursor: pointer; padding: 4px; border-radius: 4px; }
-.priority-label { margin-bottom: 12px; color: var(--primary, #1e3a8a); border-bottom: 2px solid var(--border-color, #eff6ff); padding-bottom: 6px; font-size: 0.95rem; }
-.suggestion-card { border: 1px solid var(--border-color, #e2e8f0); border-radius: 10px; padding: 15px; margin-bottom: 12px; background: var(--bg-color, white); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
-.sug-id { font-size: 0.75rem; color: #94a3b8; font-weight: bold; margin-bottom: 5px; }
-.sug-hit-badge { color: #10b981; font-weight: 800; font-size: 0.7rem; margin-top: 5px; background: rgba(16, 185, 129, 0.1); padding: 2px 6px; border-radius: 4px; display: inline-block; }
-.success-btn { background: #10b981; color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 10px; }
-.well-plate-wrapper { display: flex; flex-direction: column; justify-content: center; padding: 20px 30px; background: #0f172a; border-radius: 16px; box-shadow: inset 0 4px 10px rgba(0,0,0,0.3); }
-.well-plate { display: inline-flex; flex-direction: column; gap: 10px; }
-.plate-header-row { display: flex; align-items: center; gap: 12px; }
-.plate-col-labels { display: flex; gap: 12px; }
-.col-label { width: 38px; text-align: center; color: #94a3b8; font-size: 0.9rem; font-weight: 800; }
-.plate-row-wrapper { display: flex; align-items: center; gap: 12px; }
-.row-label { width: 25px; color: #94a3b8; font-size: 1.1rem; font-weight: 800; text-align: center; }
-.plate-row { display: flex; gap: 12px; }
-.well { width: 38px; height: 38px; border-radius: 50%; background: #1e293b; border: 2px solid #334155; display: flex; align-items: center; justify-content: center; transition: all 0.3s; cursor: help; }
-.well-id { font-size: 0.65rem; color: #475569; font-weight: bold; pointer-events: none; }
-.phase-hit { border-color: #10b981; background: rgba(16, 185, 129, 0.4) !important; box-shadow: 0 0 15px rgba(16, 185, 129, 0.6); }
+.clear-btn { background: transparent; border: none; color: #ef4444; cursor: pointer; padding: 2px; border-radius: 4px; }
+.success-btn { background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+
+/* Side-by-Side Plates Grid */
+.plates-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; align-items: start; }
+@media (max-width: 1100px) { .plates-grid { grid-template-columns: 1fr; } }
+
+.well-plate-wrapper { display: flex; flex-direction: column; align-items: center; padding: 15px; background: #0f172a; border-radius: 12px; box-shadow: inset 0 4px 10px rgba(0,0,0,0.3); width: 100%; overflow-x: auto; }
+.well-plate { display: inline-flex; flex-direction: column; gap: 6px; }
+.plate-header-row { display: flex; align-items: center; gap: 8px; }
+.plate-col-labels { display: flex; gap: 8px; }
+.col-label { width: 28px; text-align: center; color: #94a3b8; font-size: 0.75rem; font-weight: 800; }
+.plate-row-wrapper { display: flex; align-items: center; gap: 8px; }
+.row-label { width: 18px; color: #94a3b8; font-size: 0.85rem; font-weight: 800; text-align: center; }
+.plate-row { display: flex; gap: 8px; }
+
+/* Condensed Well */
+.well { width: 28px; height: 28px; border-radius: 50%; background: #1e293b; border: 1px solid #334155; display: flex; align-items: center; justify-content: center; transition: all 0.3s; cursor: help; }
+.well-id { font-size: 0.55rem; color: #475569; font-weight: bold; pointer-events: none; }
+.phase-hit { border-color: #10b981; background: rgba(16, 185, 129, 0.4) !important; box-shadow: 0 0 10px rgba(16, 185, 129, 0.6); }
 .phase-hit .well-id { color: #fff; }
 .phase-miss { border-color: #ef4444; background: rgba(239, 68, 68, 0.2) !important; }
 .phase-target { border-color: #3b82f6; background: rgba(59, 130, 246, 0.25) !important; animation: pulse-blue 2s infinite; }
 .phase-target .well-id { color: #fff; }
-@keyframes pulse-blue { 0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.6); } 70% { box-shadow: 0 0 0 8px rgba(59,130,246,0); } 100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); } }
+@keyframes pulse-blue { 0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.5); } 70% { box-shadow: 0 0 0 5px rgba(59,130,246,0); } 100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); } }
+
+/* Utils */
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
 .checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; cursor: pointer; color: #475569; font-weight: bold; }
+.export-controls { display: flex; align-items: center; gap: 10px; }
+.compact-select { width: 120px; padding: 4px; background: transparent; color: inherit; border: 1px solid var(--border-color, #475569); border-radius: 4px; font-size: 0.8rem; }
+.compact-input { width: 60px; padding: 4px; background: transparent; color: inherit; border: 1px solid var(--border-color, #475569); border-radius: 4px; font-size: 0.8rem; text-align: center; }
 </style>

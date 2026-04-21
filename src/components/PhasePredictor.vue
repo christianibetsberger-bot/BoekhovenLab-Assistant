@@ -157,6 +157,19 @@
 
         <div class="internal-section">
           <h3>4. Active Learning Engine</h3>
+
+          <div style="margin-bottom: 15px; padding: 10px; background: rgba(59, 130, 246, 0.05); border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px;">
+            <label style="display: block; font-size: 0.85rem; font-weight: bold; margin-bottom: 8px; color: var(--primary, #3b82f6);">Sampling Strategy:</label>
+            <div style="display: flex; gap: 15px;">
+              <label class="checkbox-label">
+                <input type="radio" value="safe" v-model="config.strategy"> Safe (Entropy/Boundary)
+              </label>
+              <label class="checkbox-label">
+                <input type="radio" value="risky" v-model="config.strategy"> Risky (Midpoint Hunt)
+              </label>
+            </div>
+          </div>
+
           <div class="engine-actions-grid">
             <button class="action-btn auto-btn" @click="calculateNextExperiments" :disabled="isCalculating">
               <i class="fas" :class="isCalculating ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
@@ -277,7 +290,8 @@ const config = ref({
   anionName: 'Compound A', anionMax: 6, stockAnion: 100, anionSearchQuery: '', anionSearchScope: 'Global',
   cationName: 'Compound B', cationMax: 6, stockCation: 100, cationSearchQuery: '', cationSearchScope: 'Global',
   saltName: 'Compound C', saltMax: 200, stockSalt: 1000, saltSearchQuery: '', saltSearchScope: 'Global',
-  targetVolume: 100 // µL
+  targetVolume: 100, // µL
+  strategy: 'safe' // The Active Learning strategy toggle
 })
 
 const experiments = ref([])
@@ -499,6 +513,15 @@ const calculateNextExperiments = async () => {
   isCalculating.value = true; 
   clearImport();
   
+  // Dynamically find the highest Sample ID so the next plate stacks properly
+  let maxId = 8999; // Base starting point if no data exists
+  experiments.value.forEach(e => {
+    if (e.sampleId && !isNaN(e.sampleId) && e.sampleId > maxId) {
+      maxId = e.sampleId;
+    }
+  });
+  const nextStartId = maxId + 1;
+  
   try {
     const response = await fetch('https://experiment-backend-s71q.onrender.com/api/suggest-experiments', {
       method: 'POST',
@@ -506,7 +529,8 @@ const calculateNextExperiments = async () => {
       body: JSON.stringify({
         config: config.value,
         experiments: experiments.value,
-        n_suggestions: 96
+        n_suggestions: 96,
+        start_id: nextStartId
       })
     });
     

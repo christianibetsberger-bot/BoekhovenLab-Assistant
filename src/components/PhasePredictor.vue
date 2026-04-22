@@ -14,7 +14,7 @@
       <div class="col-left">
         <div class="internal-section">
           <div class="flex-between">
-            <h3>1. Search Space & Volumes</h3>
+            <h3>1. Search Space, Steps & Volumes</h3>
             <div class="target-vol-input">
               <label>Target Well Vol (µL):</label>
               <input type="number" v-model="config.targetVolume" @change="renderPlot" title="Total Volume per well in µL" />
@@ -37,7 +37,6 @@
                     </div>
                     <div class="dropdown-search">
                       <input type="text" v-model="config.anionSearchQuery" placeholder="Filter inventory..." @click.stop>
-                      <button class="small" @click="config.anionName = config.anionSearchQuery; activeDropdown = null; renderPlot()">Text</button>
                     </div>
                     <div class="dropdown-results">
                       <div v-for="inv in filterBlockInventory(config.anionSearchQuery, config.anionSearchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="selectInventory('anion', inv)">
@@ -46,9 +45,10 @@
                     </div>
                   </div>
                 </div>
-                <input type="number" v-model="config.anionMin" @change="renderPlot" style="flex: 0.5;" title="Min Target (mM)" placeholder="Min" />
-                <input type="number" v-model="config.anionMax" @change="renderPlot" style="flex: 0.5;" title="Max Target (mM)" placeholder="Max" />
-                <input type="number" v-model="config.stockAnion" style="flex: 0.7;" title="Stock Conc (mM)" placeholder="Stock" />
+                <input type="number" v-model="config.anionMin" @change="renderPlot" style="flex: 0.4;" title="Min Target (mM)" placeholder="Min" />
+                <input type="number" v-model="config.anionMax" @change="renderPlot" style="flex: 0.4;" title="Max Target (mM)" placeholder="Max" />
+                <input type="number" v-model="config.anionStep" @change="renderPlot" style="flex: 0.4;" title="Step Grid (mM)" placeholder="Step" />
+                <input type="number" v-model="config.stockAnion" style="flex: 0.6;" title="Stock Conc (mM)" placeholder="Stock" />
               </div>
             </div>
             
@@ -67,7 +67,6 @@
                     </div>
                     <div class="dropdown-search">
                       <input type="text" v-model="config.cationSearchQuery" placeholder="Filter inventory..." @click.stop>
-                      <button class="small" @click="config.cationName = config.cationSearchQuery; activeDropdown = null; renderPlot()">Text</button>
                     </div>
                     <div class="dropdown-results">
                       <div v-for="inv in filterBlockInventory(config.cationSearchQuery, config.cationSearchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="selectInventory('cation', inv)">
@@ -76,9 +75,10 @@
                     </div>
                   </div>
                 </div>
-                <input type="number" v-model="config.cationMin" @change="renderPlot" style="flex: 0.5;" title="Min Target (mM)" placeholder="Min" />
-                <input type="number" v-model="config.cationMax" @change="renderPlot" style="flex: 0.5;" title="Max Target (mM)" placeholder="Max" />
-                <input type="number" v-model="config.stockCation" style="flex: 0.7;" title="Stock Conc (mM)" placeholder="Stock" />
+                <input type="number" v-model="config.cationMin" @change="renderPlot" style="flex: 0.4;" title="Min Target (mM)" placeholder="Min" />
+                <input type="number" v-model="config.cationMax" @change="renderPlot" style="flex: 0.4;" title="Max Target (mM)" placeholder="Max" />
+                <input type="number" v-model="config.cationStep" @change="renderPlot" style="flex: 0.4;" title="Step Grid (mM)" placeholder="Step" />
+                <input type="number" v-model="config.stockCation" style="flex: 0.6;" title="Stock Conc (mM)" placeholder="Stock" />
               </div>
             </div>
             
@@ -97,7 +97,6 @@
                     </div>
                     <div class="dropdown-search">
                       <input type="text" v-model="config.saltSearchQuery" placeholder="Filter inventory..." @click.stop>
-                      <button class="small" @click="config.saltName = config.saltSearchQuery; activeDropdown = null; renderPlot()">Text</button>
                     </div>
                     <div class="dropdown-results">
                       <div v-for="inv in filterBlockInventory(config.saltSearchQuery, config.saltSearchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="selectInventory('salt', inv)">
@@ -106,9 +105,10 @@
                     </div>
                   </div>
                 </div>
-                <input type="number" v-model="config.saltMin" @change="renderPlot" style="flex: 0.5;" title="Min Target (mM)" placeholder="Min" />
-                <input type="number" v-model="config.saltMax" @change="renderPlot" style="flex: 0.5;" title="Max Target (mM)" placeholder="Max" />
-                <input type="number" v-model="config.stockSalt" style="flex: 0.7;" title="Stock Conc (mM)" placeholder="Stock" />
+                <input type="number" v-model="config.saltMin" @change="renderPlot" style="flex: 0.4;" title="Min Target (mM)" placeholder="Min" />
+                <input type="number" v-model="config.saltMax" @change="renderPlot" style="flex: 0.4;" title="Max Target (mM)" placeholder="Max" />
+                <input type="number" v-model="config.saltStep" @change="renderPlot" style="flex: 0.4;" title="Step Grid (mM)" placeholder="Step" />
+                <input type="number" v-model="config.stockSalt" style="flex: 0.6;" title="Stock Conc (mM)" placeholder="Stock" />
               </div>
             </div>
           </div>
@@ -123,7 +123,7 @@
                   <th>A (mM)</th>
                   <th>B (mM)</th>
                   <th>C (mM)</th>
-                  <th>Result</th>
+                  <th>Observed Phase</th>
                   <th></th>
                 </tr>
               </thead>
@@ -133,10 +133,13 @@
                   <td><input type="number" v-model="exp.cation" @change="updateExperiment(exp)" class="small-input" /></td>
                   <td><input type="number" v-model="exp.salt" @change="updateExperiment(exp)" class="small-input" /></td>
                   <td>
-                    <select v-model="exp.phase" @change="updateExperiment(exp)" class="small-select" :class="{'bg-green-hit': exp.phase === 1, 'bg-red-miss': exp.phase === 0}">
+                    <select v-model="exp.phase" @change="updateExperiment(exp)" class="small-select" :style="{ backgroundColor: getPhaseColor(exp.phase, 0.2), borderColor: getPhaseColor(exp.phase, 1) }">
                       <option :value="-1">Untested</option>
                       <option :value="0">Clear</option>
-                      <option :value="1">Coacervate</option>
+                      <option :value="1">Phase 1</option>
+                      <option :value="2">Phase 2</option>
+                      <option :value="3">Phase 3</option>
+                      <option :value="4">Phase 4</option>
                     </select>
                   </td>
                   <td>
@@ -150,11 +153,10 @@
             <div style="display: flex; gap: 10px;">
               <button class="small" @click="addManualRow"><i class="fas fa-plus"></i> Add Manual Data</button>
               <button class="small" @click="triggerFileInput" style="background: var(--summary-bg, #f1f5f9); color: inherit; border: 1px solid var(--border-color, #cbd5e1);">
-                <i class="fas fa-file-csv"></i> Import Historical CSV
+                <i class="fas fa-file-csv"></i> Import CSV
               </button>
-              <input type="file" id="hidden-csv-input" accept=".csv" style="display: none" />
             </div>
-            <button class="small danger-btn" @click="clearLedger"><i class="fas fa-trash-alt"></i> Reset All Memory</button>
+            <button class="small danger-btn" @click="clearLedger"><i class="fas fa-trash-alt"></i> Reset Memory</button>
           </div>
         </div>
       </div>
@@ -165,11 +167,11 @@
             <h3 style="margin: 0; border: none; padding: 0;">3. Phase Map (3D Space)</h3>
             <div style="display: flex; gap: 10px; align-items: center;">
               <label v-if="boundaryData" class="checkbox-label">
-                <input type="checkbox" v-model="showBoundary" @change="renderPlot"> Show Surface
+                <input type="checkbox" v-model="showBoundary" @change="renderPlot"> Show Multi-Class Uncertainty
               </label>
               <button class="small" @click="calculateBoundary" :disabled="isCalculatingBoundary" style="background: rgba(59, 130, 246, 0.1); color: #3b82f6; border: 1px solid #3b82f6; margin: 0;">
                 <i class="fas" :class="isCalculatingBoundary ? 'fa-spinner fa-spin' : 'fa-cube'"></i>
-                {{ isCalculatingBoundary ? 'Modeling...' : 'Map 3D Boundary' }}
+                {{ isCalculatingBoundary ? 'Modeling...' : 'Map Global Boundary' }}
               </button>
             </div>
           </div>
@@ -180,21 +182,32 @@
 
         <div class="internal-section">
           <h3>4. Active Learning Engine</h3>
-          <div style="margin-bottom: 15px; padding: 10px; background: rgba(59, 130, 246, 0.05); border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px;">
-            <label style="display: block; font-size: 0.85rem; font-weight: bold; margin-bottom: 8px; color: var(--primary, #3b82f6);">Sampling Strategy:</label>
-            <div style="display: flex; gap: 15px;">
-              <label class="checkbox-label">
-                <input type="radio" value="safe" v-model="config.strategy"> Safe (Entropy/Boundary)
-              </label>
-              <label class="checkbox-label">
-                <input type="radio" value="risky" v-model="config.strategy"> Risky (Midpoint Hunt)
-              </label>
-            </div>
+          
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; padding: 10px; background: rgba(59, 130, 246, 0.05); border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px;">
+              <div class="input-group" style="margin: 0;">
+                  <label style="font-size: 0.75rem; font-weight: bold; color: var(--primary, #3b82f6);">Targets to Suggest:</label>
+                  <input type="number" v-model.number="config.numSuggestions" min="1" max="384" style="padding: 6px;" title="How many wells should the AI generate?" />
+              </div>
+              <div class="input-group" style="margin: 0;">
+                  <label style="font-size: 0.75rem; font-weight: bold; color: var(--primary, #3b82f6);">Min Distance Filter (0-1):</label>
+                  <input type="number" v-model.number="config.minDistanceFactor" step="0.01" min="0" max="1" style="padding: 6px;" title="0.0 = Tightly Clustered, 0.1+ = Spread Apart" />
+              </div>
+              <div style="grid-column: span 2; margin-top: 5px;">
+                  <label style="display: block; font-size: 0.75rem; font-weight: bold; margin-bottom: 8px; color: var(--primary, #3b82f6);">Sampling Strategy:</label>
+                  <div style="display: flex; gap: 15px;">
+                    <label class="checkbox-label">
+                      <input type="radio" value="safe" v-model="config.strategy"> Multi-Phase Entropy (Boundary)
+                    </label>
+                    <label class="checkbox-label">
+                      <input type="radio" value="risky" v-model="config.strategy"> Geometry Midpoint Hunt
+                    </label>
+                  </div>
+              </div>
           </div>
 
           <button class="action-btn auto-btn" @click="calculateNextExperiments" :disabled="isCalculating" style="width: 100%; margin-bottom: 10px;">
             <i class="fas" :class="isCalculating ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
-            <span>{{ isCalculating ? 'Calculating...' : 'Auto-Suggest AI Plate' }}</span>
+            <span>{{ isCalculating ? 'Calculating...' : 'Auto-Suggest Grid-Locked Plate' }}</span>
           </button>
 
           <div class="suggestions-container" v-if="suggestions.length > 0">
@@ -249,7 +262,7 @@
               <div v-for="(rowLabel, rIndex) in plateRows" :key="'row'+rIndex" class="plate-row-wrapper">
                 <div class="row-label">{{ rowLabel }}</div>
                 <div class="plate-row">
-                  <div v-for="cIndex in 12" :key="'well'+rIndex+'-'+cIndex" class="well" :class="getWellStatusClass(existingPlateData, rIndex, cIndex - 1)" :title="getWellTooltip(existingPlateData, rIndex, cIndex - 1)">
+                  <div v-for="cIndex in 12" :key="'well'+rIndex+'-'+cIndex" class="well" :style="{ backgroundColor: getPhaseColor(getWellSample(existingPlateData, rIndex, cIndex-1)?.phase, 0.4), borderColor: getPhaseColor(getWellSample(existingPlateData, rIndex, cIndex-1)?.phase, 1) }" :title="getWellTooltip(existingPlateData, rIndex, cIndex - 1)">
                     <span class="well-id">{{ getWellSample(existingPlateData, rIndex, cIndex - 1)?.sampleId || '' }}</span>
                   </div>
                 </div>
@@ -269,8 +282,8 @@
               <div v-for="(rowLabel, rIndex) in plateRows" :key="'row'+rIndex" class="plate-row-wrapper">
                 <div class="row-label">{{ rowLabel }}</div>
                 <div class="plate-row">
-                  <div v-for="cIndex in 12" :key="'well'+rIndex+'-'+cIndex" class="well" :class="getWellStatusClass(suggestedPlateData, rIndex, cIndex - 1)" :title="getWellTooltip(suggestedPlateData, rIndex, cIndex - 1)">
-                    <span class="well-id">{{ getWellSample(suggestedPlateData, rIndex, cIndex - 1)?.sampleId || '' }}</span>
+                  <div v-for="cIndex in 12" :key="'well'+rIndex+'-'+cIndex" class="well" :style="{ backgroundColor: getPhaseColor(getWellSample(suggestedPlateData, rIndex, cIndex-1)?.phase, 0.4), borderColor: getPhaseColor(getWellSample(suggestedPlateData, rIndex, cIndex-1)?.phase, 1) }" :title="getWellTooltip(suggestedPlateData, rIndex, cIndex - 1)">
+                    <span class="well-id" style="color: white;">{{ getWellSample(suggestedPlateData, rIndex, cIndex - 1)?.sampleId || '' }}</span>
                   </div>
                 </div>
               </div>
@@ -293,13 +306,33 @@ const activeDropdown = ref(null)
 const targetPlateId = ref('')
 const targetStartWell = ref('A1')
 
+// --- Multi-Phase Colors ---
+const phaseColors = {
+    [-1]: 'rgba(59, 130, 246, 1)',   // Blue (Target)
+    0: 'rgba(239, 68, 68, 1)',    // Red (Clear)
+    1: 'rgba(16, 185, 129, 1)',   // Green (Phase 1)
+    2: 'rgba(245, 158, 11, 1)',   // Amber (Phase 2)
+    3: 'rgba(168, 85, 247, 1)',   // Purple (Phase 3)
+    4: 'rgba(236, 72, 153, 1)'    // Pink (Phase 4)
+};
+const phaseNames = {
+    0: 'Clear (0)', 1: 'Phase 1', 2: 'Phase 2', 3: 'Phase 3', 4: 'Phase 4'
+};
+const getPhaseColor = (phase, alpha = 1) => {
+    if (phase === undefined || phase === null) return 'transparent';
+    let rgb = phaseColors[phase] || 'rgba(148, 163, 184, 1)'; // Slate for unknown
+    return rgb.replace('1)', `${alpha})`);
+};
+
 // --- State ---
 const config = ref({ 
-  anionName: 'Compound A', anionMin: 0, anionMax: 6, stockAnion: 100, anionInv: null, anionSearchQuery: '', anionSearchScope: 'Global',
-  cationName: 'Compound B', cationMin: 0, cationMax: 6, stockCation: 100, cationInv: null, cationSearchQuery: '', cationSearchScope: 'Global',
-  saltName: 'Compound C', saltMin: 0, saltMax: 200, stockSalt: 1000, saltInv: null, saltSearchQuery: '', saltSearchScope: 'Global',
+  anionName: 'Compound A', anionMin: 0, anionMax: 6, anionStep: 0.5, stockAnion: 100, anionInv: null, anionSearchQuery: '', anionSearchScope: 'Global',
+  cationName: 'Compound B', cationMin: 0, cationMax: 6, cationStep: 0.5, stockCation: 100, cationInv: null, cationSearchQuery: '', cationSearchScope: 'Global',
+  saltName: 'Compound C', saltMin: 0, saltMax: 200, saltStep: 10, stockSalt: 1000, saltInv: null, saltSearchQuery: '', saltSearchScope: 'Global',
   targetVolume: 100,
-  strategy: 'safe' 
+  strategy: 'safe',
+  numSuggestions: 96,
+  minDistanceFactor: 0.05
 })
 
 const experiments = ref([])
@@ -375,19 +408,11 @@ const getWellSample = (dataArray, rIndex, cIndex) => {
   return dataArray[linearIndex] || null
 }
 
-const getWellStatusClass = (dataArray, r, c) => {
-  const sample = getWellSample(dataArray, r, c)
-  if (!sample) return ''
-  if (sample.phase === 1) return 'phase-hit'
-  if (sample.phase === 0) return 'phase-miss'
-  return 'phase-target'
-}
-
 const getWellTooltip = (dataArray, r, c) => {
   const s = getWellSample(dataArray, r, c)
   if (!s) return 'Empty Well'
-  const status = s.phase === 1 ? 'HIT' : (s.phase === 0 ? 'CLEAR' : 'AI TARGET')
-  return `ID: ${s.sampleId} [${status}]\nA: ${s.anion} | B: ${s.cation} | C: ${s.salt}`
+  const statusName = s.phase === -1 ? 'AI TARGET' : (phaseNames[s.phase] || `Phase ${s.phase}`);
+  return `ID: ${s.sampleId} [${statusName}]\nA: ${s.anion} | B: ${s.cation} | C: ${s.salt}`
 }
 
 const exportSuggestionsToPlate = () => {
@@ -402,7 +427,6 @@ const exportSuggestionsToPlate = () => {
     let startRow = match[1].charCodeAt(0) - 65; 
     let startCol = parseInt(match[2]) - 1;
 
-    // Helper to generate the exact Andrew+ span structure
     const getInventoryTag = (inv, vol, targetConc) => {
         if (!inv) return `<strong>Unknown Component:</strong> ${vol} µL (${targetConc} mM)<br>`;
         return `&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${inv.code}] ${inv.name} (${store.formatNum(inv.stock)} ${inv.stockUnit || 'µM'})&nbsp;<i class="fas fa-times" style="cursor:pointer; margin-left:4px; opacity: 0.7;" onclick="let ce = this.closest('[contenteditable]'); this.parentElement.remove(); if(ce) ce.dispatchEvent(new Event('input', {bubbles: true}));" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7"></i></span>&nbsp; ${vol} µL (${targetConc} mM)<br>`;
@@ -427,7 +451,6 @@ const exportSuggestionsToPlate = () => {
             
             let warningHtml = vWater < 0 ? `<br><span style="color:#ef4444; font-size:0.7rem;">⚠️ Vol Exceeds Limit</span>` : '';
 
-            // Generate HTML using the deeply integrated Inventory references
             let cellHtml = `<strong style="color: var(--primary);">AI Target [${sug.sampleId}]</strong><br>
                             ${getInventoryTag(config.value.anionInv, vA, sug.anion)}
                             ${getInventoryTag(config.value.cationInv, vB, sug.cation)}
@@ -444,46 +467,38 @@ const renderPlot = () => {
   const plotDiv = document.getElementById('phase-ternary-plot')
   if (!plotDiv) return
 
-  const traceCoacervate = { 
-    type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
-    name: 'Hit (1)', marker: { color: '#10b981', size: 5, symbol: 'circle', line: { color: '#064e3b', width: 1 } } 
+  // Dynamic Trace Generation for 5 phases
+  const classTraces = {};
+  for(let i=0; i<=4; i++) {
+      classTraces[i] = { type: 'scatter3d', mode: 'markers', x:[], y:[], z:[], text:[], name: phaseNames[i], marker: {color: phaseColors[i], size: 5, symbol: 'circle', line: {color: '#000', width: 1}} };
   }
-  const traceClear = { 
-    type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
-    name: 'Clear (0)', marker: { color: '#ef4444', size: 3, symbol: 'circle', line: { color: '#7f1d1d', width: 1 } } 
-  }
-  const traceUnknown = { 
-    type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
-    name: 'Untested', marker: { color: '#94a3b8', size: 2, symbol: 'circle' } 
-  }
-  const traceTarget = { 
-    type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], 
-    name: 'Target', marker: { color: '#3b82f6', size: 4, symbol: 'cross', line: { color: '#1e3a8a', width: 1 } } 
-  }
+  
+  const traceUnknown = { type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], name: 'Untested', marker: { color: '#94a3b8', size: 2, symbol: 'circle' } };
+  const traceTarget = { type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], name: 'AI Target', marker: { color: phaseColors[-1], size: 4, symbol: 'cross', line: { color: '#fff', width: 1 } } };
 
   const allData = [...experiments.value, ...suggestions.value]
 
   allData.forEach(exp => {
-    const label = `ID: ${exp.sampleId || 'Manual'} | A: ${exp.anion} | B: ${exp.cation} | C: ${exp.salt}`
+    const statusName = exp.phase === -1 ? 'AI Target' : (phaseNames[exp.phase] || `Phase ${exp.phase}`);
+    const label = `ID: ${exp.sampleId || 'Manual'} | ${statusName} | A: ${exp.anion} | B: ${exp.cation} | C: ${exp.salt}`;
     
-    if (exp.phase === 1) { 
-        traceCoacervate.x.push(exp.anion); traceCoacervate.y.push(exp.cation); traceCoacervate.z.push(exp.salt); traceCoacervate.text.push(label) 
-    } else if (exp.phase === 0) { 
-        traceClear.x.push(exp.anion); traceClear.y.push(exp.cation); traceClear.z.push(exp.salt); traceClear.text.push(label) 
+    if (exp.phase >= 0 && exp.phase <= 4) {
+        classTraces[exp.phase].x.push(exp.anion); classTraces[exp.phase].y.push(exp.cation); classTraces[exp.phase].z.push(exp.salt); classTraces[exp.phase].text.push(label);
     } else if (exp.sampleId > 0 && !experiments.value.some(e => e.sampleId === exp.sampleId)) {
-        traceTarget.x.push(exp.anion); traceTarget.y.push(exp.cation); traceTarget.z.push(exp.salt); traceTarget.text.push(label)
+        traceTarget.x.push(exp.anion); traceTarget.y.push(exp.cation); traceTarget.z.push(exp.salt); traceTarget.text.push(label);
     } else {
-        traceUnknown.x.push(exp.anion); traceUnknown.y.push(exp.cation); traceUnknown.z.push(exp.salt); traceUnknown.text.push(label)
+        traceUnknown.x.push(exp.anion); traceUnknown.y.push(exp.cation); traceUnknown.z.push(exp.salt); traceUnknown.text.push(label);
     }
   })
 
-  const traces = [traceCoacervate, traceClear, traceUnknown, traceTarget];
+  // Only push traces that actually contain data points
+  const traces = [...Object.values(classTraces).filter(t => t.x.length > 0), traceUnknown, traceTarget];
 
   if (boundaryData.value && showBoundary.value) {
       const rawX = [...boundaryData.value.x];
       const rawY = [...boundaryData.value.y];
       const rawZ = [...boundaryData.value.z];
-      const rawProb = [...boundaryData.value.prob];
+      const rawProb = [...boundaryData.value.prob]; // Now mapping normalized MULTI-CLASS ENTROPY
 
       const traceSurface = {
           type: 'isosurface',
@@ -491,13 +506,13 @@ const renderPlot = () => {
           y: rawY,
           z: rawZ,
           value: rawProb,
-          isomin: 0.1, 
-          isomax: 0.9,
-          surface: { show: true, count: 5 },
+          isomin: 0.3, // Show anything with moderate-to-high uncertainty
+          isomax: 1.0, // Peak uncertainty (the exact boundary line)
+          surface: { show: true, count: 6 },
           opacity: 0.6,
           colorscale: 'YlOrRd', 
           caps: { x: {show: false}, y: {show: false}, z: {show: false} },
-          name: 'AI Phase Boundary',
+          name: 'Multi-Phase Uncertainty',
           showscale: true, 
           hoverinfo: 'none'
       };
@@ -521,8 +536,12 @@ const renderPlot = () => {
 
 watch([experiments, suggestions, config], () => { renderPlot() }, { deep: true })
 
+// ABSOLUTE PERSONALIZATION LOCK: Enforce RLS visually by actively querying owner_id if available
 const fetchExperiments = async () => {
-  const { data, error } = await db.from('phase_data').select('*')
+  let query = db.from('phase_data').select('*');
+  if (store.user && store.user.id) query = query.eq('owner_id', store.user.id);
+  
+  const { data, error } = await query;
   if (!error && data) { experiments.value = data; renderPlot() }
 }
 
@@ -562,7 +581,10 @@ const clearLedger = async () => {
 }
 
 const importSuggestion = async (sug) => {
-  const { error } = await db.from('phase_data').insert([{ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }]);
+  const payload = { sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase };
+  if (store.user && store.user.id) payload.owner_id = store.user.id;
+  
+  const { error } = await db.from('phase_data').insert([payload]);
   if(!error) { 
     await fetchExperiments(); 
     suggestions.value = suggestions.value.filter(s => s.sampleId !== sug.sampleId); 
@@ -570,7 +592,11 @@ const importSuggestion = async (sug) => {
 }
 
 const importAllSuggestions = async () => {
-  const payload = suggestions.value.map(sug => ({ sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase }));
+  const payload = suggestions.value.map(sug => {
+      const p = { sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase };
+      if (store.user && store.user.id) p.owner_id = store.user.id;
+      return p;
+  });
   const { error } = await db.from('phase_data').insert(payload);
   if(!error) { 
     await fetchExperiments(); 
@@ -580,111 +606,105 @@ const importAllSuggestions = async () => {
   }
 }
 
-onMounted(() => {
-  // Setup native file input listener once
-  const input = document.getElementById('hidden-csv-input');
-  if (input) {
-    input.addEventListener('change', (event) => {
-      const file = event.target.files[0];
-      if (!file) return;
-      
-      const reader = new FileReader();
-      
-      reader.onload = async (e) => {
-        const text = e.target.result; 
-        const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
-        if (lines.length < 2) return;
-        
-        const delimiter = lines[0].includes(';') ? ';' : ',';
-        const headers = lines[0].split(delimiter).map(s => s.trim().replace(/^["']|["']$/g, '').toLowerCase());
-        
-        let idxId = headers.findIndex(h => h === '' || h === 'index' || h === 'sampleid');
-        let idxA = headers.indexOf('anion');
-        let idxB = headers.indexOf('cation');
-        let idxC = headers.indexOf('salt');
-        let idxPhase = headers.indexOf('phase');
-        
-        if (idxId === -1) idxId = 0;
-        if (idxA === -1) idxA = 1;
-        if (idxB === -1) idxB = 2;
-        if (idxC === -1) idxC = 3;
-        if (idxPhase === -1) idxPhase = 4;
-        
-        const newKnowns = [];
-        
-        for (let i = 1; i < lines.length; i++) {
-          const rowText = lines[i].trim();
-          if(!rowText) continue;
-          
-          const cols = rowText.split(delimiter).map(c => c.trim().replace(/^["']|["']$/g, ''));
-          
-          if (cols.length > Math.max(idxA, idxB, idxC, idxPhase)) { 
-              let sId = parseInt(cols[idxId], 10);
-              let a = parseFloat(cols[idxA]);
-              let b = parseFloat(cols[idxB]);
-              let c = parseFloat(cols[idxC]);
-              let rawPhase = parseInt(cols[idxPhase], 10); 
-              
-              if (isNaN(sId)) sId = Math.floor(Math.random() * 9000); 
-              if (isNaN(a) || isNaN(b) || isNaN(c) || isNaN(rawPhase)) continue;
+// --- DYNAMIC NATIVE CSV INJECTION ---
+const triggerFileInput = () => { 
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.csv';
 
-              if (rawPhase === 1 || rawPhase === 0) {
-                  newKnowns.push({ 
-                      sampleId: sId, 
-                      anion: Number(a.toFixed(2)), 
-                      cation: Number(b.toFixed(2)), 
-                      salt: Number(c.toFixed(1)), 
-                      phase: rawPhase 
-                  }) 
+  input.onchange = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    
+    reader.onload = async (e) => {
+      const text = e.target.result; 
+      const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+      if (lines.length < 2) return;
+      
+      const delimiter = lines[0].includes(';') ? ';' : ',';
+      const headers = lines[0].split(delimiter).map(s => s.trim().replace(/^["']|["']$/g, '').toLowerCase());
+      
+      let idxId = headers.findIndex(h => h === '' || h === 'index' || h === 'sampleid');
+      let idxA = headers.indexOf('anion');
+      let idxB = headers.indexOf('cation');
+      let idxC = headers.indexOf('salt');
+      let idxPhase = headers.indexOf('phase');
+      
+      if (idxId === -1) idxId = 0;
+      if (idxA === -1) idxA = 1;
+      if (idxB === -1) idxB = 2;
+      if (idxC === -1) idxC = 3;
+      if (idxPhase === -1) idxPhase = 4;
+      
+      const newKnowns = [];
+      
+      for (let i = 1; i < lines.length; i++) {
+        const rowText = lines[i].trim();
+        if(!rowText) continue;
+        
+        const cols = rowText.split(delimiter).map(c => c.trim().replace(/^["']|["']$/g, ''));
+        
+        if (cols.length > Math.max(idxA, idxB, idxC, idxPhase)) { 
+            let sId = parseInt(cols[idxId], 10);
+            let a = parseFloat(cols[idxA]);
+            let b = parseFloat(cols[idxB]);
+            let c = parseFloat(cols[idxC]);
+            let rawPhase = parseInt(cols[idxPhase], 10); 
+            
+            if (isNaN(sId)) sId = Math.floor(Math.random() * 9000); 
+            if (isNaN(a) || isNaN(b) || isNaN(c) || isNaN(rawPhase)) continue;
+
+            // Expanded to accept phases 0 through 4
+            if (rawPhase >= 0 && rawPhase <= 4) {
+                const payload = { sampleId: sId, anion: Number(a.toFixed(2)), cation: Number(b.toFixed(2)), salt: Number(c.toFixed(1)), phase: rawPhase };
+                if (store.user && store.user.id) payload.owner_id = store.user.id;
+                newKnowns.push(payload);
+            }
+        }
+      }
+
+      if (newKnowns.length > 0) {
+          const uniqueToInsert = [];
+          const seenIds = new Set(experiments.value.map(exp => exp.sampleId));
+
+          for (let k of newKnowns) {
+              if (!seenIds.has(k.sampleId)) {
+                  uniqueToInsert.push(k);
+                  seenIds.add(k.sampleId);
               }
           }
-        }
-        input.value = ''; 
 
-        if (newKnowns.length > 0) {
-            const uniqueToInsert = [];
-            const seenIds = new Set(experiments.value.map(exp => exp.sampleId));
-
-            for (let k of newKnowns) {
-                if (!seenIds.has(k.sampleId)) {
-                    uniqueToInsert.push(k);
-                    seenIds.add(k.sampleId);
-                }
-            }
-
-            if (uniqueToInsert.length > 0) {
-                const { error } = await db.from('phase_data').insert(uniqueToInsert);
-                if (!error) {
-                    await fetchExperiments();
-                    alert(`Successfully imported ${uniqueToInsert.length} historical data points into the Ledger!`);
-                } else {
-                    console.error("Supabase Error:", error);
-                    alert("Error logging CSV data to Supabase. Check console.");
-                }
-            } else {
-                alert("All tested points in this CSV are already loaded in the Ledger.");
-            }
-        } else {
-            alert("No valid tested points (Phase 1 or 0) were found in the uploaded CSV.");
-        }
-      };
-      
-      reader.onerror = () => { alert("Failed to read the file."); };
-      reader.readAsText(file);
-    });
-  }
-})
-
-const triggerFileInput = () => { 
-  const el = document.getElementById('hidden-csv-input');
-  if (el) el.click(); 
+          if (uniqueToInsert.length > 0) {
+              const { error } = await db.from('phase_data').insert(uniqueToInsert);
+              if (!error) {
+                  await fetchExperiments();
+                  alert(`Successfully imported ${uniqueToInsert.length} historical data points into the Ledger!`);
+              } else {
+                  console.error("Supabase Error:", error);
+                  alert("Error logging CSV data to Supabase. Check console.");
+              }
+          } else {
+              alert("All tested points in this CSV are already loaded in the Ledger.");
+          }
+      } else {
+          alert("No valid tested points (Phases 0-4) were found in the uploaded CSV.");
+      }
+    };
+    
+    reader.onerror = () => { alert("Failed to read the file."); };
+    reader.readAsText(file);
+  };
+  
+  input.click();
 }
 
 const calculateBoundary = async () => {
   const validExps = experiments.value.filter(e => e.phase !== -1);
   const phases = new Set(validExps.map(e => e.phase));
   if (phases.size < 2) {
-      alert("You need at least one Hit and one Clear logged to map a boundary.");
+      alert("You need multiple different phases logged to map a boundary.");
       return;
   }
 
@@ -727,7 +747,7 @@ const calculateNextExperiments = async () => {
       body: JSON.stringify({
         config: config.value,
         experiments: experiments.value,
-        n_suggestions: 96,
+        n_suggestions: config.value.numSuggestions || 96,
         start_id: nextStartId
       })
     });
@@ -788,8 +808,6 @@ onMounted(() => {
 .ledger-table th { background: var(--summary-bg, #f8fafc); font-weight: bold; position: sticky; top: 0; z-index: 5; }
 .small-input { width: 100%; padding: 4px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); font-size: 0.8rem; background-color: transparent !important; color: inherit !important; }
 .small-select { padding: 4px; border-radius: 4px; border: 1px solid var(--border-color, #ddd); font-size: 0.8rem; outline: none; background-color: transparent !important; color: inherit !important; }
-.bg-green-hit { background-color: rgba(16, 185, 129, 0.2) !important; color: #10b981 !important; font-weight: bold; border-color: #10b981; }
-.bg-red-miss { background-color: rgba(239, 68, 68, 0.2) !important; color: #ef4444 !important; border-color: #ef4444; }
 
 /* Plot Area */
 .plot-area { height: 280px; background: #000; border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0); padding: 5px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); overflow: hidden; }
@@ -818,13 +836,7 @@ onMounted(() => {
 
 /* Condensed Well */
 .well { width: 28px; height: 28px; border-radius: 50%; background: #1e293b; border: 1px solid #334155; display: flex; align-items: center; justify-content: center; transition: all 0.3s; cursor: help; }
-.well-id { font-size: 0.55rem; color: #475569; font-weight: bold; pointer-events: none; }
-.phase-hit { border-color: #10b981; background: rgba(16, 185, 129, 0.4) !important; box-shadow: 0 0 10px rgba(16, 185, 129, 0.6); }
-.phase-hit .well-id { color: #fff; }
-.phase-miss { border-color: #ef4444; background: rgba(239, 68, 68, 0.2) !important; }
-.phase-target { border-color: #3b82f6; background: rgba(59, 130, 246, 0.25) !important; animation: pulse-blue 2s infinite; }
-.phase-target .well-id { color: #fff; }
-@keyframes pulse-blue { 0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.5); } 70% { box-shadow: 0 0 0 5px rgba(59,130,246,0); } 100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); } }
+.well-id { font-size: 0.55rem; font-weight: bold; pointer-events: none; }
 
 /* Utils */
 .flex-between { display: flex; justify-content: space-between; align-items: center; }

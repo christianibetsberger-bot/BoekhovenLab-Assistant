@@ -167,11 +167,11 @@
             <h3 style="margin: 0; border: none; padding: 0;">3. Phase Map (3D Space)</h3>
             <div style="display: flex; gap: 10px; align-items: center;">
               <label v-if="boundaryData" class="checkbox-label">
-                <input type="checkbox" v-model="showBoundary" @change="renderPlot"> Show Multi-Class Uncertainty
+                <input type="checkbox" v-model="showBoundary" @change="renderPlot"> Show Phase Boundaries
               </label>
               <button class="small" @click="calculateBoundary" :disabled="isCalculatingBoundary" style="background: rgba(59, 130, 246, 0.1); color: #3b82f6; border: 1px solid #3b82f6; margin: 0;">
                 <i class="fas" :class="isCalculatingBoundary ? 'fa-spinner fa-spin' : 'fa-cube'"></i>
-                {{ isCalculatingBoundary ? 'Modeling...' : 'Map Global Boundary' }}
+                {{ isCalculatingBoundary ? 'Modeling...' : 'Map Phase Boundaries' }}
               </button>
             </div>
           </div>
@@ -306,25 +306,23 @@ const activeDropdown = ref(null)
 const targetPlateId = ref('')
 const targetStartWell = ref('A1')
 
-// --- Multi-Phase Colors ---
 const phaseColors = {
-    [-1]: 'rgba(59, 130, 246, 1)',   // Blue (Target)
-    0: 'rgba(239, 68, 68, 1)',    // Red (Clear)
-    1: 'rgba(16, 185, 129, 1)',   // Green (Phase 1)
-    2: 'rgba(245, 158, 11, 1)',   // Amber (Phase 2)
-    3: 'rgba(168, 85, 247, 1)',   // Purple (Phase 3)
-    4: 'rgba(236, 72, 153, 1)'    // Pink (Phase 4)
+    [-1]: 'rgba(59, 130, 246, 1)',   
+    0: 'rgba(239, 68, 68, 1)',    
+    1: 'rgba(16, 185, 129, 1)',   
+    2: 'rgba(245, 158, 11, 1)',   
+    3: 'rgba(168, 85, 247, 1)',   
+    4: 'rgba(236, 72, 153, 1)'    
 };
 const phaseNames = {
     0: 'Clear (0)', 1: 'Phase 1', 2: 'Phase 2', 3: 'Phase 3', 4: 'Phase 4'
 };
 const getPhaseColor = (phase, alpha = 1) => {
     if (phase === undefined || phase === null) return 'transparent';
-    let rgb = phaseColors[phase] || 'rgba(148, 163, 184, 1)'; // Slate for unknown
+    let rgb = phaseColors[phase] || 'rgba(148, 163, 184, 1)'; 
     return rgb.replace('1)', `${alpha})`);
 };
 
-// --- State ---
 const config = ref({ 
   anionName: 'Compound A', anionMin: 0, anionMax: 6, anionStep: 0.5, stockAnion: 100, anionInv: null, anionSearchQuery: '', anionSearchScope: 'Global',
   cationName: 'Compound B', cationMin: 0, cationMax: 6, cationStep: 0.5, stockCation: 100, cationInv: null, cationSearchQuery: '', cationSearchScope: 'Global',
@@ -345,7 +343,6 @@ const showBoundary = ref(true)
 
 const plateRows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 
-// --- Helper Math ---
 const getMM = (val, unit) => {
     if (!val) return 0;
     let m = 1;
@@ -467,7 +464,6 @@ const renderPlot = () => {
   const plotDiv = document.getElementById('phase-ternary-plot')
   if (!plotDiv) return
 
-  // Dynamic Trace Generation for 5 phases
   const classTraces = {};
   for(let i=0; i<=4; i++) {
       classTraces[i] = { type: 'scatter3d', mode: 'markers', x:[], y:[], z:[], text:[], name: phaseNames[i], marker: {color: phaseColors[i], size: 5, symbol: 'circle', line: {color: '#000', width: 1}} };
@@ -491,32 +487,40 @@ const renderPlot = () => {
     }
   })
 
-  // Only push traces that actually contain data points
   const traces = [...Object.values(classTraces).filter(t => t.x.length > 0), traceUnknown, traceTarget];
 
-  if (boundaryData.value && showBoundary.value) {
+  // EXPLICIT COLORED BOUNDARY SHELLS FOR EVERY INDIVIDUAL PHASE
+  if (boundaryData.value && showBoundary.value && boundaryData.value.probs) {
       const rawX = [...boundaryData.value.x];
       const rawY = [...boundaryData.value.y];
       const rawZ = [...boundaryData.value.z];
-      const rawProb = [...boundaryData.value.prob]; // Now mapping normalized MULTI-CLASS ENTROPY
 
-      const traceSurface = {
-          type: 'isosurface',
-          x: rawX,
-          y: rawY,
-          z: rawZ,
-          value: rawProb,
-          isomin: 0.3, // Show anything with moderate-to-high uncertainty
-          isomax: 1.0, // Peak uncertainty (the exact boundary line)
-          surface: { show: true, count: 6 },
-          opacity: 0.6,
-          colorscale: 'YlOrRd', 
-          caps: { x: {show: false}, y: {show: false}, z: {show: false} },
-          name: 'Multi-Phase Uncertainty',
-          showscale: true, 
-          hoverinfo: 'none'
-      };
-      traces.push(traceSurface);
+      Object.keys(boundaryData.value.probs).forEach(phaseId => {
+          const rawProb = [...boundaryData.value.probs[phaseId]];
+          const pId = parseInt(phaseId, 10);
+          
+          // Force the colorscale to strictly match the CSS color of this specific phase
+          const baseColor = phaseColors[pId] || 'rgba(148, 163, 184, 1)';
+          const cScale = [ [0, baseColor], [1, baseColor] ];
+
+          const traceSurface = {
+              type: 'isosurface',
+              x: rawX,
+              y: rawY,
+              z: rawZ,
+              value: rawProb,
+              isomin: 0.45, // Draw boundary right at the 50% transition threshold
+              isomax: 0.55, 
+              surface: { show: true, count: 2 },
+              opacity: 0.35, // Highly transparent so overlapping interior points remain visible
+              colorscale: cScale, 
+              caps: { x: {show: false}, y: {show: false}, z: {show: false} },
+              name: `${phaseNames[pId] || 'Phase ' + pId} Boundary`,
+              showscale: false, 
+              hoverinfo: 'none'
+          };
+          traces.push(traceSurface);
+      });
   }
 
   const layout = {
@@ -536,13 +540,18 @@ const renderPlot = () => {
 
 watch([experiments, suggestions, config], () => { renderPlot() }, { deep: true })
 
-// ABSOLUTE PERSONALIZATION LOCK: Enforce RLS visually by actively querying owner_id if available
 const fetchExperiments = async () => {
   let query = db.from('phase_data').select('*');
   if (store.user && store.user.id) query = query.eq('owner_id', store.user.id);
   
   const { data, error } = await query;
-  if (!error && data) { experiments.value = data; renderPlot() }
+  if (!error && data) { 
+      experiments.value = data.map(row => ({
+          ...row,
+          sampleId: row.sampleid !== undefined ? row.sampleid : row.sampleId
+      }));
+      renderPlot() 
+  }
 }
 
 const updateExperiment = async (exp) => {
@@ -581,7 +590,7 @@ const clearLedger = async () => {
 }
 
 const importSuggestion = async (sug) => {
-  const payload = { sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase };
+  const payload = { sampleid: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase };
   if (store.user && store.user.id) payload.owner_id = store.user.id;
   
   const { error } = await db.from('phase_data').insert([payload]);
@@ -593,7 +602,7 @@ const importSuggestion = async (sug) => {
 
 const importAllSuggestions = async () => {
   const payload = suggestions.value.map(sug => {
-      const p = { sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase };
+      const p = { sampleid: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase };
       if (store.user && store.user.id) p.owner_id = store.user.id;
       return p;
   });
@@ -606,7 +615,6 @@ const importAllSuggestions = async () => {
   }
 }
 
-// --- DYNAMIC NATIVE CSV INJECTION ---
 const triggerFileInput = () => { 
   const input = document.createElement('input');
   input.type = 'file';
@@ -656,9 +664,8 @@ const triggerFileInput = () => {
             if (isNaN(sId)) sId = Math.floor(Math.random() * 9000); 
             if (isNaN(a) || isNaN(b) || isNaN(c) || isNaN(rawPhase)) continue;
 
-            // Expanded to accept phases 0 through 4
             if (rawPhase >= 0 && rawPhase <= 4) {
-                const payload = { sampleId: sId, anion: Number(a.toFixed(2)), cation: Number(b.toFixed(2)), salt: Number(c.toFixed(1)), phase: rawPhase };
+                const payload = { sampleid: sId, anion: Number(a.toFixed(2)), cation: Number(b.toFixed(2)), salt: Number(c.toFixed(1)), phase: rawPhase };
                 if (store.user && store.user.id) payload.owner_id = store.user.id;
                 newKnowns.push(payload);
             }
@@ -670,9 +677,9 @@ const triggerFileInput = () => {
           const seenIds = new Set(experiments.value.map(exp => exp.sampleId));
 
           for (let k of newKnowns) {
-              if (!seenIds.has(k.sampleId)) {
+              if (!seenIds.has(k.sampleid)) {
                   uniqueToInsert.push(k);
-                  seenIds.add(k.sampleId);
+                  seenIds.add(k.sampleid);
               }
           }
 

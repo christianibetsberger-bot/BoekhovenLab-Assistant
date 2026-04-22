@@ -155,6 +155,7 @@
               <button class="small" @click="triggerFileInput" style="background: var(--summary-bg, #f1f5f9); color: inherit; border: 1px solid var(--border-color, #cbd5e1);">
                 <i class="fas fa-file-csv"></i> Import CSV
               </button>
+              <input type="file" id="hidden-csv-input" accept=".csv" style="display: none" />
             </div>
             <button class="small danger-btn" @click="clearLedger"><i class="fas fa-trash-alt"></i> Reset Memory</button>
           </div>
@@ -306,6 +307,7 @@ const activeDropdown = ref(null)
 const targetPlateId = ref('')
 const targetStartWell = ref('A1')
 
+// --- Multi-Phase Colors ---
 const phaseColors = {
     [-1]: 'rgba(59, 130, 246, 1)',   
     0: 'rgba(239, 68, 68, 1)',    
@@ -323,6 +325,7 @@ const getPhaseColor = (phase, alpha = 1) => {
     return rgb.replace('1)', `${alpha})`);
 };
 
+// --- State ---
 const config = ref({ 
   anionName: 'Compound A', anionMin: 0, anionMax: 6, anionStep: 0.5, stockAnion: 100, anionInv: null, anionSearchQuery: '', anionSearchScope: 'Global',
   cationName: 'Compound B', cationMin: 0, cationMax: 6, cationStep: 0.5, stockCation: 100, cationInv: null, cationSearchQuery: '', cationSearchScope: 'Global',
@@ -343,6 +346,7 @@ const showBoundary = ref(true)
 
 const plateRows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 
+// --- Helper Math ---
 const getMM = (val, unit) => {
     if (!val) return 0;
     let m = 1;
@@ -489,7 +493,7 @@ const renderPlot = () => {
 
   const traces = [...Object.values(classTraces).filter(t => t.x.length > 0), traceUnknown, traceTarget];
 
-  // EXPLICIT COLORED BOUNDARY SHELLS FOR EVERY INDIVIDUAL PHASE
+  // MATHEMATICALLY ROBUST DYNAMIC ISOSURFACE RENDERING
   if (boundaryData.value && showBoundary.value && boundaryData.value.probs) {
       const rawX = [...boundaryData.value.x];
       const rawY = [...boundaryData.value.y];
@@ -499,9 +503,15 @@ const renderPlot = () => {
           const rawProb = [...boundaryData.value.probs[phaseId]];
           const pId = parseInt(phaseId, 10);
           
-          // Force the colorscale to strictly match the CSS color of this specific phase
+          // Clamp detection: Prevent WebGL from crashing if the model is highly uncertain
+          const maxProb = Math.max(...rawProb);
+          const minProb = Math.min(...rawProb);
+          if (maxProb - minProb < 0.05 || maxProb < 0.20) return; // Skip if surface mathematically doesn't exist
+          
+          // Force proper Plotly colorscale syntax
           const baseColor = phaseColors[pId] || 'rgba(148, 163, 184, 1)';
-          const cScale = [ [0, baseColor], [1, baseColor] ];
+          const transparentColor = baseColor.replace('1)', '0.0)');
+          const cScale = [ [0, transparentColor], [1, baseColor] ];
 
           const traceSurface = {
               type: 'isosurface',
@@ -509,10 +519,11 @@ const renderPlot = () => {
               y: rawY,
               z: rawZ,
               value: rawProb,
-              isomin: 0.45, // Draw boundary right at the 50% transition threshold
-              isomax: 0.55, 
-              surface: { show: true, count: 2 },
-              opacity: 0.35, // Highly transparent so overlapping interior points remain visible
+              // Anchor the boundary line dynamically near the highest confidence ridge
+              isomin: Math.max(0.2, maxProb - 0.15), 
+              isomax: maxProb, 
+              surface: { show: true, count: 3 },
+              opacity: 0.45, 
               colorscale: cScale, 
               caps: { x: {show: false}, y: {show: false}, z: {show: false} },
               name: `${phaseNames[pId] || 'Phase ' + pId} Boundary`,

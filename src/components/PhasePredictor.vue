@@ -23,7 +23,7 @@
           
           <div class="config-grid-complex">
             <div class="input-group">
-              <label>Component A (Anion)</label>
+              <label>Component A (Anion) <span class="unit-badge">{{ config.anionUnit }}</span></label>
               <div style="display: flex; gap: 5px; align-items: flex-end;">
                 <div style="flex: 2; position: relative;" @click.stop>
                   <div @click="activeDropdown = activeDropdown === 'anion' ? null : 'anion'" class="inventory-select-box">
@@ -45,15 +45,15 @@
                     </div>
                   </div>
                 </div>
-                <input type="number" v-model="config.anionMin" @change="renderPlot" style="flex: 0.4;" title="Min Target (mM)" placeholder="Min" />
-                <input type="number" v-model="config.anionMax" @change="renderPlot" style="flex: 0.4;" title="Max Target (mM)" placeholder="Max" />
-                <input type="number" v-model="config.anionStep" @change="renderPlot" style="flex: 0.4;" title="Step Grid (mM)" placeholder="Step" />
-                <input type="number" v-model="config.stockAnion" style="flex: 0.6;" title="Stock Conc (mM)" placeholder="Stock" />
+                <input type="number" v-model="config.anionMin" @change="renderPlot" style="flex: 0.4;" :title="`Min (${config.anionUnit})`" placeholder="Min" />
+                <input type="number" v-model="config.anionMax" @change="renderPlot" style="flex: 0.4;" :title="`Max (${config.anionUnit})`" placeholder="Max" />
+                <input type="number" v-model="config.anionStep" @change="renderPlot" style="flex: 0.4;" :title="`Step (${config.anionUnit})`" placeholder="Step" />
+                <input type="number" v-model="config.stockAnion" style="flex: 0.6;" :title="`Stock (${config.anionUnit})`" :placeholder="`Stock ${config.anionUnit}`" />
               </div>
             </div>
             
             <div class="input-group">
-              <label>Component B (Cation)</label>
+              <label>Component B (Cation) <span class="unit-badge">{{ config.cationUnit }}</span></label>
               <div style="display: flex; gap: 5px; align-items: flex-end;">
                 <div style="flex: 2; position: relative;" @click.stop>
                   <div @click="activeDropdown = activeDropdown === 'cation' ? null : 'cation'" class="inventory-select-box">
@@ -75,15 +75,15 @@
                     </div>
                   </div>
                 </div>
-                <input type="number" v-model="config.cationMin" @change="renderPlot" style="flex: 0.4;" title="Min Target (mM)" placeholder="Min" />
-                <input type="number" v-model="config.cationMax" @change="renderPlot" style="flex: 0.4;" title="Max Target (mM)" placeholder="Max" />
-                <input type="number" v-model="config.cationStep" @change="renderPlot" style="flex: 0.4;" title="Step Grid (mM)" placeholder="Step" />
-                <input type="number" v-model="config.stockCation" style="flex: 0.6;" title="Stock Conc (mM)" placeholder="Stock" />
+                <input type="number" v-model="config.cationMin" @change="renderPlot" style="flex: 0.4;" :title="`Min (${config.cationUnit})`" placeholder="Min" />
+                <input type="number" v-model="config.cationMax" @change="renderPlot" style="flex: 0.4;" :title="`Max (${config.cationUnit})`" placeholder="Max" />
+                <input type="number" v-model="config.cationStep" @change="renderPlot" style="flex: 0.4;" :title="`Step (${config.cationUnit})`" placeholder="Step" />
+                <input type="number" v-model="config.stockCation" style="flex: 0.6;" :title="`Stock (${config.cationUnit})`" :placeholder="`Stock ${config.cationUnit}`" />
               </div>
             </div>
             
             <div class="input-group">
-              <label>Component C (Salt/Buffer)</label>
+              <label>Component C (Salt/Buffer) <span class="unit-badge">{{ config.saltUnit }}</span></label>
               <div style="display: flex; gap: 5px; align-items: flex-end;">
                 <div style="flex: 2; position: relative;" @click.stop>
                   <div @click="activeDropdown = activeDropdown === 'salt' ? null : 'salt'" class="inventory-select-box">
@@ -105,10 +105,10 @@
                     </div>
                   </div>
                 </div>
-                <input type="number" v-model="config.saltMin" @change="renderPlot" style="flex: 0.4;" title="Min Target (mM)" placeholder="Min" />
-                <input type="number" v-model="config.saltMax" @change="renderPlot" style="flex: 0.4;" title="Max Target (mM)" placeholder="Max" />
-                <input type="number" v-model="config.saltStep" @change="renderPlot" style="flex: 0.4;" title="Step Grid (mM)" placeholder="Step" />
-                <input type="number" v-model="config.stockSalt" style="flex: 0.6;" title="Stock Conc (mM)" placeholder="Stock" />
+                <input type="number" v-model="config.saltMin" @change="renderPlot" style="flex: 0.4;" :title="`Min (${config.saltUnit})`" placeholder="Min" />
+                <input type="number" v-model="config.saltMax" @change="renderPlot" style="flex: 0.4;" :title="`Max (${config.saltUnit})`" placeholder="Max" />
+                <input type="number" v-model="config.saltStep" @change="renderPlot" style="flex: 0.4;" :title="`Step (${config.saltUnit})`" placeholder="Step" />
+                <input type="number" v-model="config.stockSalt" style="flex: 0.6;" :title="`Stock (${config.saltUnit})`" :placeholder="`Stock ${config.saltUnit}`" />
               </div>
             </div>
           </div>
@@ -367,22 +367,48 @@ const getMM = (val, unit) => {
     return val * m;
 }
 
+// Inverse of getMM — convert a mM value back to a target unit (molar units only)
+const MOLAR_UNITS = new Set(['M', 'mM', 'µM', 'nM'])
+const fromMM = (valMM, unit) => {
+    if (unit === 'M')  return valMM / 1000;
+    if (unit === 'mM') return valMM;
+    if (unit === 'µM') return valMM * 1000;
+    if (unit === 'nM') return valMM * 1e6;
+    return valMM; // non-molar units: leave as-is
+}
+
+const rescaleRange = (cfgMin, cfgMax, cfgStep, oldUnit, newUnit) => {
+    if (!MOLAR_UNITS.has(oldUnit) || !MOLAR_UNITS.has(newUnit) || oldUnit === newUnit) return null;
+    const decimals = newUnit === 'nM' ? 0 : newUnit === 'µM' ? 2 : 4;
+    return {
+        min:  +fromMM(getMM(cfgMin,  oldUnit), newUnit).toFixed(decimals),
+        max:  +fromMM(getMM(cfgMax,  oldUnit), newUnit).toFixed(decimals),
+        step: +fromMM(getMM(cfgStep, oldUnit), newUnit).toFixed(decimals)
+    };
+}
+
 const selectInventory = (type, inv) => {
-    const unit = inv.stockUnit || 'µM';
+    const newUnit = inv.stockUnit || 'µM';
     if (type === 'anion') {
+        const scaled = rescaleRange(config.value.anionMin, config.value.anionMax, config.value.anionStep, config.value.anionUnit, newUnit);
+        if (scaled) { config.value.anionMin = scaled.min; config.value.anionMax = scaled.max; config.value.anionStep = scaled.step; }
         config.value.anionName = `[${inv.code}] ${inv.name}`;
         config.value.stockAnion = inv.stock;
-        config.value.anionUnit = unit;
+        config.value.anionUnit = newUnit;
         config.value.anionInv = inv;
     } else if (type === 'cation') {
+        const scaled = rescaleRange(config.value.cationMin, config.value.cationMax, config.value.cationStep, config.value.cationUnit, newUnit);
+        if (scaled) { config.value.cationMin = scaled.min; config.value.cationMax = scaled.max; config.value.cationStep = scaled.step; }
         config.value.cationName = `[${inv.code}] ${inv.name}`;
         config.value.stockCation = inv.stock;
-        config.value.cationUnit = unit;
+        config.value.cationUnit = newUnit;
         config.value.cationInv = inv;
     } else if (type === 'salt') {
+        const scaled = rescaleRange(config.value.saltMin, config.value.saltMax, config.value.saltStep, config.value.saltUnit, newUnit);
+        if (scaled) { config.value.saltMin = scaled.min; config.value.saltMax = scaled.max; config.value.saltStep = scaled.step; }
         config.value.saltName = `[${inv.code}] ${inv.name}`;
         config.value.stockSalt = inv.stock;
-        config.value.saltUnit = unit;
+        config.value.saltUnit = newUnit;
         config.value.saltInv = inv;
     }
     activeDropdown.value = null;
@@ -838,6 +864,7 @@ onMounted(() => {
 .target-vol-input input { width: 80px; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; }
 .config-grid-complex { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .input-group label { display: block; font-size: 0.8rem; margin-bottom: 4px; font-weight: bold; opacity: 0.8; }
+.unit-badge { display: inline-block; font-size: 0.7rem; font-weight: normal; background: rgba(59, 130, 246, 0.15); color: #3b82f6; border-radius: 3px; padding: 1px 5px; margin-left: 4px; letter-spacing: 0.3px; }
 .input-group input { width: 100%; padding: 6px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; font-size: 0.85rem; }
 .inventory-select-box { border: 1px solid var(--border-color, #cbd5e1); padding: 6px 10px; background: transparent; color: inherit; cursor: pointer; border-radius: 4px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; min-height: 32px; }
 

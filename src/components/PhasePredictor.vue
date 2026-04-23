@@ -552,16 +552,13 @@ const renderPlot = () => {
 watch([experiments, suggestions, config], () => { renderPlot() }, { deep: true })
 
 const fetchExperiments = async () => {
-  let query = db.from('phase_data').select('*');
-  if (store.user && store.user.id) query = query.eq('owner_id', store.user.id);
-  
-  const { data, error } = await query;
-  if (!error && data) { 
+  const { data, error } = await db.from('phase_data').select('*');
+  if (!error && data) {
       experiments.value = data.map(row => ({
           ...row,
           sampleId: row.sampleid !== undefined ? row.sampleid : row.sampleId
       }));
-      renderPlot() 
+      renderPlot()
   }
 }
 
@@ -602,25 +599,21 @@ const clearLedger = async () => {
 
 const importSuggestion = async (sug) => {
   const payload = { sampleid: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase };
-  if (store.user && store.user.id) payload.owner_id = store.user.id;
-  
   const { error } = await db.from('phase_data').insert([payload]);
-  if(!error) { 
-    await fetchExperiments(); 
-    suggestions.value = suggestions.value.filter(s => s.sampleId !== sug.sampleId); 
+  if (!error) {
+    await fetchExperiments();
+    suggestions.value = suggestions.value.filter(s => s.sampleId !== sug.sampleId);
   }
 }
 
 const importAllSuggestions = async () => {
-  const payload = suggestions.value.map(sug => {
-      const p = { sampleid: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase };
-      if (store.user && store.user.id) p.owner_id = store.user.id;
-      return p;
-  });
+  const payload = suggestions.value.map(sug => ({
+      sampleid: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase
+  }));
   const { error } = await db.from('phase_data').insert(payload);
-  if(!error) { 
-    await fetchExperiments(); 
-    suggestions.value = []; 
+  if (!error) {
+    await fetchExperiments();
+    suggestions.value = [];
   } else {
     alert("Error logging AI targets to Supabase.");
   }
@@ -672,13 +665,11 @@ const triggerFileInput = () => {
             let c = parseFloat(cols[idxC]);
             let rawPhase = parseInt(cols[idxPhase], 10); 
             
-            if (isNaN(sId)) sId = Math.floor(Math.random() * 9000); 
+            if (isNaN(sId)) sId = Math.floor(Math.random() * 9000);
             if (isNaN(a) || isNaN(b) || isNaN(c) || isNaN(rawPhase)) continue;
 
-            if (rawPhase >= 0 && rawPhase <= 4) {
-                const payload = { sampleid: sId, anion: Number(a.toFixed(2)), cation: Number(b.toFixed(2)), salt: Number(c.toFixed(1)), phase: rawPhase };
-                if (store.user && store.user.id) payload.owner_id = store.user.id;
-                newKnowns.push(payload);
+            if (rawPhase >= -1 && rawPhase <= 4) {
+                newKnowns.push({ sampleid: sId, anion: Number(a.toFixed(4)), cation: Number(b.toFixed(4)), salt: Number(c.toFixed(4)), phase: rawPhase });
             }
         }
       }

@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, watch } from 'vue'
 import { db } from './services/supabase'
 import { useLabStore } from './stores/labStore'
 
@@ -22,6 +22,17 @@ import WellPlateEditor from './components/WellPlateEditor.vue'
 import ArchiveManager from './components/ArchiveManager.vue'
 
 const store = useLabStore()
+
+// Auto-save full workspace state per user so unsaved items/blocks survive refresh
+let draftSaveTimeout
+watch(
+  [() => store.reactions, () => store.matrices, () => store.reverseMatrices, () => store.wellPlates],
+  () => {
+    clearTimeout(draftSaveTimeout)
+    draftSaveTimeout = setTimeout(() => store.saveLocalDrafts(), 800)
+  },
+  { deep: true }
+)
 
 onMounted(() => {
   // Check if user is already logged in on load

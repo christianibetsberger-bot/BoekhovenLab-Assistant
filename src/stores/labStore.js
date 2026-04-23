@@ -149,6 +149,23 @@ export const useLabStore = defineStore('lab', {
           if (maxId >= this.nextPlateId) this.nextPlateId = maxId + 1;
       }
 
+      // Restore local workspace drafts — unsaved items and unsaved changes survive refresh
+      const draftRaw = localStorage.getItem(`lab_local_drafts_${this.user.id}`);
+      if (draftRaw) {
+        try {
+          const drafts = JSON.parse(draftRaw);
+          // Sub-counters (block/component IDs) are not derivable from cloud, restore from draft
+          if ((drafts.nextBlockId || 0) > this.nextBlockId) this.nextBlockId = drafts.nextBlockId;
+          if ((drafts.nextRmCompId || 0) > this.nextRmCompId) this.nextRmCompId = drafts.nextRmCompId;
+          // Prefer draft state for workspace — it has the latest local edits including unsaved blocks
+          if (drafts.reactions?.length > 0) this.reactions = drafts.reactions;
+          if (drafts.matrices?.length > 0) this.matrices = drafts.matrices;
+          if (drafts.reverseMatrices?.length > 0) this.reverseMatrices = drafts.reverseMatrices;
+          if (drafts.wellPlates?.length > 0) this.wellPlates = drafts.wellPlates;
+        } catch (e) {
+          // Corrupted draft — ignore and use cloud state
+        }
+      }
     },
 
     async saveItemToCloud(item) {
@@ -220,6 +237,19 @@ export const useLabStore = defineStore('lab', {
       if (num === null || num === undefined || isNaN(num)) return (0).toFixed(this.globalSettings.decimals);
       const factor = Math.pow(10, this.globalSettings.decimals);
       return (Math.round((Number(num) + Number.EPSILON) * factor) / factor).toFixed(this.globalSettings.decimals);
+    },
+
+    saveLocalDrafts() {
+      if (!this.user?.id) return;
+      const drafts = {
+        reactions: JSON.parse(JSON.stringify(this.reactions)),
+        matrices: JSON.parse(JSON.stringify(this.matrices)),
+        reverseMatrices: JSON.parse(JSON.stringify(this.reverseMatrices)),
+        wellPlates: JSON.parse(JSON.stringify(this.wellPlates)),
+        nextBlockId: this.nextBlockId,
+        nextRmCompId: this.nextRmCompId
+      };
+      localStorage.setItem(`lab_local_drafts_${this.user.id}`, JSON.stringify(drafts));
     },
 
     saveUserPreferences() {

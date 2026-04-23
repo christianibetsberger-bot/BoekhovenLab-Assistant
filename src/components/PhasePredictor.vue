@@ -177,8 +177,8 @@
                 <i class="fas" :class="isCalculatingBoundary ? 'fa-spinner fa-spin' : 'fa-cube'"></i>
                 {{ isCalculatingBoundary ? 'Modeling...' : 'Map Phase Boundaries' }}
               </button>
-              <button class="small" @click="exportPlot" title="Export phase map as PNG" style="background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid #10b981; margin: 0;">
-                <i class="fas fa-image"></i> Export
+              <button class="small" @click="exportPlot" title="Export interactive 3D phase map as HTML (open in browser to rotate)" style="background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid #10b981; margin: 0;">
+                <i class="fas fa-cube"></i> Export HTML
               </button>
             </div>
           </div>
@@ -741,11 +741,40 @@ const calculateBoundary = async () => {
 }
 
 const exportPlot = () => {
-  const anionLabel = `${config.value.anionName} (${config.value.anionUnit})`.replace(/[^a-zA-Z0-9_\-]/g, '_');
-  const cationLabel = `${config.value.cationName} (${config.value.cationUnit})`.replace(/[^a-zA-Z0-9_\-]/g, '_');
-  const saltLabel = `${config.value.saltName} (${config.value.saltUnit})`.replace(/[^a-zA-Z0-9_\-]/g, '_');
-  const filename = `PhaseMap_${anionLabel}_${cationLabel}_${saltLabel}_${new Date().toISOString().split('T')[0]}`;
-  Plotly.downloadImage('phase-ternary-plot', { format: 'png', width: 1400, height: 1000, filename })
+  const plotDiv = document.getElementById('phase-ternary-plot')
+  if (!plotDiv || !plotDiv.data) { alert('Nothing to export — generate the phase map first.'); return; }
+
+  const date = new Date().toISOString().split('T')[0];
+  const filename = `PhaseMap_${date}`;
+
+  // Serialize live traces and layout into a standalone interactive HTML file.
+  // Plotly 3D is rendered in WebGL so downloadImage only captures the SVG legend —
+  // exporting as HTML preserves the full interactive 3D scene.
+  const html = `<!DOCTYPE html>
+<html><head>
+  <meta charset="utf-8">
+  <title>${filename}</title>
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"><\/script>
+  <style>body{margin:0;background:#000;}#plot{width:100vw;height:100vh;}</style>
+</head>
+<body>
+  <div id="plot"></div>
+  <script>
+    Plotly.newPlot('plot',
+      ${JSON.stringify(plotDiv.data)},
+      ${JSON.stringify(plotDiv.layout)},
+      {responsive:true}
+    );
+  <\/script>
+</body>
+</html>`;
+
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${filename}.html`;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
 const calculateNextExperiments = async () => {

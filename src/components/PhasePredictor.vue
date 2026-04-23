@@ -536,14 +536,14 @@ const renderPlot = () => {
 
       Object.keys(boundaryData.value.probs).forEach(phaseId => {
           const pId = parseInt(phaseId, 10);
-          // Clear (0) is empty space between phases — don't render a surface for it
+          // Skip Clear (0) — represents unstructured solution; no surface needed.
+          // Other phases may be directly adjacent to each other without a Clear gap.
           if (pId === 0) return;
 
           const rawProb = [...boundaryData.value.probs[phaseId]];
           const maxProb = Math.max(...rawProb);
           if (maxProb < 0.3) return;
 
-          // Force proper Plotly colorscale syntax
           const baseColor = phaseColors[pId] || 'rgba(148, 163, 184, 1)';
           const transparentColor = baseColor.replace('1)', '0.0)');
           const cScale = [ [0, transparentColor], [1, baseColor] ];
@@ -554,16 +554,20 @@ const renderPlot = () => {
               y: rawY,
               z: rawZ,
               value: rawProb,
-              // 0.45 contour on the argmax-indicator field gives the RFC decision boundary.
-              // All training points are guaranteed inside because RFC classifies its own data correctly.
-              isomin: 0.45,
+              // Threshold 0.40 on the argmax-indicator (0/1) field after light Gaussian smoothing.
+              // At a direct phase-phase boundary (no Clear in between), the smoothed indicator
+              // for both phases is ~0.5 at the shared boundary voxels.  Using 0.40 ensures
+              // both surfaces extend to include those voxels so they visually meet rather than
+              // leaving a spurious gap.  Training points are well inside (field → 1) so they
+              // remain enclosed regardless of threshold.
+              isomin: 0.40,
               isomax: 1.0,
               surface: { show: true, count: 1 },
-              opacity: 0.45, 
-              colorscale: cScale, 
+              opacity: 0.45,
+              colorscale: cScale,
               caps: { x: {show: false}, y: {show: false}, z: {show: false} },
               name: `${phaseNames[pId] || 'Phase ' + pId} Boundary`,
-              showscale: false, 
+              showscale: false,
               hoverinfo: 'none'
           };
           traces.push(traceSurface);

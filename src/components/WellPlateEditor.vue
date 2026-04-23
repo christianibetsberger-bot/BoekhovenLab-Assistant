@@ -508,7 +508,7 @@ const exportAndrewPlus = (plate) => {
                     <option v-for="lw in store.targetLabwares.filter(l => l.format === plate.format)" :value="lw.uuid" :key="lw.uuid">{{ lw.name }}</option>
                 </select>
                 <button class="small" @click="savePlateToJournal(plate)" title="Log to Journal"><i class="fas fa-file-import"></i> Log</button>
-                <button class="small" @click="exportAndrewPlus(plate)" title="Export Robot Protocol (.onp) — Requires a valid Andrew+ license. Not affiliated with or endorsed by Waters Corporation."><i class="fas fa-robot"></i> Export (.onp)</button>
+                <button class="small" @click="exportAndrewPlus(plate)" title="Export Robot Protocol (.onp) — Requires a valid Andrew+ license. Not affiliated with or endorsed by Waters Corporation."><i class="fas fa-robot"></i> .onp</button>
                 <button class="secondary small" @click="duplicateWellPlate(pIndex)" title="Duplicate"><i class="fas fa-copy"></i></button>
                 <button class="secondary small" @click="archivePlate(pIndex)" title="Archive"><i class="fas fa-box-archive"></i></button>
                 <button class="danger small" @click="closePlateInWorkspace(pIndex)" title="Close from workspace"><i class="fas fa-times"></i></button>

@@ -217,35 +217,29 @@ const exportJournal = (type) => {
 // --- Fetch from Supabase on Mount ---
 onMounted(async () => {
     const { data: { user } } = await db.auth.getUser();
-    
+
     if (user) {
         const { data, error } = await db.from('journals')
             .select('*')
             .eq('owner_id', user.id)
             .order('created_at', { ascending: false });
-            
-        if (!error && data) {
-            // Because your local store might have old integer-based entries, 
-            // we filter them out and only replace with fresh Supabase data
-            const cloudEntries = data.map(row => ({
-                id: row.id,
-                expId: row.data?.expId || 'Untitled',
-                date: row.data?.date || '',
-                content: row.data?.content || '',
-                created_at: row.created_at
-            }));
 
-            // Merge cloud entries with any existing local entries (if needed)
-            // Or strictly overwrite to ensure clean state
-            const localEntries = store.journal.entries.filter(e => typeof e.id !== 'string');
-            store.journal.entries = [...cloudEntries, ...localEntries];
-            
-            if (store.journal.entries.length > 0) {
-                store.journal.activeId = store.journal.entries[0].id;
-                nextTick(() => syncEditor());
-            }
-        } else if (error) {
+        if (error) {
             console.error("Failed to load journal entries from server:", error);
+            return;
+        }
+
+        store.journal.entries = (data || []).map(row => ({
+            id: row.id,
+            expId: row.data?.expId || 'Untitled',
+            date: row.data?.date || '',
+            content: row.data?.content || '',
+            created_at: row.created_at
+        }));
+
+        if (store.journal.entries.length > 0) {
+            store.journal.activeId = store.journal.entries[0].id;
+            nextTick(() => syncEditor());
         }
     }
 });

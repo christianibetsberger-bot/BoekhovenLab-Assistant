@@ -28,6 +28,7 @@ onMounted(() => {
   db.auth.getSession().then(({ data }) => {
     if (data.session) {
       store.user = data.session.user
+      store.loadUserPreferences()
       store.loadCloudInventory()
     }
   })
@@ -36,6 +37,7 @@ onMounted(() => {
   db.auth.onAuthStateChange((event, session) => {
     store.user = session?.user || null
     if (store.user) {
+        store.loadUserPreferences()
         store.loadCloudInventory()
     }
   })

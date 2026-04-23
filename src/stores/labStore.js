@@ -149,13 +149,6 @@ export const useLabStore = defineStore('lab', {
           if (maxId >= this.nextPlateId) this.nextPlateId = maxId + 1;
       }
 
-      // 6. Load Journal Entries
-      const { data: jrnData } = await db.from('journals').select('*');
-      if (jrnData && jrnData.length > 0) {
-          this.journal.entries = jrnData.map(row => row.data);
-          this.journal.entries.sort((a, b) => new Date(b.date) - new Date(a.date));
-          if (!this.journal.activeId) this.journal.activeId = this.journal.entries[0].id;
-      }
     },
 
     async saveItemToCloud(item) {
@@ -229,6 +222,25 @@ export const useLabStore = defineStore('lab', {
       return (Math.round((Number(num) + Number.EPSILON) * factor) / factor).toFixed(this.globalSettings.decimals);
     },
 
+    saveUserPreferences() {
+      if (!this.user?.id) return;
+      const prefs = {
+        isDarkMode: this.isDarkMode,
+        uiSettings: { ...this.uiSettings }
+      };
+      localStorage.setItem(`lab_user_prefs_${this.user.id}`, JSON.stringify(prefs));
+    },
+
+    loadUserPreferences() {
+      if (!this.user?.id) return;
+      const raw = localStorage.getItem(`lab_user_prefs_${this.user.id}`);
+      if (!raw) return;
+      const prefs = JSON.parse(raw);
+      if (prefs.isDarkMode !== undefined) this.isDarkMode = prefs.isDarkMode;
+      if (prefs.uiSettings) this.uiSettings = { ...this.uiSettings, ...prefs.uiSettings };
+      this.updateThemeColors();
+    },
+
     toggleDarkMode() {
       this.isDarkMode = !this.isDarkMode;
       this.updateThemeColors();
@@ -242,6 +254,7 @@ export const useLabStore = defineStore('lab', {
       }
       document.documentElement.style.setProperty('--primary', this.uiSettings.primaryColor);
       document.documentElement.style.setProperty('--radius', this.uiSettings.borderRadius);
+      this.saveUserPreferences();
     }
   }
 })

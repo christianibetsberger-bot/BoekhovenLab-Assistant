@@ -552,7 +552,8 @@ const renderPlot = () => {
 watch([experiments, suggestions, config], () => { renderPlot() }, { deep: true })
 
 const fetchExperiments = async () => {
-  const { data, error } = await db.from('phase_data').select('*');
+  if (!store.user?.id) return;
+  const { data, error } = await db.from('phase_data').select('*').eq('owner_id', store.user.id);
   if (!error && data) {
       experiments.value = data.map(row => ({
           ...row,
@@ -598,7 +599,8 @@ const clearLedger = async () => {
 }
 
 const importSuggestion = async (sug) => {
-  const payload = { sampleid: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase };
+  if (!store.user?.id) return;
+  const payload = { sampleid: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase, owner_id: store.user.id };
   const { error } = await db.from('phase_data').insert([payload]);
   if (!error) {
     await fetchExperiments();
@@ -607,8 +609,9 @@ const importSuggestion = async (sug) => {
 }
 
 const importAllSuggestions = async () => {
+  if (!store.user?.id) return;
   const payload = suggestions.value.map(sug => ({
-      sampleid: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase
+      sampleid: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase, owner_id: store.user.id
   }));
   const { error } = await db.from('phase_data').insert(payload);
   if (!error) {
@@ -669,7 +672,7 @@ const triggerFileInput = () => {
             if (isNaN(a) || isNaN(b) || isNaN(c) || isNaN(rawPhase)) continue;
 
             if (rawPhase >= -1 && rawPhase <= 4) {
-                newKnowns.push({ sampleid: sId, anion: Number(a.toFixed(4)), cation: Number(b.toFixed(4)), salt: Number(c.toFixed(4)), phase: rawPhase });
+                newKnowns.push({ sampleid: sId, anion: Number(a.toFixed(4)), cation: Number(b.toFixed(4)), salt: Number(c.toFixed(4)), phase: rawPhase, owner_id: store.user?.id });
             }
         }
       }

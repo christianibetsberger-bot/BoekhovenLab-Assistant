@@ -152,10 +152,10 @@
           <div class="flex-between" style="margin-top: 10px;">
             <div style="display: flex; gap: 10px;">
               <button class="small" @click="addManualRow"><i class="fas fa-plus"></i> Add Manual Data</button>
-              <button class="small" @click="triggerFileInput" style="background: var(--summary-bg, #f1f5f9); color: inherit; border: 1px solid var(--border-color, #cbd5e1);">
+              <button class="small" @click="csvInputRef.click()" style="background: var(--summary-bg, #f1f5f9); color: inherit; border: 1px solid var(--border-color, #cbd5e1);">
                 <i class="fas fa-file-csv"></i> Import CSV
               </button>
-              <input type="file" id="hidden-csv-input" accept=".csv" style="display: none" />
+              <input type="file" ref="csvInputRef" accept=".csv" style="display: none" @change="onCsvFileSelected" />
             </div>
             <button class="small danger-btn" @click="clearLedger"><i class="fas fa-trash-alt"></i> Reset Memory</button>
           </div>
@@ -622,94 +622,84 @@ const importAllSuggestions = async () => {
   }
 }
 
-const triggerFileInput = () => { 
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.csv';
+const csvInputRef = ref(null)
 
-  input.onchange = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    
-    reader.onload = async (e) => {
-      const text = e.target.result; 
-      const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
-      if (lines.length < 2) return;
-      
-      const delimiter = lines[0].includes(';') ? ';' : ',';
-      const headers = lines[0].split(delimiter).map(s => s.trim().replace(/^["']|["']$/g, '').toLowerCase());
-      
-      let idxId = headers.findIndex(h => h === '' || h === 'index' || h === 'sampleid');
-      let idxA = headers.indexOf('anion');
-      let idxB = headers.indexOf('cation');
-      let idxC = headers.indexOf('salt');
-      let idxPhase = headers.indexOf('phase');
-      
-      if (idxId === -1) idxId = 0;
-      if (idxA === -1) idxA = 1;
-      if (idxB === -1) idxB = 2;
-      if (idxC === -1) idxC = 3;
-      if (idxPhase === -1) idxPhase = 4;
-      
-      const newKnowns = [];
-      
-      for (let i = 1; i < lines.length; i++) {
-        const rowText = lines[i].trim();
-        if(!rowText) continue;
-        
-        const cols = rowText.split(delimiter).map(c => c.trim().replace(/^["']|["']$/g, ''));
-        
-        if (cols.length > Math.max(idxA, idxB, idxC, idxPhase)) { 
-            let sId = parseInt(cols[idxId], 10);
-            let a = parseFloat(cols[idxA]);
-            let b = parseFloat(cols[idxB]);
-            let c = parseFloat(cols[idxC]);
-            let rawPhase = parseInt(cols[idxPhase], 10); 
-            
-            if (isNaN(sId)) sId = Math.floor(Math.random() * 9000);
-            if (isNaN(a) || isNaN(b) || isNaN(c) || isNaN(rawPhase)) continue;
+const onCsvFileSelected = async (event) => {
+  const file = event.target.files[0];
+  // Reset so the same file can be re-uploaded later
+  event.target.value = '';
+  if (!file) return;
 
-            if (rawPhase >= -1 && rawPhase <= 4) {
-                newKnowns.push({ sampleid: sId, anion: Number(a.toFixed(4)), cation: Number(b.toFixed(4)), salt: Number(c.toFixed(4)), phase: rawPhase, owner_id: store.user?.id });
-            }
-        }
-      }
+  const text = await file.text();
+  const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+  if (lines.length < 2) { alert('CSV file appears to be empty.'); return; }
 
-      if (newKnowns.length > 0) {
-          const uniqueToInsert = [];
-          const seenIds = new Set(experiments.value.map(exp => exp.sampleId));
+  const delimiter = lines[0].includes(';') ? ';' : ',';
+  const headers = lines[0].split(delimiter).map(s => s.trim().replace(/^﻿/, '').replace(/^["']|["']$/g, '').toLowerCase());
 
-          for (let k of newKnowns) {
-              if (!seenIds.has(k.sampleid)) {
-                  uniqueToInsert.push(k);
-                  seenIds.add(k.sampleid);
-              }
-          }
+  let idxId = headers.findIndex(h => h === '' || h === 'index' || h === 'sampleid');
+  let idxA = headers.indexOf('anion');
+  let idxB = headers.indexOf('cation');
+  let idxC = headers.indexOf('salt');
+  let idxPhase = headers.indexOf('phase');
 
-          if (uniqueToInsert.length > 0) {
-              const { error } = await db.from('phase_data').insert(uniqueToInsert);
-              if (!error) {
-                  await fetchExperiments();
-                  alert(`Successfully imported ${uniqueToInsert.length} historical data points into the Ledger!`);
-              } else {
-                  console.error("Supabase Error:", error);
-                  alert("Error logging CSV data to Supabase. Check console.");
-              }
-          } else {
-              alert("All tested points in this CSV are already loaded in the Ledger.");
-          }
-      } else {
-          alert("No valid tested points (Phases 0-4) were found in the uploaded CSV.");
-      }
-    };
-    
-    reader.onerror = () => { alert("Failed to read the file."); };
-    reader.readAsText(file);
-  };
-  
-  input.click();
+  if (idxId === -1) idxId = 0;
+  if (idxA === -1) idxA = 1;
+  if (idxB === -1) idxB = 2;
+  if (idxC === -1) idxC = 3;
+  if (idxPhase === -1) idxPhase = 4;
+
+  const newKnowns = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const rowText = lines[i].trim();
+    if (!rowText) continue;
+
+    const cols = rowText.split(delimiter).map(c => c.trim().replace(/^["']|["']$/g, ''));
+    if (cols.length <= Math.max(idxA, idxB, idxC, idxPhase)) continue;
+
+    let sId = parseInt(cols[idxId], 10);
+    const a = parseFloat(cols[idxA]);
+    const b = parseFloat(cols[idxB]);
+    const c = parseFloat(cols[idxC]);
+    const rawPhase = parseInt(cols[idxPhase], 10);
+
+    if (isNaN(sId)) sId = Math.floor(Math.random() * 9000);
+    if (isNaN(a) || isNaN(b) || isNaN(c) || isNaN(rawPhase)) continue;
+    if (rawPhase < -1 || rawPhase > 4) continue;
+
+    const row = { sampleid: sId, anion: Number(a.toFixed(4)), cation: Number(b.toFixed(4)), salt: Number(c.toFixed(4)), phase: rawPhase };
+    if (store.user?.id) row.owner_id = store.user.id;
+    newKnowns.push(row);
+  }
+
+  if (newKnowns.length === 0) {
+    alert('No valid rows found in the CSV. Check that columns Anion, Cation, Salt, Phase exist.');
+    return;
+  }
+
+  const seenIds = new Set(experiments.value.map(exp => exp.sampleId ?? exp.sampleid));
+  const uniqueToInsert = [];
+  for (const k of newKnowns) {
+    if (!seenIds.has(k.sampleid)) {
+      uniqueToInsert.push(k);
+      seenIds.add(k.sampleid);
+    }
+  }
+
+  if (uniqueToInsert.length === 0) {
+    alert('All rows in this CSV are already loaded in the Ledger.');
+    return;
+  }
+
+  const { error } = await db.from('phase_data').insert(uniqueToInsert);
+  if (!error) {
+    await fetchExperiments();
+    alert(`Successfully imported ${uniqueToInsert.length} data points into the Ledger!`);
+  } else {
+    console.error('Supabase insert error:', error);
+    alert(`Import failed: ${error.message}`);
+  }
 }
 
 const calculateBoundary = async () => {

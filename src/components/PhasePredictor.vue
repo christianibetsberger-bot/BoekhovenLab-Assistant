@@ -23,7 +23,7 @@
           
           <div class="config-grid-complex">
             <div class="input-group">
-              <label>Component A (Anion) <span class="unit-badge">{{ config.anionUnit }}</span></label>
+              <label>Component A (Anion) <select :value="config.anionUnit" @change="changeUnit('anion', config.anionUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
               <div style="display: flex; gap: 5px; align-items: flex-end;">
                 <div style="flex: 2; position: relative;" @click.stop>
                   <div @click="activeDropdown = activeDropdown === 'anion' ? null : 'anion'" class="inventory-select-box">
@@ -53,7 +53,7 @@
             </div>
             
             <div class="input-group">
-              <label>Component B (Cation) <span class="unit-badge">{{ config.cationUnit }}</span></label>
+              <label>Component B (Cation) <select :value="config.cationUnit" @change="changeUnit('cation', config.cationUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
               <div style="display: flex; gap: 5px; align-items: flex-end;">
                 <div style="flex: 2; position: relative;" @click.stop>
                   <div @click="activeDropdown = activeDropdown === 'cation' ? null : 'cation'" class="inventory-select-box">
@@ -83,7 +83,7 @@
             </div>
             
             <div class="input-group">
-              <label>Component C (Salt/Buffer) <span class="unit-badge">{{ config.saltUnit }}</span></label>
+              <label>Component C (Salt/Buffer) <select :value="config.saltUnit" @change="changeUnit('salt', config.saltUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
               <div style="display: flex; gap: 5px; align-items: flex-end;">
                 <div style="flex: 2; position: relative;" @click.stop>
                   <div @click="activeDropdown = activeDropdown === 'salt' ? null : 'salt'" class="inventory-select-box">
@@ -120,9 +120,9 @@
             <table class="ledger-table">
               <thead>
                 <tr>
-                  <th>A ({{ config.anionUnit }})</th>
-                  <th>B ({{ config.cationUnit }})</th>
-                  <th>C ({{ config.saltUnit }})</th>
+                  <th>A (<span class="unit-text">{{ config.anionUnit }}</span>)</th>
+                  <th>B (<span class="unit-text">{{ config.cationUnit }}</span>)</th>
+                  <th>C (<span class="unit-text">{{ config.saltUnit }}</span>)</th>
                   <th>Observed Phase</th>
                   <th></th>
                 </tr>
@@ -367,6 +367,8 @@ const getMM = (val, unit) => {
     return val * m;
 }
 
+const unitOptions = ['M', 'mM', 'µM', 'nM', 'mg/mL', 'µg/µL', 'ng/µL', 'X', '%']
+
 // Inverse of getMM — convert a mM value back to a target unit (molar units only)
 const MOLAR_UNITS = new Set(['M', 'mM', 'µM', 'nM'])
 const fromMM = (valMM, unit) => {
@@ -385,6 +387,37 @@ const rescaleRange = (cfgMin, cfgMax, cfgStep, oldUnit, newUnit) => {
         max:  +fromMM(getMM(cfgMax,  oldUnit), newUnit).toFixed(decimals),
         step: +fromMM(getMM(cfgStep, oldUnit), newUnit).toFixed(decimals)
     };
+}
+
+// Called when the user changes the unit selector manually — rescales all values.
+const changeUnit = (type, oldUnit, newUnit) => {
+    if (oldUnit === newUnit) return;
+    const rescale = (min, max, step, stock) => {
+        const range = rescaleRange(min, max, step, oldUnit, newUnit);
+        let newStock = stock;
+        if (MOLAR_UNITS.has(oldUnit) && MOLAR_UNITS.has(newUnit)) {
+            const d = newUnit === 'nM' ? 0 : newUnit === 'µM' ? 2 : 4;
+            newStock = +fromMM(getMM(stock, oldUnit), newUnit).toFixed(d);
+        }
+        return { range, newStock };
+    };
+    if (type === 'anion') {
+        const { range, newStock } = rescale(config.value.anionMin, config.value.anionMax, config.value.anionStep, config.value.stockAnion);
+        if (range) { config.value.anionMin = range.min; config.value.anionMax = range.max; config.value.anionStep = range.step; }
+        config.value.stockAnion = newStock;
+        config.value.anionUnit = newUnit;
+    } else if (type === 'cation') {
+        const { range, newStock } = rescale(config.value.cationMin, config.value.cationMax, config.value.cationStep, config.value.stockCation);
+        if (range) { config.value.cationMin = range.min; config.value.cationMax = range.max; config.value.cationStep = range.step; }
+        config.value.stockCation = newStock;
+        config.value.cationUnit = newUnit;
+    } else if (type === 'salt') {
+        const { range, newStock } = rescale(config.value.saltMin, config.value.saltMax, config.value.saltStep, config.value.stockSalt);
+        if (range) { config.value.saltMin = range.min; config.value.saltMax = range.max; config.value.saltStep = range.step; }
+        config.value.stockSalt = newStock;
+        config.value.saltUnit = newUnit;
+    }
+    renderPlot();
 }
 
 const selectInventory = (type, inv) => {
@@ -868,7 +901,9 @@ onMounted(() => {
 .target-vol-input input { width: 80px; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; }
 .config-grid-complex { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .input-group label { display: block; font-size: 0.8rem; margin-bottom: 4px; font-weight: bold; opacity: 0.8; }
-.unit-badge { display: inline-block; font-size: 0.7rem; font-weight: normal; background: rgba(59, 130, 246, 0.15); color: #3b82f6; border-radius: 3px; padding: 1px 5px; margin-left: 4px; letter-spacing: 0.3px; }
+.unit-select { display: inline-block; font-size: 0.7rem; font-weight: normal; text-transform: none; letter-spacing: 0; background: rgba(59, 130, 246, 0.15); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 3px; padding: 1px 3px; margin-left: 4px; cursor: pointer; width: auto; max-width: 80px; outline: none; vertical-align: middle; }
+.unit-select option { text-transform: none; color: var(--text); background: var(--surface); }
+.unit-text { text-transform: none; }
 .input-group input { width: 100%; padding: 6px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; font-size: 0.85rem; }
 .inventory-select-box { border: 1px solid var(--border-color, #cbd5e1); padding: 6px 10px; background: transparent; color: inherit; cursor: pointer; border-radius: 4px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; min-height: 32px; }
 

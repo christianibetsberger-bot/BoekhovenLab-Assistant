@@ -18,13 +18,13 @@
     --radius: 2px; /* Controlled by UI settings */
 }
 
-/* Dark Mode Override */
-body.dark-mode {
-    --bg: #111827;            
+/* Dark Mode Override — covers both body.dark-mode and #body-wrapper.dark-mode */
+body.dark-mode, .dark-mode {
+    --bg: #111827;
     --surface: #1f2937;
-    --text: #f3f4f6; 
+    --text: #f3f4f6;
     --border: #374151;
-    --danger: #f87171; 
+    --danger: #f87171;
     --danger-bg: #7f1d1d;
     --summary-bg: #111827;
     --input-bg: #374151;

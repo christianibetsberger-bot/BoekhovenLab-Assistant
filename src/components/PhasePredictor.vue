@@ -546,9 +546,9 @@ const renderPlot = () => {
 
   const layout = {
     scene: {
-      xaxis: { range: [config.value.anionMin, config.value.anionMax], title: `${config.value.anionName} (${config.value.anionUnit})`, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } },
-      yaxis: { range: [config.value.cationMin, config.value.cationMax], title: `${config.value.cationName} (${config.value.cationUnit})`, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } },
-      zaxis: { range: [config.value.saltMin, config.value.saltMax], title: `${config.value.saltName} (${config.value.saltUnit})`, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } }
+      xaxis: { range: [config.value.anionMin, config.value.anionMax], title: { text: `${config.value.anionName} (${config.value.anionUnit})`, font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } },
+      yaxis: { range: [config.value.cationMin, config.value.cationMax], title: { text: `${config.value.cationName} (${config.value.cationUnit})`, font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } },
+      zaxis: { range: [config.value.saltMin, config.value.saltMax], title: { text: `${config.value.saltName} (${config.value.saltUnit})`, font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } }
     },
     paper_bgcolor: '#000000',
     margin: { l: 0, r: 0, b: 0, t: 0 },
@@ -842,12 +842,12 @@ onMounted(() => {
 .inventory-select-box { border: 1px solid var(--border-color, #cbd5e1); padding: 6px 10px; background: transparent; color: inherit; cursor: pointer; border-radius: 4px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; min-height: 32px; }
 
 /* Dropdown */
-.inventory-dropdown { position: absolute; top: 100%; left: 0; z-index: 1000; background: var(--bg-color, white); border: 1px solid var(--border-color, #cbd5e1); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); width: 100%; min-width: 250px; border-radius: 6px; overflow: hidden; }
-.dropdown-scope-selector { display: flex; gap: 10px; padding: 8px; border-bottom: 1px solid var(--border-color, #e2e8f0); }
-.dropdown-search { padding: 8px; display: flex; gap: 5px; border-bottom: 1px solid var(--border-color, #f1f5f9); }
-.dropdown-search input { background: var(--bg-color, white) !important; color: inherit !important; border: 1px solid var(--border-color, #cbd5e1); border-radius: 4px; padding: 5px 8px; font-size: 0.82rem; width: 100%; }
-.dropdown-results { overflow-y: auto; max-height: 150px; }
-.dropdown-item { padding: 8px 12px; cursor: pointer; font-size: 0.8rem; border-bottom: 1px solid var(--border-color, #f8fafc); transition: background 0.2s; }
+.inventory-dropdown { position: absolute; top: 100%; left: 0; z-index: 1000; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2); width: 100%; min-width: 250px; border-radius: 6px; overflow: hidden; color: var(--text); }
+.dropdown-scope-selector { display: flex; gap: 10px; padding: 8px; border-bottom: 1px solid var(--border); }
+.dropdown-search { padding: 8px; display: flex; gap: 5px; border-bottom: 1px solid var(--border); }
+.dropdown-search input { background: var(--input-bg) !important; color: var(--text) !important; border: 1px solid var(--border) !important; border-radius: 4px; padding: 5px 8px; font-size: 0.82rem; width: 100%; }
+.dropdown-results { overflow-y: auto; max-height: 150px; background: var(--surface); }
+.dropdown-item { padding: 8px 12px; cursor: pointer; font-size: 0.8rem; border-bottom: 1px solid var(--border); transition: background 0.2s; color: var(--text); }
 .dropdown-item:hover { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
 .truncate-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
 

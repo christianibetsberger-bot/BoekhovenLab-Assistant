@@ -231,6 +231,41 @@ export const useLabStore = defineStore('lab', {
       localStorage.setItem(`lab_local_drafts_${this.user.id}`, JSON.stringify(drafts));
     },
 
+    getDefaultModuleLayout() {
+      return {
+        // Order of modules in each column (by module id)
+        leftOrder: ['globalSettings', 'standardStock', 'sequenceCalc', 'archiveManager', 'inventoryManager'],
+        rightOrder: ['reactionPlan', 'matrixPlanner', 'screeningPlanner', 'phasePredictor', 'wellPlateEditor'],
+        // Which modules are minimized (id -> true)
+        minimized: {}
+      };
+    },
+
+    saveModuleLayout(layout) {
+      if (!this.user?.id) return;
+      localStorage.setItem(`lab_module_layout_${this.user.id}`, JSON.stringify(layout));
+    },
+
+    loadModuleLayout() {
+      if (!this.user?.id) return this.getDefaultModuleLayout();
+      const raw = localStorage.getItem(`lab_module_layout_${this.user.id}`);
+      if (!raw) return this.getDefaultModuleLayout();
+      try {
+        const saved = JSON.parse(raw);
+        const def = this.getDefaultModuleLayout();
+        // Merge saved with default to handle new modules added after user saved
+        const mergeOrders = (saved, def) => {
+          const allIds = def.filter(id => !saved.includes(id));
+          return [...saved, ...allIds];
+        };
+        return {
+          leftOrder: mergeOrders(saved.leftOrder || [], def.leftOrder),
+          rightOrder: mergeOrders(saved.rightOrder || [], def.rightOrder),
+          minimized: saved.minimized || {}
+        };
+      } catch { return this.getDefaultModuleLayout(); }
+    },
+
     saveUserPreferences() {
       if (!this.user?.id) return;
       const prefs = {

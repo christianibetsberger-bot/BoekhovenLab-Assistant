@@ -557,7 +557,7 @@ const fetchExperiments = async () => {
   if (!error && data) {
       experiments.value = data.map(row => ({
           ...row,
-          sampleId: row.sampleid !== undefined ? row.sampleid : row.sampleId
+          sampleId: row.sampleId ?? row.sampleid
       }));
       renderPlot()
   }
@@ -600,7 +600,7 @@ const clearLedger = async () => {
 
 const importSuggestion = async (sug) => {
   if (!store.user?.id) return;
-  const payload = { sampleid: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase, owner_id: store.user.id };
+  const payload = { sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase, owner_id: store.user.id };
   const { error } = await db.from('phase_data').insert([payload]);
   if (!error) {
     await fetchExperiments();
@@ -611,7 +611,7 @@ const importSuggestion = async (sug) => {
 const importAllSuggestions = async () => {
   if (!store.user?.id) return;
   const payload = suggestions.value.map(sug => ({
-      sampleid: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase, owner_id: store.user.id
+      sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase, owner_id: store.user.id
   }));
   const { error } = await db.from('phase_data').insert(payload);
   if (!error) {
@@ -668,7 +668,7 @@ const onCsvFileSelected = async (event) => {
     if (isNaN(a) || isNaN(b) || isNaN(c) || isNaN(rawPhase)) continue;
     if (rawPhase < -1 || rawPhase > 4) continue;
 
-    const row = { sampleid: sId, anion: Number(a.toFixed(4)), cation: Number(b.toFixed(4)), salt: Number(c.toFixed(4)), phase: rawPhase };
+    const row = { sampleId: sId, anion: Number(a.toFixed(4)), cation: Number(b.toFixed(4)), salt: Number(c.toFixed(4)), phase: rawPhase };
     if (store.user?.id) row.owner_id = store.user.id;
     newKnowns.push(row);
   }
@@ -678,12 +678,12 @@ const onCsvFileSelected = async (event) => {
     return;
   }
 
-  const seenIds = new Set(experiments.value.map(exp => exp.sampleId ?? exp.sampleid));
+  const seenIds = new Set(experiments.value.map(exp => exp.sampleId));
   const uniqueToInsert = [];
   for (const k of newKnowns) {
-    if (!seenIds.has(k.sampleid)) {
+    if (!seenIds.has(k.sampleId)) {
       uniqueToInsert.push(k);
-      seenIds.add(k.sampleid);
+      seenIds.add(k.sampleId);
     }
   }
 

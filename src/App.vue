@@ -26,7 +26,7 @@ const store = useLabStore()
 // Auto-save full workspace state per user so unsaved items/blocks survive refresh
 let draftSaveTimeout
 watch(
-  [() => store.reactions, () => store.matrices, () => store.reverseMatrices, () => store.wellPlates],
+  [() => store.reactions, () => store.matrices, () => store.reverseMatrices, () => store.wellPlates, () => store.journal.entries],
   () => {
     clearTimeout(draftSaveTimeout)
     draftSaveTimeout = setTimeout(() => store.saveLocalDrafts(), 800)

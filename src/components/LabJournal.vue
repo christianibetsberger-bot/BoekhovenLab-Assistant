@@ -229,13 +229,27 @@ onMounted(async () => {
             return;
         }
 
-        store.journal.entries = (data || []).map(row => ({
+        const cloudEntries = (data || []).map(row => ({
             id: row.id,
             expId: row.data?.expId || 'Untitled',
             date: row.data?.date || '',
             content: row.data?.content || '',
             created_at: row.created_at
         }));
+
+        // Prefer local draft content — it has the user's latest typing even if Supabase hasn't caught up
+        try {
+            const draftRaw = localStorage.getItem(`lab_local_drafts_${user.id}`);
+            const draftEntries = draftRaw ? JSON.parse(draftRaw).journalEntries : null;
+            if (draftEntries?.length > 0) {
+                const draftMap = new Map(draftEntries.map(e => [e.id, e]));
+                store.journal.entries = cloudEntries.map(e => draftMap.get(e.id) || e);
+            } else {
+                store.journal.entries = cloudEntries;
+            }
+        } catch (e) {
+            store.journal.entries = cloudEntries;
+        }
 
         if (store.journal.entries.length > 0) {
             store.journal.activeId = store.journal.entries[0].id;

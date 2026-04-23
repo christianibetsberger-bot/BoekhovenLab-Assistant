@@ -246,6 +246,7 @@ export const useLabStore = defineStore('lab', {
         matrices: JSON.parse(JSON.stringify(this.matrices)),
         reverseMatrices: JSON.parse(JSON.stringify(this.reverseMatrices)),
         wellPlates: JSON.parse(JSON.stringify(this.wellPlates)),
+        journalEntries: JSON.parse(JSON.stringify(this.journal.entries)),
         nextBlockId: this.nextBlockId,
         nextRmCompId: this.nextRmCompId
       };

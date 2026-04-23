@@ -509,9 +509,8 @@ const renderPlot = () => {
 
           const rawProb = [...boundaryData.value.probs[phaseId]];
           const maxProb = Math.max(...rawProb);
-          const minProb = Math.min(...rawProb);
-          if (maxProb - minProb < 0.05 || maxProb < 0.20) return;
-          
+          if (maxProb < 0.3) return;
+
           // Force proper Plotly colorscale syntax
           const baseColor = phaseColors[pId] || 'rgba(148, 163, 184, 1)';
           const transparentColor = baseColor.replace('1)', '0.0)');
@@ -523,10 +522,11 @@ const renderPlot = () => {
               y: rawY,
               z: rawZ,
               value: rawProb,
-              // Anchor the boundary line dynamically near the highest confidence ridge
-              isomin: Math.max(0.2, maxProb - 0.15), 
-              isomax: maxProb, 
-              surface: { show: true, count: 3 },
+              // 0.45 contour on the argmax-indicator field gives the RFC decision boundary.
+              // All training points are guaranteed inside because RFC classifies its own data correctly.
+              isomin: 0.45,
+              isomax: 1.0,
+              surface: { show: true, count: 1 },
               opacity: 0.45, 
               colorscale: cScale, 
               caps: { x: {show: false}, y: {show: false}, z: {show: false} },

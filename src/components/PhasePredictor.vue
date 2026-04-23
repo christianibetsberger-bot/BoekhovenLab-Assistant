@@ -500,13 +500,14 @@ const renderPlot = () => {
       const rawZ = [...boundaryData.value.z];
 
       Object.keys(boundaryData.value.probs).forEach(phaseId => {
-          const rawProb = [...boundaryData.value.probs[phaseId]];
           const pId = parseInt(phaseId, 10);
-          
-          // Clamp detection: Prevent WebGL from crashing if the model is highly uncertain
+          // Clear (0) is empty space between phases — don't render a surface for it
+          if (pId === 0) return;
+
+          const rawProb = [...boundaryData.value.probs[phaseId]];
           const maxProb = Math.max(...rawProb);
           const minProb = Math.min(...rawProb);
-          if (maxProb - minProb < 0.05 || maxProb < 0.20) return; // Skip if surface mathematically doesn't exist
+          if (maxProb - minProb < 0.05 || maxProb < 0.20) return;
           
           // Force proper Plotly colorscale syntax
           const baseColor = phaseColors[pId] || 'rgba(148, 163, 184, 1)';

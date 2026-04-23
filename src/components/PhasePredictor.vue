@@ -167,6 +167,9 @@
           <div class="flex-between" style="margin-bottom: 10px;">
             <h3 style="margin: 0; border: none; padding: 0;">3. Phase Map (3D Space)</h3>
             <div style="display: flex; gap: 10px; align-items: center;">
+              <span v-if="boundaryData" style="font-size: 0.75rem; opacity: 0.7;">
+                {{ boundaryData.n_labeled }} pts · phases {{ boundaryData.phases_used?.join(', ') }}
+              </span>
               <label v-if="boundaryData" class="checkbox-label">
                 <input type="checkbox" v-model="showBoundary" @change="renderPlot"> Show Phase Boundaries
               </label>

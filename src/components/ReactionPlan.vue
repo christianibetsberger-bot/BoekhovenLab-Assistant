@@ -87,10 +87,12 @@ const duplicateReaction = (index) => {
     store.saveWorkspaceState();
 }
 
-const archiveReaction = (index) => {
-    if(confirm("Archive this reaction plan locally?")) {
-        store.archivedReactions.push(store.reactions.splice(index, 1)[0]);
-        store.saveWorkspaceState();
+const archiveReaction = async (index) => {
+    if(confirm("Archive this reaction plan?")) {
+        const item = store.reactions.splice(index, 1)[0];
+        item.scope = 'Archived';
+        store.archivedReactions.push(item);
+        await store.saveToCloud('reactions', item);
     }
 }
 
@@ -217,7 +219,7 @@ const saveReactionToWell = (reaction) => {
     <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
         <h2 style="border: none; padding: 0; margin: 0;"><i class="fas fa-flask"></i> Reaction Plan</h2>
         <div style="display: flex; gap: 10px;">
-            <button @click="showCloudLibrary = true" class="secondary small"><i class="fas fa-cloud"></i> Cloud Library</button>
+            <button @click="showCloudLibrary = true" class="secondary small"><i class="fas fa-book"></i> Library</button>
             <button @click="addReaction" class="small"><i class="fas fa-plus"></i> New Plan</button>
         </div>
     </div>

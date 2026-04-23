@@ -120,9 +120,9 @@
             <table class="ledger-table">
               <thead>
                 <tr>
-                  <th>A (mM)</th>
-                  <th>B (mM)</th>
-                  <th>C (mM)</th>
+                  <th>A ({{ config.anionUnit }})</th>
+                  <th>B ({{ config.cationUnit }})</th>
+                  <th>C ({{ config.saltUnit }})</th>
                   <th>Observed Phase</th>
                   <th></th>
                 </tr>
@@ -176,6 +176,9 @@
               <button class="small" @click="calculateBoundary" :disabled="isCalculatingBoundary" style="background: rgba(59, 130, 246, 0.1); color: #3b82f6; border: 1px solid #3b82f6; margin: 0;">
                 <i class="fas" :class="isCalculatingBoundary ? 'fa-spinner fa-spin' : 'fa-cube'"></i>
                 {{ isCalculatingBoundary ? 'Modeling...' : 'Map Phase Boundaries' }}
+              </button>
+              <button class="small" @click="exportPlot" title="Export phase map as PNG" style="background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid #10b981; margin: 0;">
+                <i class="fas fa-image"></i> Export
               </button>
             </div>
           </div>
@@ -329,10 +332,10 @@ const getPhaseColor = (phase, alpha = 1) => {
 };
 
 // --- State ---
-const config = ref({ 
-  anionName: 'Compound A', anionMin: 0, anionMax: 6, anionStep: 0.5, stockAnion: 100, anionInv: null, anionSearchQuery: '', anionSearchScope: 'Global',
-  cationName: 'Compound B', cationMin: 0, cationMax: 6, cationStep: 0.5, stockCation: 100, cationInv: null, cationSearchQuery: '', cationSearchScope: 'Global',
-  saltName: 'Compound C', saltMin: 0, saltMax: 200, saltStep: 10, stockSalt: 1000, saltInv: null, saltSearchQuery: '', saltSearchScope: 'Global',
+const config = ref({
+  anionName: 'Compound A', anionMin: 0, anionMax: 6, anionStep: 0.5, stockAnion: 100, anionUnit: 'mM', anionInv: null, anionSearchQuery: '', anionSearchScope: 'Global',
+  cationName: 'Compound B', cationMin: 0, cationMax: 6, cationStep: 0.5, stockCation: 100, cationUnit: 'mM', cationInv: null, cationSearchQuery: '', cationSearchScope: 'Global',
+  saltName: 'Compound C', saltMin: 0, saltMax: 200, saltStep: 10, stockSalt: 1000, saltUnit: 'mM', saltInv: null, saltSearchQuery: '', saltSearchScope: 'Global',
   targetVolume: 100,
   strategy: 'safe',
   numSuggestions: 96,
@@ -365,18 +368,21 @@ const getMM = (val, unit) => {
 }
 
 const selectInventory = (type, inv) => {
-    const stockInMM = getMM(inv.stock, inv.stockUnit || 'µM');
+    const unit = inv.stockUnit || 'µM';
     if (type === 'anion') {
         config.value.anionName = `[${inv.code}] ${inv.name}`;
-        config.value.stockAnion = stockInMM;
+        config.value.stockAnion = inv.stock;
+        config.value.anionUnit = unit;
         config.value.anionInv = inv;
     } else if (type === 'cation') {
         config.value.cationName = `[${inv.code}] ${inv.name}`;
-        config.value.stockCation = stockInMM;
+        config.value.stockCation = inv.stock;
+        config.value.cationUnit = unit;
         config.value.cationInv = inv;
     } else if (type === 'salt') {
         config.value.saltName = `[${inv.code}] ${inv.name}`;
-        config.value.stockSalt = stockInMM;
+        config.value.stockSalt = inv.stock;
+        config.value.saltUnit = unit;
         config.value.saltInv = inv;
     }
     activeDropdown.value = null;
@@ -540,9 +546,9 @@ const renderPlot = () => {
 
   const layout = {
     scene: {
-      xaxis: { range: [config.value.anionMin, config.value.anionMax], title: config.value.anionName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } },
-      yaxis: { range: [config.value.cationMin, config.value.cationMax], title: config.value.cationName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } },
-      zaxis: { range: [config.value.saltMin, config.value.saltMax], title: config.value.saltName + ' (mM)', backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } }
+      xaxis: { range: [config.value.anionMin, config.value.anionMax], title: `${config.value.anionName} (${config.value.anionUnit})`, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } },
+      yaxis: { range: [config.value.cationMin, config.value.cationMax], title: `${config.value.cationName} (${config.value.cationUnit})`, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } },
+      zaxis: { range: [config.value.saltMin, config.value.saltMax], title: `${config.value.saltName} (${config.value.saltUnit})`, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 }, titlefont: { color: '#ffffff', size: 12 } }
     },
     paper_bgcolor: '#000000',
     margin: { l: 0, r: 0, b: 0, t: 0 },
@@ -734,6 +740,14 @@ const calculateBoundary = async () => {
   }
 }
 
+const exportPlot = () => {
+  const anionLabel = `${config.value.anionName} (${config.value.anionUnit})`.replace(/[^a-zA-Z0-9_\-]/g, '_');
+  const cationLabel = `${config.value.cationName} (${config.value.cationUnit})`.replace(/[^a-zA-Z0-9_\-]/g, '_');
+  const saltLabel = `${config.value.saltName} (${config.value.saltUnit})`.replace(/[^a-zA-Z0-9_\-]/g, '_');
+  const filename = `PhaseMap_${anionLabel}_${cationLabel}_${saltLabel}_${new Date().toISOString().split('T')[0]}`;
+  Plotly.downloadImage('phase-ternary-plot', { format: 'png', width: 1400, height: 1000, filename })
+}
+
 const calculateNextExperiments = async () => {
   isCalculating.value = true; 
   suggestions.value = []; 
@@ -802,6 +816,7 @@ onMounted(() => {
 .inventory-dropdown { position: absolute; top: 100%; left: 0; z-index: 1000; background: var(--bg-color, white); border: 1px solid var(--border-color, #cbd5e1); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); width: 100%; min-width: 250px; border-radius: 6px; overflow: hidden; }
 .dropdown-scope-selector { display: flex; gap: 10px; padding: 8px; border-bottom: 1px solid var(--border-color, #e2e8f0); }
 .dropdown-search { padding: 8px; display: flex; gap: 5px; border-bottom: 1px solid var(--border-color, #f1f5f9); }
+.dropdown-search input { background: var(--bg-color, white) !important; color: inherit !important; border: 1px solid var(--border-color, #cbd5e1); border-radius: 4px; padding: 5px 8px; font-size: 0.82rem; width: 100%; }
 .dropdown-results { overflow-y: auto; max-height: 150px; }
 .dropdown-item { padding: 8px 12px; cursor: pointer; font-size: 0.8rem; border-bottom: 1px solid var(--border-color, #f8fafc); transition: background 0.2s; }
 .dropdown-item:hover { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }

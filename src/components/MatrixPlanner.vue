@@ -79,8 +79,13 @@ const addFixedAdditive = (matrix) => {
     if(!matrix.fixedAdditives) matrix.fixedAdditives = [];
     matrix.fixedAdditives.push({ name: 'New Component', vol: 1, searchQuery: '', searchScope: 'Global', labware: '' });
 }
-const archiveMatrix = (index) => {
-    if(confirm("Archive this matrix locally?")) store.archivedMatrices.push(store.matrices.splice(index, 1)[0]);
+const archiveMatrix = async (index) => {
+    if(confirm("Archive this matrix?")) {
+        const item = store.matrices.splice(index, 1)[0];
+        item.scope = 'Archived';
+        store.archivedMatrices.push(item);
+        await store.saveToCloud('matrices', item);
+    }
 }
 const duplicateMatrix = (index) => {
     const copy = JSON.parse(JSON.stringify(store.matrices[index]));

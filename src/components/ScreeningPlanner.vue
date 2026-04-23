@@ -74,11 +74,12 @@ const removeReverseMatrix = (index) => {
     store.saveWorkspaceState();
 }
 
-// Fixed: Added persistence because archiving removes it from screen
-const archiveReverseMatrix = (index) => {
-    if(confirm("Archive this screening locally?")) {
-        store.archivedReverseMatrices.push(store.reverseMatrices.splice(index, 1)[0]);
-        store.saveWorkspaceState();
+const archiveReverseMatrix = async (index) => {
+    if(confirm("Archive this screening?")) {
+        const item = store.reverseMatrices.splice(index, 1)[0];
+        item.scope = 'Archived';
+        store.archivedReverseMatrices.push(item);
+        await store.saveToCloud('screenings', item);
     }
 }
 

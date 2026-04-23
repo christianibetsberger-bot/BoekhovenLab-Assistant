@@ -18,19 +18,44 @@ const filteredArchivedReactions = computed(() => {
 })
 
 // --- Archive Methods ---
-const restoreReaction = (item) => {
+const restoreReaction = async (item) => {
     const idx = typeof item === 'number' ? item : store.archivedReactions.indexOf(item);
-    if (idx !== -1) store.reactions.unshift(store.archivedReactions.splice(idx, 1)[0]);
+    if (idx === -1) return;
+    const restored = store.archivedReactions.splice(idx, 1)[0];
+    restored.scope = 'Personal';
+    store.reactions.unshift(restored);
+    await store.saveToCloud('reactions', restored);
+    store.saveWorkspaceState();
 }
 
-const deleteArchivedReaction = (item) => {
+const deleteArchivedReaction = async (item) => {
     const idx = typeof item === 'number' ? item : store.archivedReactions.indexOf(item);
-    if (idx !== -1) store.archivedReactions.splice(idx, 1);
+    if (idx === -1) return;
+    const removed = store.archivedReactions.splice(idx, 1)[0];
+    await store.deleteFromCloud('reactions', removed.id);
 }
 
-const restoreMatrix = (index) => { store.matrices.unshift(store.archivedMatrices.splice(index, 1)[0]); }
-const restoreReverseMatrix = (index) => { store.reverseMatrices.unshift(store.archivedReverseMatrices.splice(index, 1)[0]); }
-const restorePlate = (index) => { store.wellPlates.unshift(store.archivedPlates.splice(index, 1)[0]); }
+const restoreMatrix = async (index) => {
+    const item = store.archivedMatrices.splice(index, 1)[0];
+    item.scope = 'Personal';
+    store.matrices.unshift(item);
+    await store.saveToCloud('matrices', item);
+    store.saveWorkspaceState();
+}
+const restoreReverseMatrix = async (index) => {
+    const item = store.archivedReverseMatrices.splice(index, 1)[0];
+    item.scope = 'Personal';
+    store.reverseMatrices.unshift(item);
+    await store.saveToCloud('screenings', item);
+    store.saveWorkspaceState();
+}
+const restorePlate = async (index) => {
+    const item = store.archivedPlates.splice(index, 1)[0];
+    item.scope = 'Personal';
+    store.wellPlates.unshift(item);
+    await store.saveToCloud('plates', item);
+    store.saveWorkspaceState();
+}
 
 // --- Import / Export ---
 const exportArchive = () => {
@@ -110,7 +135,7 @@ const importArchive = (event) => {
             <div v-for="(item, i) in store.archivedMatrices" :key="'am'+i" style="background: var(--panel-bg); padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); display: flex; align-items: center; gap: 10px;">
                 <span>{{ item.name }}</span>
                 <button class="small success" @click="restoreMatrix(i)" title="Restore"><i class="fas fa-arrow-rotate-left"></i></button>
-                <button class="small danger" @click="store.archivedMatrices.splice(i, 1)" title="Delete Permanently"><i class="fas fa-times"></i></button>
+                <button class="small danger" @click="store.deleteFromCloud('matrices', item.id); store.archivedMatrices.splice(i, 1)" title="Delete Permanently"><i class="fas fa-times"></i></button>
             </div>
         </div>
     </div>
@@ -121,7 +146,7 @@ const importArchive = (event) => {
             <div v-for="(item, i) in store.archivedReverseMatrices" :key="'arm'+i" style="background: var(--panel-bg); padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); display: flex; align-items: center; gap: 10px;">
                 <span>{{ item.name }}</span>
                 <button class="small success" @click="restoreReverseMatrix(i)" title="Restore"><i class="fas fa-arrow-rotate-left"></i></button>
-                <button class="small danger" @click="store.archivedReverseMatrices.splice(i, 1)" title="Delete Permanently"><i class="fas fa-times"></i></button>
+                <button class="small danger" @click="store.deleteFromCloud('screenings', item.id); store.archivedReverseMatrices.splice(i, 1)" title="Delete Permanently"><i class="fas fa-times"></i></button>
             </div>
         </div>
     </div>
@@ -132,7 +157,7 @@ const importArchive = (event) => {
             <div v-for="(item, i) in store.archivedPlates" :key="'ap'+i" style="background: var(--panel-bg); padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); display: flex; align-items: center; gap: 10px;">
                 <span>{{ item.name }}</span>
                 <button class="small success" @click="restorePlate(i)" title="Restore"><i class="fas fa-arrow-rotate-left"></i></button>
-                <button class="small danger" @click="store.archivedPlates.splice(i, 1)" title="Delete Permanently"><i class="fas fa-times"></i></button>
+                <button class="small danger" @click="store.deleteFromCloud('plates', item.id); store.archivedPlates.splice(i, 1)" title="Delete Permanently"><i class="fas fa-times"></i></button>
             </div>
         </div>
     </div>

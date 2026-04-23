@@ -94,58 +94,44 @@ export const useLabStore = defineStore('lab', {
       // 2. Load Reactions
       const { data: rxnData } = await db.from('reactions').select('*');
       if (rxnData) {
-          this.cloudReactions = rxnData.map(row => {
-              const obj = row.data;
-              obj.owner_id = row.owner_id;
-              return obj;
-          });
-          // Restore items only if their ID is in the registry
+          const allRxns = rxnData.map(row => { const obj = row.data; obj.owner_id = row.owner_id; return obj; });
+          this.cloudReactions = allRxns.filter(r => r.scope !== 'Archived');
+          this.archivedReactions = allRxns.filter(r => r.scope === 'Archived');
           this.reactions = this.cloudReactions.filter(r => registry.rxnIds.includes(r.id)).map(r => JSON.parse(JSON.stringify(r)));
-          
-          // Ensure counter is always higher than highest cloud ID
-          const maxId = Math.max(0, ...this.cloudReactions.map(r => r.id));
+          const maxId = Math.max(0, ...allRxns.map(r => r.id));
           if (maxId >= this.nextReactionId) this.nextReactionId = maxId + 1;
       }
 
       // 3. Load Matrices
       const { data: matData } = await db.from('matrices').select('*');
       if (matData) {
-          this.cloudMatrices = matData.map(row => {
-              const obj = row.data;
-              obj.owner_id = row.owner_id;
-              return obj;
-          });
+          const allMats = matData.map(row => { const obj = row.data; obj.owner_id = row.owner_id; return obj; });
+          this.cloudMatrices = allMats.filter(m => m.scope !== 'Archived');
+          this.archivedMatrices = allMats.filter(m => m.scope === 'Archived');
           this.matrices = this.cloudMatrices.filter(m => registry.matIds.includes(m.id)).map(m => JSON.parse(JSON.stringify(m)));
-          
-          const maxId = Math.max(0, ...this.cloudMatrices.map(m => m.id));
+          const maxId = Math.max(0, ...allMats.map(m => m.id));
           if (maxId >= this.nextMatrixId) this.nextMatrixId = maxId + 1;
       }
 
       // 4. Load Screenings
       const { data: scrData } = await db.from('screenings').select('*');
       if (scrData) {
-          this.cloudReverseMatrices = scrData.map(row => {
-              const obj = row.data;
-              obj.owner_id = row.owner_id;
-              return obj;
-          });
+          const allScrs = scrData.map(row => { const obj = row.data; obj.owner_id = row.owner_id; return obj; });
+          this.cloudReverseMatrices = allScrs.filter(s => s.scope !== 'Archived');
+          this.archivedReverseMatrices = allScrs.filter(s => s.scope === 'Archived');
           this.reverseMatrices = this.cloudReverseMatrices.filter(s => registry.scrIds.includes(s.id)).map(s => JSON.parse(JSON.stringify(s)));
-          
-          const maxId = Math.max(0, ...this.cloudReverseMatrices.map(s => s.id));
+          const maxId = Math.max(0, ...allScrs.map(s => s.id));
           if (maxId >= this.nextRmId) this.nextRmId = maxId + 1;
       }
 
       // 5. Load Plates
       const { data: pltData } = await db.from('plates').select('*');
       if (pltData) {
-          this.cloudPlates = pltData.map(row => {
-              const obj = row.data;
-              obj.owner_id = row.owner_id;
-              return obj;
-          });
+          const allPlts = pltData.map(row => { const obj = row.data; obj.owner_id = row.owner_id; return obj; });
+          this.cloudPlates = allPlts.filter(p => p.scope !== 'Archived');
+          this.archivedPlates = allPlts.filter(p => p.scope === 'Archived');
           this.wellPlates = this.cloudPlates.filter(p => registry.pltIds.includes(p.id)).map(p => JSON.parse(JSON.stringify(p)));
-          
-          const maxId = Math.max(0, ...this.cloudPlates.map(p => p.id));
+          const maxId = Math.max(0, ...allPlts.map(p => p.id));
           if (maxId >= this.nextPlateId) this.nextPlateId = maxId + 1;
       }
 
@@ -193,17 +179,13 @@ export const useLabStore = defineStore('lab', {
         
         const { data } = await db.from(tableName).select('*');
         if (data) {
-            const mapped = data.map(row => {
-                const obj = row.data;
-                obj.owner_id = row.owner_id;
-                return obj;
-            });
-            if (tableName === 'reactions') this.cloudReactions = mapped;
-            if (tableName === 'matrices') this.cloudMatrices = mapped;
-            if (tableName === 'screenings') this.cloudReverseMatrices = mapped;
-            if (tableName === 'plates') this.cloudPlates = mapped;
+            const mapped = data.map(row => { const obj = row.data; obj.owner_id = row.owner_id; return obj; });
+            if (tableName === 'reactions') { this.cloudReactions = mapped.filter(r => r.scope !== 'Archived'); this.archivedReactions = mapped.filter(r => r.scope === 'Archived'); }
+            if (tableName === 'matrices') { this.cloudMatrices = mapped.filter(m => m.scope !== 'Archived'); this.archivedMatrices = mapped.filter(m => m.scope === 'Archived'); }
+            if (tableName === 'screenings') { this.cloudReverseMatrices = mapped.filter(s => s.scope !== 'Archived'); this.archivedReverseMatrices = mapped.filter(s => s.scope === 'Archived'); }
+            if (tableName === 'plates') { this.cloudPlates = mapped.filter(p => p.scope !== 'Archived'); this.archivedPlates = mapped.filter(p => p.scope === 'Archived'); }
         }
-        
+
         // Ensure registry is updated after a save (especially for new items)
         this.saveWorkspaceState();
     },
@@ -219,17 +201,13 @@ export const useLabStore = defineStore('lab', {
         
         const { data } = await db.from(tableName).select('*');
         if (data) {
-            const mapped = data.map(row => {
-                const obj = row.data;
-                obj.owner_id = row.owner_id;
-                return obj;
-            });
-            if (tableName === 'reactions') this.cloudReactions = mapped;
-            if (tableName === 'matrices') this.cloudMatrices = mapped;
-            if (tableName === 'screenings') this.cloudReverseMatrices = mapped;
-            if (tableName === 'plates') this.cloudPlates = mapped;
+            const mapped = data.map(row => { const obj = row.data; obj.owner_id = row.owner_id; return obj; });
+            if (tableName === 'reactions') { this.cloudReactions = mapped.filter(r => r.scope !== 'Archived'); this.archivedReactions = mapped.filter(r => r.scope === 'Archived'); }
+            if (tableName === 'matrices') { this.cloudMatrices = mapped.filter(m => m.scope !== 'Archived'); this.archivedMatrices = mapped.filter(m => m.scope === 'Archived'); }
+            if (tableName === 'screenings') { this.cloudReverseMatrices = mapped.filter(s => s.scope !== 'Archived'); this.archivedReverseMatrices = mapped.filter(s => s.scope === 'Archived'); }
+            if (tableName === 'plates') { this.cloudPlates = mapped.filter(p => p.scope !== 'Archived'); this.archivedPlates = mapped.filter(p => p.scope === 'Archived'); }
         }
-        
+
         this.saveWorkspaceState();
     },
 

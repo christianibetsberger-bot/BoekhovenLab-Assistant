@@ -64,9 +64,13 @@ const closePlateInWorkspace = (index) => {
     store.saveWorkspaceState();
 }
 
-const archivePlate = (index) => {
-    if(confirm("Archive this well plate locally?")) store.archivedPlates.push(store.wellPlates.splice(index, 1)[0]);
-    store.saveWorkspaceState();
+const archivePlate = async (index) => {
+    if(confirm("Archive this well plate?")) {
+        const item = store.wellPlates.splice(index, 1)[0];
+        item.scope = 'Archived';
+        store.archivedPlates.push(item);
+        await store.saveToCloud('plates', item);
+    }
 }
 
 const duplicateWellPlate = (index) => {

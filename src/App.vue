@@ -20,17 +20,17 @@ const store = useLabStore()
 
 // Icons match each component's actual <h2> fa- class
 const MODULE_META = {
-  labJournal:       { label: 'Lab Journal', icon: 'fa-book',             component: markRaw(LabJournal) },
-  globalSettings:   { label: 'Settings',    icon: 'fa-sliders',          component: markRaw(GlobalSettings) },
-  standardStock:    { label: 'Stock Calc',  icon: 'fa-flask-vial',       component: markRaw(StandardStock) },
-  sequenceCalc:     { label: 'DNA Calc',    icon: 'fa-dna',              component: markRaw(SequenceCalc) },
-  archiveManager:   { label: 'Archive',     icon: 'fa-box-archive',      component: markRaw(ArchiveManager) },
-  inventoryManager: { label: 'Inventory',   icon: 'fa-boxes-stacked',    component: markRaw(InventoryManager) },
-  reactionPlan:     { label: 'Reaction',    icon: 'fa-flask',            component: markRaw(ReactionPlan) },
-  matrixPlanner:    { label: 'Matrix',      icon: 'fa-table-cells',      component: markRaw(MatrixPlanner) },
-  screeningPlanner: { label: 'Screening',   icon: 'fa-table-cells-large',component: markRaw(ScreeningPlanner) },
-  phasePredictor:   { label: 'Phase Map',   icon: 'fa-brain',            component: markRaw(PhasePredictor) },
-  wellPlateEditor:  { label: 'Well Plate',  icon: 'fa-border-all',       component: markRaw(WellPlateEditor) },
+  labJournal:       { label: 'Lab Journal', icon: 'fa-book',             gradient: 'linear-gradient(145deg,#ff9f0a,#ff6300)',   component: markRaw(LabJournal) },
+  globalSettings:   { label: 'Settings',    icon: 'fa-sliders',          gradient: 'linear-gradient(145deg,#8e8e93,#3a3a3c)',   component: markRaw(GlobalSettings) },
+  standardStock:    { label: 'Stock Calc',  icon: 'fa-flask-vial',       gradient: 'linear-gradient(145deg,#30d158,#0a9e3c)',   component: markRaw(StandardStock) },
+  sequenceCalc:     { label: 'DNA Calc',    icon: 'fa-dna',              gradient: 'linear-gradient(145deg,#bf5af2,#8b00d4)',   component: markRaw(SequenceCalc) },
+  archiveManager:   { label: 'Archive',     icon: 'fa-box-archive',      gradient: 'linear-gradient(145deg,#c7974a,#8b5e20)',   component: markRaw(ArchiveManager) },
+  inventoryManager: { label: 'Inventory',   icon: 'fa-boxes-stacked',    gradient: 'linear-gradient(145deg,#0a84ff,#0055d4)',   component: markRaw(InventoryManager) },
+  reactionPlan:     { label: 'Reaction',    icon: 'fa-flask',            gradient: 'linear-gradient(145deg,#ff453a,#c4160e)',   component: markRaw(ReactionPlan) },
+  matrixPlanner:    { label: 'Matrix',      icon: 'fa-table-cells',      gradient: 'linear-gradient(145deg,#5e5ce6,#3634c0)',   component: markRaw(MatrixPlanner) },
+  screeningPlanner: { label: 'Screening',   icon: 'fa-table-cells-large',gradient: 'linear-gradient(145deg,#20d7d0,#0aa09a)',   component: markRaw(ScreeningPlanner) },
+  phasePredictor:   { label: 'Phase Map',   icon: 'fa-brain',            gradient: 'linear-gradient(145deg,#ff2d55,#c0002e)',   component: markRaw(PhasePredictor) },
+  wellPlateEditor:  { label: 'Well Plate',  icon: 'fa-border-all',       gradient: 'linear-gradient(145deg,#5ac8fa,#0aafff)',   component: markRaw(WellPlateEditor) },
 }
 
 const layout = ref({ topOrder: [], leftOrder: [], rightOrder: [], minimized: {} })
@@ -146,14 +146,18 @@ const signOut = async () => { await db.auth.signOut(); window.location.reload() 
             :title="MODULE_META[id].label"
             @click="toggleModule(id)"
           >
-            <i class="fas" :class="MODULE_META[id].icon"></i>
+            <div class="sidebar-icon" :style="{ background: MODULE_META[id].gradient }">
+              <i class="fas" :class="MODULE_META[id].icon"></i>
+            </div>
             <span class="sidebar-label">{{ MODULE_META[id].label }}</span>
           </button>
         </div>
 
         <div class="sidebar-footer">
           <button class="sidebar-btn sidebar-reset" title="Reset layout" @click="resetLayout">
-            <i class="fas fa-rotate-left"></i>
+            <div class="sidebar-icon" style="background: linear-gradient(145deg,#8e8e93,#48484a)">
+              <i class="fas fa-rotate-left"></i>
+            </div>
             <span class="sidebar-label">Reset</span>
           </button>
         </div>
@@ -275,18 +279,24 @@ body { padding: 0 !important; margin: 0 !important; }
 
 #body-wrapper { display: flex; min-height: 100vh; width: 100%; }
 
-/* ══ Auto-hide sidebar ══ */
+/* ══ Auto-hide sidebar — Liquid Glass ══ */
 .module-sidebar {
   position: fixed;
   left: 0; top: 0;
   height: 100vh;
   width: 96px;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  box-shadow: 4px 0 16px rgba(0,0,0,0.18);
+  /* Frosted glass base — more opaque fallback if backdrop-filter unsupported */
+  background: rgba(235, 235, 245, 0.65);
+  backdrop-filter: blur(60px) saturate(200%);
+  -webkit-backdrop-filter: blur(60px) saturate(200%);
+  border-right: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow:
+    6px 0 48px rgba(0, 0, 0, 0.10),
+    inset -1px 0 0 rgba(255, 255, 255, 0.55),
+    inset  1px 0 0 rgba(255, 255, 255, 0.20);
   display: flex;
   flex-direction: column;
-  padding: 10px 0;
+  padding: 12px 0;
   z-index: 500;
   transform: translateX(calc(-96px + 5px));
   transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
@@ -295,16 +305,38 @@ body { padding: 0 !important; margin: 0 !important; }
 }
 .module-sidebar:hover { transform: translateX(0); }
 
-/* Coloured peek strip */
+.dark-mode .module-sidebar {
+  background: rgba(12, 12, 22, 0.60);
+  border-right: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow:
+    6px 0 48px rgba(0, 0, 0, 0.55),
+    inset -1px 0 0 rgba(255, 255, 255, 0.10),
+    inset  1px 0 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Glassy edge peek strip */
 .module-sidebar::before {
   content: '';
   position: absolute;
   right: 0; top: 0;
   width: 5px; height: 100%;
-  background: var(--primary);
-  opacity: 0.55;
+  background: linear-gradient(
+    to bottom,
+    rgba(255,255,255,0.70) 0%,
+    rgba(255,255,255,0.25) 50%,
+    rgba(255,255,255,0.45) 100%
+  );
+  opacity: 0.8;
   pointer-events: none;
   transition: opacity 0.22s;
+}
+.dark-mode .module-sidebar::before {
+  background: linear-gradient(
+    to bottom,
+    rgba(255,255,255,0.22) 0%,
+    rgba(255,255,255,0.06) 50%,
+    rgba(255,255,255,0.14) 100%
+  );
 }
 .module-sidebar:hover::before { opacity: 0; }
 
@@ -312,57 +344,132 @@ body { padding: 0 !important; margin: 0 !important; }
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 4px 8px;
-  width: 100%;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 6px 4px;
 }
 .sidebar-footer {
-  border-top: 1px solid var(--border);
-  padding: 8px 8px 4px;
+  border-top: 1px solid rgba(120, 120, 140, 0.20);
+  padding: 8px 6px 4px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
+}
+.dark-mode .sidebar-footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-/* Rectangular sidebar button */
+/* Dock-style button — icon on top, tiny label below */
 .sidebar-btn {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   width: 100%;
-  padding: 9px 10px;
+  padding: 5px 4px;
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: var(--text);
+  border: none;
+  border-radius: 10px;
   cursor: pointer;
-  font-size: 0.78rem;
-  font-weight: 500;
-  text-transform: none;
-  letter-spacing: 0;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  position: relative;
+  transition: background 0.15s;
 }
-.sidebar-btn i { font-size: 0.95rem; width: 16px; text-align: center; flex-shrink: 0; }
-.sidebar-label  { font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
-.sidebar-btn.is-active {
-  background: color-mix(in srgb, var(--primary) 14%, transparent);
-  border-color: color-mix(in srgb, var(--primary) 35%, transparent);
-  color: var(--primary);
+/* macOS squircle icon tile */
+.sidebar-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 24%;        /* squircle approximation */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.28),
+    0 1px  3px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.30);
+  transition:
+    transform  0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.22s ease,
+    opacity    0.18s ease,
+    filter     0.18s ease;
 }
-.sidebar-btn.is-hidden { opacity: 0.4; }
-.sidebar-btn:hover {
-  filter: none;
-  background: color-mix(in srgb, var(--primary) 20%, transparent);
-  border-color: color-mix(in srgb, var(--primary) 45%, transparent);
-  color: var(--primary);
-  opacity: 1;
+
+/* Diagonal gloss highlight (top-left → centre) */
+.sidebar-icon::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    148deg,
+    rgba(255,255,255,0.34) 0%,
+    rgba(255,255,255,0.10) 38%,
+    rgba(255,255,255,0.00) 62%
+  );
+  pointer-events: none;
 }
-.sidebar-reset { opacity: 0.5; }
-.sidebar-reset:hover { opacity: 1; }
+
+.sidebar-icon i {
+  font-size: 1.2rem;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.30);
+  position: relative;
+  z-index: 1;
+}
+
+/* Hover: spring-scale lift */
+.sidebar-btn:hover .sidebar-icon {
+  transform: scale(1.14) translateY(-3px);
+  box-shadow:
+    0 10px 26px rgba(0, 0, 0, 0.32),
+    0  3px  8px rgba(0, 0, 0, 0.20),
+    inset 0 1px 0 rgba(255, 255, 255, 0.32);
+}
+
+/* Active (module visible): vibrant; inactive (hidden): dimmed + desaturated */
+.sidebar-btn.is-hidden .sidebar-icon {
+  opacity: 0.42;
+  filter: saturate(0.55);
+}
+
+/* Small dot below button when active (macOS dock running indicator) */
+.sidebar-btn.is-active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(80, 80, 100, 0.60);
+  box-shadow: 0 0 3px rgba(0,0,0,0.18);
+}
+.dark-mode .sidebar-btn.is-active::after {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.sidebar-label {
+  font-size: 0.60rem;
+  font-weight: 500;
+  color: var(--text);
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 84px;
+  text-align: center;
+  letter-spacing: 0.01em;
+}
+.sidebar-btn.is-hidden .sidebar-label { opacity: 0.35; }
+
+.sidebar-reset .sidebar-icon { opacity: 0.65; }
+.sidebar-reset:hover .sidebar-icon { opacity: 1; }
 
 /* ══ Main content ══ */
 .app-main {

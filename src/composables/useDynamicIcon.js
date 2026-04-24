@@ -169,13 +169,36 @@ async function applyIcon(color) {
 
 // ── Composable ────────────────────────────────────────────────────────────────
 
+// Read the last-used primary color from localStorage so the icon is correct
+// immediately at startup — before the auth session resolves and cloud settings
+// load.  This eliminates the brief flash of the default blue and ensures that
+// if the user adds the webapp to the macOS dock right after opening it, Safari
+// captures the icon with their actual theme color rather than the default.
+function seedColorFromStorage() {
+  try {
+    // Scan all lab_user_prefs_* keys — we don't know the user ID yet, but there
+    // is normally only one user on a device, so take the first match found.
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key?.startsWith('lab_user_prefs_')) {
+        const prefs = JSON.parse(localStorage.getItem(key) || '{}')
+        if (prefs?.uiSettings?.primaryColor) return prefs.uiSettings.primaryColor
+      }
+    }
+  } catch (_) { /* storage unavailable or parse error */ }
+  return null
+}
+
 export function useDynamicIcon() {
   const store = useLabStore()
   const apply = () => applyIcon(store.uiSettings?.primaryColor || '#0E396E')
 
-  // Run immediately (picks up default or already-loaded user prefs)
-  apply()
+  // Apply the stored color immediately (before auth / cloud settings finish
+  // loading) so the favicon and manifest icon are never the wrong color.
+  const storedColor = seedColorFromStorage()
+  applyIcon(storedColor || '#0E396E')
 
-  // Re-run whenever the user changes their theme color in Global Settings
+  // Re-run whenever the Pinia store's primaryColor changes — covers both the
+  // cloud-settings load after login and live changes in Global Settings.
   watch(() => store.uiSettings?.primaryColor, apply)
 }

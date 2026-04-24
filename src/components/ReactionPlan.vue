@@ -1,30 +1,11 @@
 <script setup>
 import { ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
+import { concentrationRatio, compatibleUnits, dimsCompatible, defaultUnitForDim, CONC_UNITS } from '../utils/units.js'
 
 const store = useLabStore()
 const activeDropdown = ref(null)
 const showCloudLibrary = ref(false)
-
-// --- Helper Math ---
-const getUM = (val, unit) => {
-    if (!val) return 0;
-    let m = 1;
-    if (unit === 'M') m = 1e6;
-    else if (unit === 'mM') m = 1e3;
-    else if (unit === 'µM') m = 1;
-    else if (unit === 'nM') m = 1e-3;
-    else if (unit === 'mg/mL' || unit === 'µg/µL') m = 1;
-    else if (unit === 'ng/µL') m = 1e-3;
-    else if (unit === 'X') m = 1;
-    else if (unit === 'U/µL') m = 1;
-    else if (unit === '%') m = 1;
-    else if (unit === 'L') m = 1e6;
-    else if (unit === 'mL') m = 1e3;
-    else if (unit === 'µL') m = 1;
-    else if (unit === 'nL') m = 1e-3;
-    return val * m;
-}
 
 const getInvName = (id) => {
     const inv = store.inventory.find(i => i.id === id);
@@ -98,23 +79,48 @@ const archiveReaction = async (index) => {
 
 const calc1xVol = (reaction, item) => {
     if (item.isFixed) {
-        const fVolBase = getUM(Number(item.fixedVol), item.fixedVolUnit || 'µL');
-        const rVolBase = getUM(1, reaction.targetVolumeUnit || 'µL');
-        return rVolBase ? fVolBase / rVolBase : 0;
+        const ratio = concentrationRatio(Number(item.fixedVol), item.fixedVolUnit || 'µL', 1, reaction.targetVolumeUnit || 'µL')
+        return ratio !== null ? ratio : 0
     }
-    if (!item.invId) return 0;
-    const invItem = store.inventory.find(i => i.id === item.invId);
-    if (!invItem || !invItem.stock) return 0;
-    
-    const targetConcBase = getUM(Number(item.target), item.targetUnit || 'µM');
-    const stockConcBase = getUM(Number(invItem.stock), invItem.stockUnit || 'µM');
-    
-    if (stockConcBase === 0) return 0;
-    return (targetConcBase * reaction.targetVolume) / stockConcBase;
+    if (!item.invId) return 0
+    const invItem = store.inventory.find(i => i.id === item.invId)
+    if (!invItem || !invItem.stock) return 0
+    const ratio = concentrationRatio(Number(item.target), item.targetUnit || 'µM', Number(invItem.stock), invItem.stockUnit || 'µM')
+    if (ratio === null) return NaN
+    return ratio * reaction.targetVolume
 }
 
 const calcMMVol = (reaction, item) => { return calc1xVol(reaction, item) * store.globalSettings.mmReactions; }
-const reactionTotalVol = (reaction) => { return reaction.items.reduce((sum, item) => sum + calc1xVol(reaction, item), 0); }
+const reactionTotalVol = (reaction) => {
+    return reaction.items.reduce((sum, item) => {
+        const v = calc1xVol(reaction, item)
+        return sum + (isNaN(v) ? 0 : v)
+    }, 0)
+}
+
+// --- Unit helpers ---
+const targetUnitsForItem = (item) => {
+    if (!item.invId) return CONC_UNITS
+    const inv = store.inventory.find(i => i.id === item.invId)
+    if (!inv) return CONC_UNITS
+    const compat = compatibleUnits(inv.stockUnit || 'µM').filter(u => CONC_UNITS.includes(u))
+    if (item.targetUnit && !compat.includes(item.targetUnit)) return [item.targetUnit, ...compat]
+    return compat
+}
+
+const isUnitMismatch = (item) => {
+    if (!item.invId || item.isFixed) return false
+    const inv = store.inventory.find(i => i.id === item.invId)
+    if (!inv) return false
+    return !dimsCompatible(item.targetUnit || 'µM', inv.stockUnit || 'µM')
+}
+
+const selectReactionItem = (item, inv) => {
+    item.invId = inv.id
+    if (!dimsCompatible(item.targetUnit || 'µM', inv.stockUnit || 'µM')) {
+        item.targetUnit = defaultUnitForDim(inv.stockUnit || 'µM')
+    }
+}
 
 // --- Cross-Module Integrations ---
 const saveReactionToJournal = (reaction) => {
@@ -292,7 +298,7 @@ const saveReactionToWell = (reaction) => {
                                     </div>
                                     <input type="text" v-model="item.searchQuery" placeholder="Search inventory..." style="margin: 5px; width: calc(100% - 10px); padding: 4px; border: 1px solid var(--border); border-radius: var(--radius);" @click.stop>
                                     <div style="overflow-y: auto; max-height: 180px;">
-                                        <div v-for="inv in filterBlockInventory(item.searchQuery, item.searchScope)" :key="inv.id" @mousedown.prevent="item.invId = inv.id; activeDropdown = null" style="padding: 6px 10px; cursor: pointer; font-size: 0.8rem; border-bottom: 1px solid var(--bg);" onmouseover="this.style.background='var(--summary-bg)'" onmouseout="this.style.background='transparent'">
+                                        <div v-for="inv in filterBlockInventory(item.searchQuery, item.searchScope)" :key="inv.id" @mousedown.prevent="selectReactionItem(item, inv); activeDropdown = null" style="padding: 6px 10px; cursor: pointer; font-size: 0.8rem; border-bottom: 1px solid var(--bg);" onmouseover="this.style.background='var(--summary-bg)'" onmouseout="this.style.background='transparent'">
                                             [{{ inv.code }}] {{ inv.name }} ({{inv.stock}} {{inv.stockUnit || 'µM'}})
                                         </div>
                                     </div>
@@ -306,13 +312,14 @@ const saveReactionToWell = (reaction) => {
                             </select>
                         </td>
                         <td style="vertical-align: top;">
-                            <div v-if="!item.isFixed" class="input-with-select">
-                                <input type="number" v-model.number="item.target" step="any" style="width: 70px; border-right: none; border-top-right-radius: 0; border-bottom-right-radius: 0;">
-                                <select v-model="item.targetUnit" style="width: 80px; padding: 6px; font-size: 0.8rem; border-left: 1px solid var(--border); border-top-left-radius: 0; border-bottom-left-radius: 0;">
-                                    <option value="M">M</option><option value="mM">mM</option><option value="µM">µM</option><option value="nM">nM</option>
-                                    <option value="mg/mL">mg/mL</option><option value="µg/µL">µg/µL</option><option value="ng/µL">ng/µL</option>
-                                    <option value="X">X</option><option value="U/µL">U/µL</option><option value="%">%</option>
-                                </select>
+                            <div v-if="!item.isFixed">
+                                <div class="input-with-select">
+                                    <input type="number" v-model.number="item.target" step="any" style="width: 70px; border-right: none; border-top-right-radius: 0; border-bottom-right-radius: 0;">
+                                    <select v-model="item.targetUnit" style="width: 80px; padding: 6px; font-size: 0.8rem; border-left: 1px solid var(--border); border-top-left-radius: 0; border-bottom-left-radius: 0;" :style="isUnitMismatch(item) ? 'border-color: var(--danger);' : ''">
+                                        <option v-for="u in targetUnitsForItem(item)" :key="u" :value="u">{{ u }}</option>
+                                    </select>
+                                </div>
+                                <div v-if="isUnitMismatch(item)" style="font-size: 0.7rem; color: var(--danger); margin-top: 2px; white-space: nowrap;"><i class="fas fa-triangle-exclamation"></i> Unit mismatch</div>
                             </div>
                             <span v-else class="icon-muted">-</span>
                         </td>
@@ -328,9 +335,15 @@ const saveReactionToWell = (reaction) => {
                                     <option value="L">L</option><option value="mL">mL</option><option value="µL">µL</option><option value="nL">nL</option>
                                 </select>
                             </div>
-                            <span v-else>{{ store.formatNum(calc1xVol(reaction, item)) }} {{ reaction.targetVolumeUnit || 'µL' }}</span>
+                            <span v-else>
+                                <span v-if="isNaN(calc1xVol(reaction, item))" style="color: var(--danger); font-size: 0.8rem;"><i class="fas fa-triangle-exclamation"></i> –</span>
+                                <span v-else>{{ store.formatNum(calc1xVol(reaction, item)) }} {{ reaction.targetVolumeUnit || 'µL' }}</span>
+                            </span>
                         </td>
-                        <td style="vertical-align: top;"><strong style="color: var(--primary);">{{ store.formatNum(calcMMVol(reaction, item)) }} {{ reaction.targetVolumeUnit || 'µL' }}</strong></td>
+                        <td style="vertical-align: top;">
+                            <strong v-if="isNaN(calcMMVol(reaction, item))" style="color: var(--danger);"><i class="fas fa-triangle-exclamation"></i> –</strong>
+                            <strong v-else style="color: var(--primary);">{{ store.formatNum(calcMMVol(reaction, item)) }} {{ reaction.targetVolumeUnit || 'µL' }}</strong>
+                        </td>
                         <td style="vertical-align: top;"><button class="danger small" @click="removeItem(reaction, iIndex)"><i class="fas fa-times"></i></button></td>
                     </tr>
                 </tbody>

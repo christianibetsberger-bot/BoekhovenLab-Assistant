@@ -1,19 +1,34 @@
 <script setup>
 import { ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
+import { concentrationRatio, compatibleUnits, dimsCompatible, defaultUnitForDim, CONC_UNITS } from '../utils/units.js'
 
 const store = useLabStore()
 const activeDropdown = ref(null)
 const showCloudLibrary = ref(false)
 
-// --- Helper Functions ---
-const getUM = (val, unit) => {
-    if (!val) return 0;
-    let m = 1;
-    if (unit === 'M') m = 1e6; else if (unit === 'mM') m = 1e3; else if (unit === 'µM') m = 1; else if (unit === 'nM') m = 1e-3;
-    else if (unit === 'mg/mL' || unit === 'µg/µL' || unit === 'X' || unit === 'U/µL' || unit === '%') m = 1;
-    else if (unit === 'ng/µL') m = 1e-3; else if (unit === 'L') m = 1e6; else if (unit === 'mL') m = 1e3; else if (unit === 'µL') m = 1; else if (unit === 'nL') m = 1e-3;
-    return val * m;
+// --- Unit helpers ---
+const targetUnitsForComp = (comp) => {
+    if (!comp.invId) return CONC_UNITS
+    const inv = store.inventory.find(i => i.id === comp.invId)
+    if (!inv) return CONC_UNITS
+    const compat = compatibleUnits(inv.stockUnit || 'µM').filter(u => CONC_UNITS.includes(u))
+    if (comp.targetUnit && !compat.includes(comp.targetUnit)) return [comp.targetUnit, ...compat]
+    return compat
+}
+
+const isCompUnitMismatch = (comp) => {
+    if (!comp.invId || comp.inputType === 'vol') return false
+    const inv = store.inventory.find(i => i.id === comp.invId)
+    if (!inv) return false
+    return !dimsCompatible(comp.targetUnit || 'µM', inv.stockUnit || 'µM')
+}
+
+const selectCompItem = (comp, inv) => {
+    comp.invId = inv.id
+    if (!dimsCompatible(comp.targetUnit || 'µM', inv.stockUnit || 'µM')) {
+        comp.targetUnit = defaultUnitForDim(inv.stockUnit || 'µM')
+    }
 }
 
 const getInvName = (id) => {
@@ -170,9 +185,12 @@ const calcRMCellHTML = (rm, rIndex, cIndex) => {
                 if (comp.inputType === 'vol') {
                     v = targetVal; displayTarget = `${targetVal} ${unit} (Fixed)`;
                 } else {
-                    const targetUM = getUM(targetVal, comp.targetUnit);
-                    const stockUM = getUM(Number(invItem.stock), invItem.stockUnit || 'µM');
-                    v = stockUM ? (targetUM * tv) / stockUM : 0;
+                    const ratio = concentrationRatio(targetVal, comp.targetUnit, Number(invItem.stock), invItem.stockUnit || 'µM');
+                    if (ratio === null) {
+                        htmlStr += `<span style="color: var(--danger); font-size: 0.85rem;"><i class="fas fa-triangle-exclamation"></i> ${invItem.code}: unit mismatch (stock: ${invItem.stockUnit || 'µM'} vs target: ${comp.targetUnit})</span><br>`;
+                        return;
+                    }
+                    v = ratio * tv;
                     displayTarget = `${targetVal} ${comp.targetUnit}`;
                 }
                 totalVol += v;
@@ -224,9 +242,8 @@ const saveReverseMatrixToJournal = (rm) => {
                     if (targetVal > 0 && invItem) {
                         if (comp.inputType === 'vol') v = targetVal;
                         else {
-                            const targetUM = getUM(targetVal, comp.targetUnit);
-                            const stockUM = getUM(Number(invItem.stock), invItem.stockUnit || 'µM');
-                            v = stockUM ? (targetUM * tv) / stockUM : 0;
+                            const ratio = concentrationRatio(targetVal, comp.targetUnit, Number(invItem.stock), invItem.stockUnit || 'µM');
+                            v = ratio !== null ? ratio * tv : 0;
                         }
                         totalVol += v;
                     }
@@ -368,7 +385,7 @@ const saveReverseMatrixToPlate = (rm) => {
                         </div>
                         <input type="text" v-model="comp.searchQuery" placeholder="Search inventory..." style="margin: 5px; width: calc(100% - 10px); padding: 4px; border: 1px solid var(--border); border-radius: var(--radius);" @click.stop>
                         <div style="overflow-y: auto; max-height: 180px;">
-                            <div v-for="inv in filterBlockInventory(comp.searchQuery, comp.searchScope)" :key="inv.id" @mousedown.prevent="comp.invId = inv.id; activeDropdown = null" style="padding: 6px 10px; cursor: pointer; font-size: 0.8rem; border-bottom: 1px solid var(--bg);" onmouseover="this.style.background='var(--summary-bg)'" onmouseout="this.style.background='transparent'">
+                            <div v-for="inv in filterBlockInventory(comp.searchQuery, comp.searchScope)" :key="inv.id" @mousedown.prevent="selectCompItem(comp, inv); activeDropdown = null" style="padding: 6px 10px; cursor: pointer; font-size: 0.8rem; border-bottom: 1px solid var(--bg);" onmouseover="this.style.background='var(--summary-bg)'" onmouseout="this.style.background='transparent'">
                                 [{{ inv.code }}] {{ inv.name }} ({{store.formatNum(inv.stock)}} {{inv.stockUnit || 'µM'}})
                             </div>
                         </div>
@@ -389,11 +406,10 @@ const saveReverseMatrixToPlate = (rm) => {
                 </div>
                 <div class="input-group" style="margin-bottom: 0;" v-if="comp.inputType !== 'vol'">
                     <label style="font-size: 0.7rem; margin-bottom: 2px;">Target Unit</label>
-                    <select v-model="comp.targetUnit" style="padding: 6px; font-size: 0.8rem; height: 32px; width: 80px;">
-                        <option value="M">M</option><option value="mM">mM</option><option value="µM">µM</option><option value="nM">nM</option>
-                        <option value="mg/mL">mg/mL</option><option value="µg/µL">µg/µL</option><option value="ng/µL">ng/µL</option>
-                        <option value="X">X</option><option value="U/µL">U/µL</option><option value="%">%</option>
+                    <select v-model="comp.targetUnit" style="padding: 6px; font-size: 0.8rem; height: 32px; width: 80px;" :style="isCompUnitMismatch(comp) ? 'border-color: var(--danger);' : ''">
+                        <option v-for="u in targetUnitsForComp(comp)" :key="u" :value="u">{{ u }}</option>
                     </select>
+                    <div v-if="isCompUnitMismatch(comp)" style="font-size: 0.65rem; color: var(--danger); margin-top: 2px; white-space: nowrap;"><i class="fas fa-triangle-exclamation"></i> Mismatch</div>
                 </div>
                 <div class="input-group" style="margin-bottom: 0;" v-else>
                     <label style="font-size: 0.7rem; margin-bottom: 2px;">Unit</label>

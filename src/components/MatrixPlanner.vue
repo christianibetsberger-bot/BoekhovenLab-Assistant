@@ -1,20 +1,11 @@
 <script setup>
 import { ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
+import { concentrationRatio, dimsCompatible, CONC_UNITS } from '../utils/units.js'
 
 const store = useLabStore()
 const activeDropdown = ref(null)
 const showCloudLibrary = ref(false)
-
-// --- Helper Functions ---
-const getUM = (val, unit) => {
-    if (!val) return 0;
-    let m = 1;
-    if (unit === 'M') m = 1e6; else if (unit === 'mM') m = 1e3; else if (unit === 'µM') m = 1; else if (unit === 'nM') m = 1e-3;
-    else if (unit === 'mg/mL' || unit === 'µg/µL' || unit === 'X' || unit === 'U/µL' || unit === '%') m = 1;
-    else if (unit === 'ng/µL') m = 1e-3; else if (unit === 'L') m = 1e6; else if (unit === 'mL') m = 1e3; else if (unit === 'µL') m = 1; else if (unit === 'nL') m = 1e-3;
-    return val * m;
-}
 
 const filterBlockInventory = (query, scope) => {
     const term = query ? query.toLowerCase() : '';
@@ -96,6 +87,18 @@ const duplicateMatrix = (index) => {
     store.matrices.splice(index + 1, 0, copy);
 }
 
+// --- Unit mismatch detection ---
+const matrixAxisHasMismatch = (matrix, selectedIds, axisUnit) => {
+    return selectedIds.some(blockId => {
+        const block = matrix.customBlocks.find(b => b.id === blockId)
+        if (!block) return false
+        return block.itemIds.some(itemId => {
+            const item = store.inventory.find(i => i.id === itemId)
+            return item && !dimsCompatible(axisUnit || 'µM', item.stockUnit || 'µM')
+        })
+    })
+}
+
 // --- Calculators ---
 const calculateMatrixCell = (matrix, rowBlockId, colBlockId) => {
     const rowBlock = matrix.customBlocks.find(b => b.id === rowBlockId);
@@ -108,24 +111,29 @@ const calculateMatrixCell = (matrix, rowBlockId, colBlockId) => {
     let htmlStr = "";
     let totalVol = 0;
 
-    const rowTargetUM = getUM(matrix.rowTargetConc, matrix.rowTargetConcUnit || 'µM');
-    const colTargetUM = getUM(matrix.colTargetConc, matrix.colTargetConcUnit || 'µM');
-
     rowBlock.itemIds.forEach(itemId => {
         const item = store.inventory.find(i => i.id === itemId);
         if(item) {
-            const stockUM = getUM(item.stock, item.stockUnit || 'µM');
-            let v = stockUM ? (rowTargetUM * tv) / stockUM : 0;
+            const ratio = concentrationRatio(matrix.rowTargetConc, matrix.rowTargetConcUnit || 'µM', item.stock, item.stockUnit || 'µM');
+            if (ratio === null) {
+                htmlStr += `<strong>Row:</strong> <span style="color: var(--danger);"><i class="fas fa-triangle-exclamation"></i> [${item.code}] ${item.name}: unit mismatch (stock: ${item.stockUnit || 'µM'} vs target: ${matrix.rowTargetConcUnit || 'µM'})</span><br>`;
+                return;
+            }
+            let v = ratio * tv;
             totalVol += v;
             htmlStr += `<strong>Row:</strong> &nbsp;<span class="inv-ref" contenteditable="false" data-labware="${rowBlock.labware || ''}"><i class="fas fa-tag"></i>&nbsp;[${item.code}] ${item.name} (${store.formatNum(item.stock)} ${item.stockUnit || 'µM'})&nbsp;<i class="fas fa-times" style="cursor:pointer; margin-left:4px; opacity: 0.7;" onclick="let ce = this.closest('[contenteditable]'); this.parentElement.remove(); if(ce) ce.dispatchEvent(new Event('input', {bubbles: true}));" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7"></i></span>&nbsp; ${store.formatNum(v)} ${unit} (${matrix.rowTargetConc} ${matrix.rowTargetConcUnit || 'µM'})<br>`;
         }
     });
-    
+
     colBlock.itemIds.forEach(itemId => {
         const item = store.inventory.find(i => i.id === itemId);
         if(item) {
-            const stockUM = getUM(item.stock, item.stockUnit || 'µM');
-            let v = stockUM ? (colTargetUM * tv) / stockUM : 0;
+            const ratio = concentrationRatio(matrix.colTargetConc, matrix.colTargetConcUnit || 'µM', item.stock, item.stockUnit || 'µM');
+            if (ratio === null) {
+                htmlStr += `<strong>Col:</strong> <span style="color: var(--danger);"><i class="fas fa-triangle-exclamation"></i> [${item.code}] ${item.name}: unit mismatch (stock: ${item.stockUnit || 'µM'} vs target: ${matrix.colTargetConcUnit || 'µM'})</span><br>`;
+                return;
+            }
+            let v = ratio * tv;
             totalVol += v;
             htmlStr += `<strong>Col:</strong> &nbsp;<span class="inv-ref" contenteditable="false" data-labware="${colBlock.labware || ''}"><i class="fas fa-tag"></i>&nbsp;[${item.code}] ${item.name} (${store.formatNum(item.stock)} ${item.stockUnit || 'µM'})&nbsp;<i class="fas fa-times" style="cursor:pointer; margin-left:4px; opacity: 0.7;" onclick="let ce = this.closest('[contenteditable]'); this.parentElement.remove(); if(ce) ce.dispatchEvent(new Event('input', {bubbles: true}));" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7"></i></span>&nbsp; ${store.formatNum(v)} ${unit} (${matrix.colTargetConc} ${matrix.colTargetConcUnit || 'µM'})<br>`;
         }
@@ -394,10 +402,11 @@ const saveMatrixToPlate = (matrix) => {
                     <label>Target Conc</label>
                     <div class="input-with-select">
                         <input type="number" v-model.number="matrix.rowTargetConc" step="any" style="border-right: none; border-top-right-radius: 0; border-bottom-right-radius: 0;">
-                        <select v-model="matrix.rowTargetConcUnit" style="width: 80px; padding: 6px; font-size: 0.8rem; border-left: 1px solid var(--border); border-top-left-radius: 0; border-bottom-left-radius: 0;">
-                            <option value="M">M</option><option value="mM">mM</option><option value="µM">µM</option><option value="nM">nM</option>
+                        <select v-model="matrix.rowTargetConcUnit" style="width: 80px; padding: 6px; font-size: 0.8rem; border-left: 1px solid var(--border); border-top-left-radius: 0; border-bottom-left-radius: 0;" :style="matrixAxisHasMismatch(matrix, matrix.selectedRows, matrix.rowTargetConcUnit) ? 'border-color: var(--danger);' : ''">
+                            <option v-for="u in CONC_UNITS" :key="u" :value="u">{{ u }}</option>
                         </select>
                     </div>
+                    <div v-if="matrixAxisHasMismatch(matrix, matrix.selectedRows, matrix.rowTargetConcUnit)" style="font-size: 0.7rem; color: var(--danger); margin-top: 2px;"><i class="fas fa-triangle-exclamation"></i> Unit mismatch with selected stocks</div>
                 </div>
                 <div class="checkbox-list">
                     <label v-for="block in matrix.customBlocks" :key="'r'+block.id">
@@ -413,10 +422,11 @@ const saveMatrixToPlate = (matrix) => {
                     <label>Target Conc</label>
                     <div class="input-with-select">
                         <input type="number" v-model.number="matrix.colTargetConc" step="any" style="border-right: none; border-top-right-radius: 0; border-bottom-right-radius: 0;">
-                        <select v-model="matrix.colTargetConcUnit" style="width: 80px; padding: 6px; font-size: 0.8rem; border-left: 1px solid var(--border); border-top-left-radius: 0; border-bottom-left-radius: 0;">
-                            <option value="M">M</option><option value="mM">mM</option><option value="µM">µM</option><option value="nM">nM</option>
+                        <select v-model="matrix.colTargetConcUnit" style="width: 80px; padding: 6px; font-size: 0.8rem; border-left: 1px solid var(--border); border-top-left-radius: 0; border-bottom-left-radius: 0;" :style="matrixAxisHasMismatch(matrix, matrix.selectedCols, matrix.colTargetConcUnit) ? 'border-color: var(--danger);' : ''">
+                            <option v-for="u in CONC_UNITS" :key="u" :value="u">{{ u }}</option>
                         </select>
                     </div>
+                    <div v-if="matrixAxisHasMismatch(matrix, matrix.selectedCols, matrix.colTargetConcUnit)" style="font-size: 0.7rem; color: var(--danger); margin-top: 2px;"><i class="fas fa-triangle-exclamation"></i> Unit mismatch with selected stocks</div>
                 </div>
                 <div class="checkbox-list">
                     <label v-for="block in matrix.customBlocks" :key="'c'+block.id">

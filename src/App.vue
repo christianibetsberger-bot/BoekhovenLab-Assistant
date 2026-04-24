@@ -3,121 +3,101 @@ import { onMounted, watch, ref, computed, markRaw } from 'vue'
 import { db } from './services/supabase'
 import { useLabStore } from './stores/labStore'
 
-// --- Core Modules ---
 import AuthLogin from './components/AuthLogin.vue'
 import LabJournal from './components/LabJournal.vue'
 import GlobalSettings from './components/GlobalSettings.vue'
 import StandardStock from './components/StandardStock.vue'
 import SequenceCalc from './components/SequenceCalc.vue'
 import InventoryManager from './components/InventoryManager.vue'
-
-// --- Advanced Planners ---
 import ReactionPlan from './components/ReactionPlan.vue'
 import MatrixPlanner from './components/MatrixPlanner.vue'
 import ScreeningPlanner from './components/ScreeningPlanner.vue'
 import PhasePredictor from './components/PhasePredictor.vue'
-
-// --- Plate & Archive Management ---
 import WellPlateEditor from './components/WellPlateEditor.vue'
 import ArchiveManager from './components/ArchiveManager.vue'
 
 const store = useLabStore()
 
-// Module metadata — defines all 10 modules
+// Icons match the exact fa- class used in each component's <h2>
 const MODULE_META = {
-  globalSettings:    { label: 'Settings',    icon: 'fa-cog',        component: markRaw(GlobalSettings) },
-  standardStock:     { label: 'Stock Calc',  icon: 'fa-flask',      component: markRaw(StandardStock) },
-  sequenceCalc:      { label: 'DNA Calc',    icon: 'fa-dna',        component: markRaw(SequenceCalc) },
-  archiveManager:    { label: 'Archive',     icon: 'fa-archive',    component: markRaw(ArchiveManager) },
-  inventoryManager:  { label: 'Inventory',   icon: 'fa-boxes',      component: markRaw(InventoryManager) },
-  reactionPlan:      { label: 'Reaction',    icon: 'fa-vial',       component: markRaw(ReactionPlan) },
-  matrixPlanner:     { label: 'Matrix',      icon: 'fa-th',         component: markRaw(MatrixPlanner) },
-  screeningPlanner:  { label: 'Screening',   icon: 'fa-layer-group',component: markRaw(ScreeningPlanner) },
-  phasePredictor:    { label: 'Phase Map',   icon: 'fa-chart-bar',  component: markRaw(PhasePredictor) },
-  wellPlateEditor:   { label: 'Well Plate',  icon: 'fa-grip-horizontal', component: markRaw(WellPlateEditor) },
+  globalSettings:   { label: 'Settings',   icon: 'fa-sliders',           component: markRaw(GlobalSettings) },
+  standardStock:    { label: 'Stock Calc', icon: 'fa-flask-vial',        component: markRaw(StandardStock) },
+  sequenceCalc:     { label: 'DNA Calc',   icon: 'fa-dna',               component: markRaw(SequenceCalc) },
+  archiveManager:   { label: 'Archive',    icon: 'fa-box-archive',       component: markRaw(ArchiveManager) },
+  inventoryManager: { label: 'Inventory',  icon: 'fa-boxes-stacked',     component: markRaw(InventoryManager) },
+  reactionPlan:     { label: 'Reaction',   icon: 'fa-flask',             component: markRaw(ReactionPlan) },
+  matrixPlanner:    { label: 'Matrix',     icon: 'fa-table-cells',       component: markRaw(MatrixPlanner) },
+  screeningPlanner: { label: 'Screening',  icon: 'fa-table-cells-large', component: markRaw(ScreeningPlanner) },
+  phasePredictor:   { label: 'Phase Map',  icon: 'fa-brain',             component: markRaw(PhasePredictor) },
+  wellPlateEditor:  { label: 'Well Plate', icon: 'fa-border-all',        component: markRaw(WellPlateEditor) },
 }
 
-// Layout state — loaded from store (user-specific localStorage)
 const layout = ref({ leftOrder: [], rightOrder: [], minimized: {} })
 
 function loadLayout() {
   layout.value = store.loadModuleLayout()
 }
-
 function saveLayout() {
   store.saveModuleLayout(layout.value)
 }
-
 function toggleModule(id) {
-  const current = layout.value.minimized[id]
-  layout.value.minimized = { ...layout.value.minimized, [id]: !current }
+  layout.value.minimized = { ...layout.value.minimized, [id]: !layout.value.minimized[id] }
   saveLayout()
 }
-
 function isMinimized(id) {
   return !!layout.value.minimized[id]
 }
-
 function resetLayout() {
   layout.value = store.getDefaultModuleLayout()
   saveLayout()
 }
 
-// Drag & drop reordering
+// Drag & drop reordering via handle strip
 const dragging = ref(null)
 const dragOverId = ref(null)
 const dragOverCol = ref(null)
 
-function onDragStart(id, col) {
-  dragging.value = { id, col }
-}
-
+function onDragStart(id, col) { dragging.value = { id, col } }
 function onDragOver(e, id, col) {
   e.preventDefault()
   dragOverId.value = id
   dragOverCol.value = col
 }
-
 function onDrop(e, targetId, targetCol) {
   e.preventDefault()
   if (!dragging.value) return
   const { id: srcId, col: srcCol } = dragging.value
-
   const srcList = srcCol === 'left' ? layout.value.leftOrder : layout.value.rightOrder
   const tgtList = targetCol === 'left' ? layout.value.leftOrder : layout.value.rightOrder
-
   const srcIdx = srcList.indexOf(srcId)
   const tgtIdx = tgtList.indexOf(targetId)
-
   if (srcCol === targetCol) {
-    // Reorder within the same column
     srcList.splice(srcIdx, 1)
     srcList.splice(tgtIdx, 0, srcId)
   } else {
-    // Move between columns
     srcList.splice(srcIdx, 1)
     tgtList.splice(tgtIdx, 0, srcId)
   }
-
   dragging.value = null
   dragOverId.value = null
   dragOverCol.value = null
   saveLayout()
 }
-
 function onDragEnd() {
   dragging.value = null
   dragOverId.value = null
   dragOverCol.value = null
 }
 
-// All 10 module ids in sidebar order (left then right)
 const allModuleIds = computed(() => {
-  const all = new Set([...layout.value.leftOrder, ...layout.value.rightOrder])
-  return [...all]
+  const seen = new Set()
+  const result = []
+  for (const id of [...layout.value.leftOrder, ...layout.value.rightOrder]) {
+    if (!seen.has(id)) { seen.add(id); result.push(id) }
+  }
+  return result
 })
 
-// Auto-save drafts
 let draftSaveTimeout
 watch(
   [() => store.reactions, () => store.matrices, () => store.reverseMatrices, () => store.wellPlates, () => store.journal.entries],
@@ -137,7 +117,6 @@ onMounted(() => {
       loadLayout()
     }
   })
-
   db.auth.onAuthStateChange((event, session) => {
     store.user = session?.user || null
     if (store.user) {
@@ -161,19 +140,15 @@ const signOut = async () => {
 
     <template v-else>
 
-      <!-- ───── Module Sidebar ───── -->
+      <!-- Auto-hide sidebar — slides in on hover -->
       <nav class="module-sidebar">
-        <div class="sidebar-logo">
-          <i class="fas fa-atom"></i>
-        </div>
-
         <div class="sidebar-modules">
           <button
             v-for="id in allModuleIds"
             :key="id"
             class="sidebar-btn"
-            :class="{ 'is-minimized': isMinimized(id), 'is-active': !isMinimized(id) }"
-            :title="MODULE_META[id].label + (isMinimized(id) ? ' (hidden — click to show)' : ' (click to hide)')"
+            :class="{ 'is-active': !isMinimized(id), 'is-hidden': isMinimized(id) }"
+            :title="MODULE_META[id].label"
             @click="toggleModule(id)"
           >
             <i class="fas" :class="MODULE_META[id].icon"></i>
@@ -182,17 +157,16 @@ const signOut = async () => {
         </div>
 
         <div class="sidebar-footer">
-          <button class="sidebar-btn sidebar-reset" title="Reset layout to default" @click="resetLayout">
-            <i class="fas fa-undo"></i>
+          <button class="sidebar-btn sidebar-reset" title="Reset layout" @click="resetLayout">
+            <i class="fas fa-rotate-left"></i>
             <span class="sidebar-label">Reset</span>
           </button>
         </div>
       </nav>
 
-      <!-- ───── Main Content ───── -->
+      <!-- Main content — full width, small left indent for sidebar peek -->
       <div class="app-main">
 
-        <!-- Top bar -->
         <div class="top-bar">
           <span class="user-info">
             <i class="fas fa-user-circle"></i>
@@ -203,23 +177,19 @@ const signOut = async () => {
           </button>
         </div>
 
-        <!-- Lab Journal always full width -->
         <div class="journal-row">
           <LabJournal />
         </div>
 
-        <!-- Two-column workspace -->
         <div class="workspace-grid">
 
           <!-- Left column -->
           <div class="workspace-col" id="col-left">
             <template v-for="id in layout.leftOrder" :key="id">
               <div
+                v-show="!isMinimized(id)"
                 class="module-wrapper"
-                :class="{
-                  'is-minimized': isMinimized(id),
-                  'drag-over': dragOverId === id && dragOverCol === 'left'
-                }"
+                :class="{ 'drag-over': dragOverId === id && dragOverCol === 'left' }"
                 @dragover="onDragOver($event, id, 'left')"
                 @drop="onDrop($event, id, 'left')"
               >
@@ -229,15 +199,8 @@ const signOut = async () => {
                   @dragstart="onDragStart(id, 'left')"
                   @dragend="onDragEnd"
                   title="Drag to reorder"
-                >
-                  <i class="fas fa-grip-lines"></i>
-                </div>
-                <div v-if="isMinimized(id)" class="minimized-placeholder" @click="toggleModule(id)">
-                  <i class="fas" :class="MODULE_META[id].icon"></i>
-                  <span>{{ MODULE_META[id].label }}</span>
-                  <i class="fas fa-expand-alt expand-icon"></i>
-                </div>
-                <component :is="MODULE_META[id].component" v-show="!isMinimized(id)" />
+                ><i class="fas fa-grip-lines"></i></div>
+                <component :is="MODULE_META[id].component" />
               </div>
             </template>
           </div>
@@ -246,11 +209,9 @@ const signOut = async () => {
           <div class="workspace-col" id="col-right">
             <template v-for="id in layout.rightOrder" :key="id">
               <div
+                v-show="!isMinimized(id)"
                 class="module-wrapper"
-                :class="{
-                  'is-minimized': isMinimized(id),
-                  'drag-over': dragOverId === id && dragOverCol === 'right'
-                }"
+                :class="{ 'drag-over': dragOverId === id && dragOverCol === 'right' }"
                 @dragover="onDragOver($event, id, 'right')"
                 @drop="onDrop($event, id, 'right')"
               >
@@ -260,15 +221,8 @@ const signOut = async () => {
                   @dragstart="onDragStart(id, 'right')"
                   @dragend="onDragEnd"
                   title="Drag to reorder"
-                >
-                  <i class="fas fa-grip-lines"></i>
-                </div>
-                <div v-if="isMinimized(id)" class="minimized-placeholder" @click="toggleModule(id)">
-                  <i class="fas" :class="MODULE_META[id].icon"></i>
-                  <span>{{ MODULE_META[id].label }}</span>
-                  <i class="fas fa-expand-alt expand-icon"></i>
-                </div>
-                <component :is="MODULE_META[id].component" v-show="!isMinimized(id)" />
+                ><i class="fas fa-grip-lines"></i></div>
+                <component :is="MODULE_META[id].component" />
               </div>
             </template>
           </div>
@@ -281,123 +235,145 @@ const signOut = async () => {
 </template>
 
 <style>
-/* ── Reset body padding for new sidebar layout ── */
+/* ── Body reset ── */
 body {
   padding: 0 !important;
   margin: 0 !important;
 }
 
-/* ── Layout shell ── */
+/* ── Root wrapper ── */
 #body-wrapper {
   display: flex;
   min-height: 100vh;
 }
 
+/* ══════════════════════════════════════════
+   AUTO-HIDE SIDEBAR (macOS-dock style)
+   Peeks 5px at left edge; slides in on hover
+   ══════════════════════════════════════════ */
 .module-sidebar {
-  width: 72px;
-  flex-shrink: 0;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 8px 0;
-  position: sticky;
+  position: fixed;
+  left: 0;
   top: 0;
   height: 100vh;
+  width: 96px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  box-shadow: 4px 0 16px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  padding: 10px 0;
+  z-index: 500;
+  /* Hidden: only 5px of the right edge visible as a peek strip */
+  transform: translateX(calc(-96px + 5px));
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
   overflow-y: auto;
-  z-index: 100;
-  transition: background 0.3s, border-color 0.3s;
+  overflow-x: hidden;
 }
 
-.sidebar-logo {
-  font-size: 1.4rem;
-  color: var(--primary);
-  padding: 10px 0 16px;
-  border-bottom: 1px solid var(--border);
-  width: 100%;
-  text-align: center;
+.module-sidebar:hover {
+  transform: translateX(0);
 }
 
+/* Coloured peek strip — always visible at left edge */
+.module-sidebar::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 5px;
+  height: 100%;
+  background: var(--primary);
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity 0.22s;
+}
+.module-sidebar:hover::before {
+  opacity: 0;
+}
+
+/* ── Sidebar button — rectangular ── */
 .sidebar-modules {
   flex: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 0;
+  gap: 2px;
+  padding: 4px 8px;
   width: 100%;
 }
 
 .sidebar-footer {
   border-top: 1px solid var(--border);
-  padding: 8px 0;
-  width: 100%;
+  padding: 8px 8px 4px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  gap: 2px;
 }
 
 .sidebar-btn {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 3px;
-  width: 60px;
-  padding: 8px 4px;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 4px;
   color: var(--text);
   cursor: pointer;
-  font-size: 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 500;
   text-transform: none;
   letter-spacing: 0;
-  transition: all 0.15s;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
 .sidebar-btn i {
-  font-size: 1.1rem;
+  font-size: 0.95rem;
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
 }
 
-.sidebar-btn .sidebar-label {
-  font-size: 0.6rem;
-  opacity: 0.8;
-  text-align: center;
-  line-height: 1.2;
-  white-space: nowrap;
+.sidebar-label {
+  font-size: 0.78rem;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 58px;
 }
 
 .sidebar-btn.is-active {
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
-  border-color: color-mix(in srgb, var(--primary) 30%, transparent);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 35%, transparent);
   color: var(--primary);
 }
 
-.sidebar-btn.is-minimized {
-  opacity: 0.45;
+.sidebar-btn.is-hidden {
+  opacity: 0.4;
 }
 
 .sidebar-btn:hover {
   filter: none;
-  background: color-mix(in srgb, var(--primary) 18%, transparent);
-  border-color: color-mix(in srgb, var(--primary) 40%, transparent);
+  background: color-mix(in srgb, var(--primary) 20%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 45%, transparent);
   color: var(--primary);
   opacity: 1;
 }
 
 .sidebar-reset {
-  color: #6b7280;
+  opacity: 0.5;
+}
+.sidebar-reset:hover {
+  opacity: 1;
 }
 
-/* ── Main content area ── */
+/* ── Main content ── */
 .app-main {
   flex: 1;
   min-width: 0;
-  padding: 16px 20px;
+  padding: 16px 20px 16px 20px;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -418,9 +394,7 @@ body {
   gap: 6px;
 }
 
-.journal-row {
-  width: 100%;
-}
+.journal-row { width: 100%; }
 
 .workspace-grid {
   display: grid;
@@ -436,7 +410,7 @@ body {
   min-width: 0;
 }
 
-/* ── Module wrappers ── */
+/* ── Module wrappers & drag handle ── */
 .module-wrapper {
   border-radius: var(--radius);
   transition: box-shadow 0.15s;
@@ -450,74 +424,22 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 18px;
+  height: 14px;
   background: var(--panel-bg);
   border: 1px solid var(--border);
   border-bottom: none;
   border-radius: var(--radius) var(--radius) 0 0;
   cursor: grab;
-  opacity: 0.5;
+  opacity: 0.35;
   transition: opacity 0.15s;
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   color: var(--text);
 }
-
-.drag-handle:hover {
-  opacity: 1;
-  background: color-mix(in srgb, var(--primary) 8%, var(--panel-bg));
-}
-
-.drag-handle:active {
-  cursor: grabbing;
-}
-
-.minimized-placeholder {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-top: 4px solid var(--primary);
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--primary);
-  opacity: 0.75;
-  transition: opacity 0.15s;
-}
-
-.minimized-placeholder:hover {
-  opacity: 1;
-}
-
-.minimized-placeholder i:first-child {
-  font-size: 1rem;
-}
-
-.expand-icon {
-  margin-left: auto;
-  font-size: 0.75rem;
-  opacity: 0.6;
-}
+.drag-handle:hover { opacity: 0.9; }
+.drag-handle:active { cursor: grabbing; }
 
 /* ── Responsive ── */
 @media (max-width: 1200px) {
-  .workspace-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 768px) {
-  .module-sidebar {
-    width: 56px;
-  }
-  .sidebar-btn {
-    width: 46px;
-  }
-  .sidebar-label {
-    display: none;
-  }
+  .workspace-grid { grid-template-columns: 1fr; }
 }
 </style>

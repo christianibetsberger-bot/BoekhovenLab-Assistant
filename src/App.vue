@@ -45,13 +45,9 @@ function toggleModule(id) {
 function isMinimized(id) { return !!layout.value.minimized[id] }
 function resetLayout() { layout.value = store.getDefaultModuleLayout(); saveLayout() }
 
-// Dynamic grid: collapses to 1-col when one side has nothing visible
+// Track which columns have at least one visible module (drives v-show on column divs)
 const leftHasVisible  = computed(() => layout.value.leftOrder.some(id  => !isMinimized(id)))
 const rightHasVisible = computed(() => layout.value.rightOrder.some(id => !isMinimized(id)))
-const gridCols = computed(() => {
-  if (leftHasVisible.value && rightHasVisible.value) return 'minmax(380px, 460px) minmax(0, 1fr)'
-  return '1fr'
-})
 
 // Drag & drop via handle strip
 const dragging   = ref(null)
@@ -163,10 +159,11 @@ const signOut = async () => { await db.auth.signOut(); window.location.reload() 
           </div>
         </template>
 
-        <!-- Two-column workspace (collapses when one side empty) -->
-        <div class="workspace-grid" :style="{ gridTemplateColumns: gridCols }">
+        <!-- Two-column workspace — flexbox so v-show:none removes column from flow -->
+        <div class="workspace-row">
 
-          <div class="workspace-col" id="col-left" v-show="leftHasVisible">
+          <!-- Left column: fixed width, disappears when all hidden -->
+          <div class="ws-col ws-left" v-show="leftHasVisible">
             <template v-for="id in layout.leftOrder" :key="id">
               <div
                 v-show="!isMinimized(id)"
@@ -183,7 +180,8 @@ const signOut = async () => { await db.auth.signOut(); window.location.reload() 
             </template>
           </div>
 
-          <div class="workspace-col" id="col-right" v-show="rightHasVisible">
+          <!-- Right column: fills remaining space, disappears when all hidden -->
+          <div class="ws-col ws-right" v-show="rightHasVisible">
             <template v-for="id in layout.rightOrder" :key="id">
               <div
                 v-show="!isMinimized(id)"
@@ -210,7 +208,10 @@ const signOut = async () => { await db.auth.signOut(); window.location.reload() 
 <style>
 body { padding: 0 !important; margin: 0 !important; }
 
-#body-wrapper { display: flex; min-height: 100vh; }
+/* #app is the Vue mount point inside <body>. Must fill full viewport width. */
+#app { width: 100%; }
+
+#body-wrapper { display: flex; min-height: 100vh; width: 100%; }
 
 /* ══ Auto-hide sidebar ══ */
 .module-sidebar {
@@ -316,19 +317,29 @@ body { padding: 0 !important; margin: 0 !important; }
 }
 .user-info { font-size: 0.9rem; opacity: 0.8; display: flex; align-items: center; gap: 6px; }
 
-/* ══ Workspace grid — columns collapse when empty ══ */
-.workspace-grid {
-  display: grid;
+/* ══ Workspace — flexbox so v-show:display:none removes a column from layout ══ */
+.workspace-row {
+  display: flex;
   gap: 20px;
-  align-items: start;
-  /* gridTemplateColumns set dynamically via :style */
+  align-items: flex-start;
+  width: 100%;
 }
 
-.workspace-col {
+.ws-col {
   display: flex;
   flex-direction: column;
   gap: 20px;
   min-width: 0;
+}
+
+/* Left column: fixed max-width; expands to fill if right is hidden */
+.ws-left {
+  flex: 0 0 460px;
+}
+
+/* Right column: fills all remaining space */
+.ws-right {
+  flex: 1;
 }
 
 /* ══ Module wrappers ══ */
@@ -349,6 +360,7 @@ body { padding: 0 !important; margin: 0 !important; }
 .drag-handle:active { cursor: grabbing; }
 
 @media (max-width: 1200px) {
-  .workspace-grid { grid-template-columns: 1fr !important; }
+  .workspace-row { flex-direction: column; }
+  .ws-left { flex: 1 1 auto; }
 }
 </style>

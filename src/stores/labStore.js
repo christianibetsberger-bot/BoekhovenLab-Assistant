@@ -287,6 +287,10 @@ export const useLabStore = defineStore('lab', {
     },
 
     updateThemeColors() {
+      // Apply dark-mode to body (for body.dark-mode CSS variable block in style.css)
+      if (this.isDarkMode) document.body.classList.add('dark-mode');
+      else document.body.classList.remove('dark-mode');
+      // Also apply to the Vue wrapper div so .dark-mode selector cascades to all children
       const wrapper = document.getElementById('body-wrapper');
       if (wrapper) {
         if (this.isDarkMode) wrapper.classList.add('dark-mode');

@@ -343,8 +343,31 @@ body { padding: 0 !important; margin: 0 !important; }
 }
 
 /* ══ Module wrappers ══ */
-.module-wrapper { border-radius: var(--radius); transition: box-shadow 0.15s; }
+.module-wrapper {
+  border-radius: var(--radius);
+  transition: box-shadow 0.15s;
+  /* Container context so child elements can respond to the module's own width */
+  container-type: inline-size;
+}
 .module-wrapper.drag-over { box-shadow: 0 0 0 2px var(--primary); }
+
+/* ── Responsive card headers at narrow widths ──
+   Targets .flex-between pattern used in all module card headers.
+   !important overrides inline display:flex;justify-content:space-between styles. */
+@container (max-width: 520px) {
+  .flex-between {
+    flex-wrap: wrap !important;
+    row-gap: 8px !important;
+    align-items: flex-start !important;
+  }
+  /* Button rows inside the header also wrap */
+  .flex-between > div {
+    flex-wrap: wrap !important;
+    row-gap: 6px !important;
+  }
+  /* Shrink h2 title slightly to give buttons more room */
+  .card h2 { font-size: 1.05rem; }
+}
 
 .drag-handle {
   display: flex; align-items: center; justify-content: center;

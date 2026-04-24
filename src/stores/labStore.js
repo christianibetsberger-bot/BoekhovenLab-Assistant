@@ -252,11 +252,22 @@ export const useLabStore = defineStore('lab', {
       try {
         const saved = JSON.parse(raw);
         const def = this.getDefaultModuleLayout();
-        const mergeOrders = (s, d) => [...s, ...d.filter(id => !s.includes(id))];
+        // Track every id already placed anywhere in the saved layout.
+        // This prevents dragged modules from being re-added to their original list.
+        const allSaved = new Set([
+          ...(saved.topOrder   || []),
+          ...(saved.leftOrder  || []),
+          ...(saved.rightOrder || [])
+        ]);
+        // Only append defaults for modules that don't appear in ANY saved list
+        const mergeOrders = (s, d) => [...s, ...d.filter(id => !allSaved.has(id))];
+        // Deduplicate within each list (cleans up any corrupted saved state)
+        const seen = new Set();
+        const dedup = list => list.filter(id => seen.has(id) ? false : (seen.add(id), true));
         return {
-          topOrder:   mergeOrders(saved.topOrder   || [], def.topOrder),
-          leftOrder:  mergeOrders(saved.leftOrder  || [], def.leftOrder),
-          rightOrder: mergeOrders(saved.rightOrder || [], def.rightOrder),
+          topOrder:   dedup(mergeOrders(saved.topOrder   || [], def.topOrder)),
+          leftOrder:  dedup(mergeOrders(saved.leftOrder  || [], def.leftOrder)),
+          rightOrder: dedup(mergeOrders(saved.rightOrder || [], def.rightOrder)),
           minimized: saved.minimized || {}
         };
       } catch { return this.getDefaultModuleLayout(); }

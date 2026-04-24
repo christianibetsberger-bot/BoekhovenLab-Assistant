@@ -233,10 +233,12 @@ export const useLabStore = defineStore('lab', {
 
     getDefaultModuleLayout() {
       return {
-        topOrder:   ['labJournal'],
-        leftOrder:  ['globalSettings', 'standardStock', 'sequenceCalc', 'archiveManager', 'inventoryManager'],
-        rightOrder: ['reactionPlan', 'matrixPlanner', 'screeningPlanner', 'phasePredictor', 'wellPlateEditor'],
-        minimized: {}
+        topOrder:        ['labJournal'],
+        leftOrder:       ['globalSettings', 'standardStock', 'sequenceCalc', 'archiveManager', 'inventoryManager'],
+        rightOrder:      ['reactionPlan', 'matrixPlanner', 'screeningPlanner', 'phasePredictor', 'wellPlateEditor'],
+        minimized:       {},
+        sidebarPosition: 'left',   // 'left' | 'right' | 'bottom'
+        sidebarHidden:   {}        // id → true  (removed from sidebar but still in layout orders)
       };
     },
 
@@ -268,7 +270,9 @@ export const useLabStore = defineStore('lab', {
           topOrder:   dedup(mergeOrders(saved.topOrder   || [], def.topOrder)),
           leftOrder:  dedup(mergeOrders(saved.leftOrder  || [], def.leftOrder)),
           rightOrder: dedup(mergeOrders(saved.rightOrder || [], def.rightOrder)),
-          minimized: saved.minimized || {}
+          minimized:       saved.minimized       || {},
+          sidebarPosition: saved.sidebarPosition || 'left',
+          sidebarHidden:   saved.sidebarHidden   || {}
         };
       } catch { return this.getDefaultModuleLayout(); }
     },

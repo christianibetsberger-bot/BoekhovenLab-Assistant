@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, watch, ref, computed, markRaw } from 'vue'
+import { onMounted, onUnmounted, watch, ref, computed, markRaw } from 'vue'
 import { db } from './services/supabase'
 import { useLabStore } from './stores/labStore'
 
@@ -20,17 +20,17 @@ const store = useLabStore()
 
 // Icons match each component's actual <h2> fa- class
 const MODULE_META = {
-  labJournal:       { label: 'Lab Journal', icon: 'fa-book',             gradient: 'linear-gradient(145deg,#ff9f0a,#ff6300)',   component: markRaw(LabJournal) },
-  globalSettings:   { label: 'Settings',    icon: 'fa-sliders',          gradient: 'linear-gradient(145deg,#8e8e93,#3a3a3c)',   component: markRaw(GlobalSettings) },
-  standardStock:    { label: 'Stock Calc',  icon: 'fa-flask-vial',       gradient: 'linear-gradient(145deg,#30d158,#0a9e3c)',   component: markRaw(StandardStock) },
-  sequenceCalc:     { label: 'DNA Calc',    icon: 'fa-dna',              gradient: 'linear-gradient(145deg,#bf5af2,#8b00d4)',   component: markRaw(SequenceCalc) },
-  archiveManager:   { label: 'Archive',     icon: 'fa-box-archive',      gradient: 'linear-gradient(145deg,#c7974a,#8b5e20)',   component: markRaw(ArchiveManager) },
-  inventoryManager: { label: 'Inventory',   icon: 'fa-boxes-stacked',    gradient: 'linear-gradient(145deg,#0a84ff,#0055d4)',   component: markRaw(InventoryManager) },
-  reactionPlan:     { label: 'Reaction',    icon: 'fa-flask',            gradient: 'linear-gradient(145deg,#ff453a,#c4160e)',   component: markRaw(ReactionPlan) },
-  matrixPlanner:    { label: 'Matrix',      icon: 'fa-table-cells',      gradient: 'linear-gradient(145deg,#5e5ce6,#3634c0)',   component: markRaw(MatrixPlanner) },
-  screeningPlanner: { label: 'Screening',   icon: 'fa-table-cells-large',gradient: 'linear-gradient(145deg,#20d7d0,#0aa09a)',   component: markRaw(ScreeningPlanner) },
-  phasePredictor:   { label: 'Phase Map',   icon: 'fa-brain',            gradient: 'linear-gradient(145deg,#ff2d55,#c0002e)',   component: markRaw(PhasePredictor) },
-  wellPlateEditor:  { label: 'Well Plate',  icon: 'fa-border-all',       gradient: 'linear-gradient(145deg,#5ac8fa,#0aafff)',   component: markRaw(WellPlateEditor) },
+  labJournal:       { label: 'Lab Journal', icon: 'fa-book',              component: markRaw(LabJournal) },
+  globalSettings:   { label: 'Settings',    icon: 'fa-sliders',           component: markRaw(GlobalSettings) },
+  standardStock:    { label: 'Stock Calc',  icon: 'fa-flask-vial',        component: markRaw(StandardStock) },
+  sequenceCalc:     { label: 'DNA Calc',    icon: 'fa-dna',               component: markRaw(SequenceCalc) },
+  archiveManager:   { label: 'Archive',     icon: 'fa-box-archive',       component: markRaw(ArchiveManager) },
+  inventoryManager: { label: 'Inventory',   icon: 'fa-boxes-stacked',     component: markRaw(InventoryManager) },
+  reactionPlan:     { label: 'Reaction',    icon: 'fa-flask',             component: markRaw(ReactionPlan) },
+  matrixPlanner:    { label: 'Matrix',      icon: 'fa-table-cells',       component: markRaw(MatrixPlanner) },
+  screeningPlanner: { label: 'Screening',   icon: 'fa-table-cells-large', component: markRaw(ScreeningPlanner) },
+  phasePredictor:   { label: 'Phase Map',   icon: 'fa-brain',             component: markRaw(PhasePredictor) },
+  wellPlateEditor:  { label: 'Well Plate',  icon: 'fa-border-all',        component: markRaw(WellPlateEditor) },
 }
 
 const layout = ref({ topOrder: [], leftOrder: [], rightOrder: [], minimized: {} })
@@ -99,14 +99,45 @@ function onColDrop(e, col) {
   clearDragState(); saveLayout()
 }
 
-// All module ids for sidebar (top → left → right order)
+// All module ids visible in the sidebar (excludes sidebarHidden); top → left → right order
 const allModuleIds = computed(() => {
   const seen = new Set(); const result = []
+  const hidden = layout.value.sidebarHidden || {}
   for (const id of [...layout.value.topOrder, ...layout.value.leftOrder, ...layout.value.rightOrder]) {
-    if (!seen.has(id)) { seen.add(id); result.push(id) }
+    if (!seen.has(id) && !hidden[id]) { seen.add(id); result.push(id) }
   }
   return result
 })
+
+// Modules removed from sidebar (can be re-added via redock panel)
+const removedModuleIds = computed(() =>
+  Object.keys(layout.value.sidebarHidden || {}).filter(id => layout.value.sidebarHidden[id])
+)
+
+// Sidebar position and dock utilities
+const POSITION_CYCLE = ['left', 'bottom', 'right']
+const sidebarPosition = computed(() => layout.value.sidebarPosition || 'left')
+const positionIconMap  = { left: 'fa-align-left', bottom: 'fa-align-center', right: 'fa-align-right' }
+const positionIcon     = computed(() => positionIconMap[sidebarPosition.value])
+function cyclePosition() {
+  const cur = layout.value.sidebarPosition || 'left'
+  layout.value.sidebarPosition = POSITION_CYCLE[(POSITION_CYCLE.indexOf(cur) + 1) % 3]
+  saveLayout()
+}
+
+// Sidebar remove / redock
+const showRedockPanel = ref(false)
+function removeFromSidebar(id) {
+  layout.value.sidebarHidden = { ...layout.value.sidebarHidden, [id]: true }
+  saveLayout()
+}
+function redockModule(id) {
+  const h = { ...layout.value.sidebarHidden }
+  delete h[id]
+  layout.value.sidebarHidden = h
+  if (!Object.values(h).some(Boolean)) showRedockPanel.value = false
+  saveLayout()
+}
 
 let draftSaveTimeout
 watch(
@@ -126,6 +157,11 @@ onMounted(() => {
 })
 
 const signOut = async () => { await db.auth.signOut(); window.location.reload() }
+
+// Close redock panel on any click outside the panel or its toggle button
+const _closeRedock = () => { showRedockPanel.value = false }
+onMounted(() => document.addEventListener('click', _closeRedock))
+onUnmounted(() => document.removeEventListener('click', _closeRedock))
 </script>
 
 <template>
@@ -135,8 +171,8 @@ const signOut = async () => { await db.auth.signOut(); window.location.reload() 
 
     <template v-else>
 
-      <!-- Auto-hide sidebar -->
-      <nav class="module-sidebar">
+      <!-- Auto-hide sidebar dock -->
+      <nav class="module-sidebar" :class="`pos-${sidebarPosition}`">
         <div class="sidebar-modules">
           <button
             v-for="id in allModuleIds"
@@ -146,22 +182,44 @@ const signOut = async () => { await db.auth.signOut(); window.location.reload() 
             :title="MODULE_META[id].label"
             @click="toggleModule(id)"
           >
-            <div class="sidebar-icon" :style="{ background: MODULE_META[id].gradient }">
+            <span class="sidebar-remove" @click.stop="removeFromSidebar(id)" title="Remove from sidebar">
+              <i class="fas fa-xmark"></i>
+            </span>
+            <div class="sidebar-icon">
               <i class="fas" :class="MODULE_META[id].icon"></i>
             </div>
-            <span class="sidebar-label">{{ MODULE_META[id].label }}</span>
           </button>
         </div>
 
         <div class="sidebar-footer">
-          <button class="sidebar-btn sidebar-reset" title="Reset layout" @click="resetLayout">
-            <div class="sidebar-icon" style="background: linear-gradient(145deg,#8e8e93,#48484a)">
-              <i class="fas fa-rotate-left"></i>
-            </div>
-            <span class="sidebar-label">Reset</span>
+          <button v-if="removedModuleIds.length" class="sidebar-btn" title="Add hidden modules back"
+            @click.stop="showRedockPanel = !showRedockPanel">
+            <div class="sidebar-icon sidebar-icon-util"><i class="fas fa-plus"></i></div>
+          </button>
+          <button class="sidebar-btn" :title="`Dock position: ${sidebarPosition}`" @click="cyclePosition">
+            <div class="sidebar-icon sidebar-icon-util"><i class="fas" :class="positionIcon"></i></div>
+          </button>
+          <button class="sidebar-btn" title="Reset layout" @click="resetLayout">
+            <div class="sidebar-icon sidebar-icon-util"><i class="fas fa-rotate-left"></i></div>
           </button>
         </div>
       </nav>
+
+      <!-- Redock picker — rendered at body level so it escapes the sidebar's overflow clip -->
+      <Teleport to="body">
+        <div v-show="showRedockPanel" class="redock-panel"
+          :class="[`panel-${sidebarPosition}`, { 'dark-mode': store.isDarkMode }]"
+          @click.stop>
+          <p class="redock-title">Hidden modules</p>
+          <div class="redock-grid">
+            <button v-for="id in removedModuleIds" :key="id" class="redock-item"
+              :title="MODULE_META[id].label" @click="redockModule(id)">
+              <div class="sidebar-icon redock-icon"><i class="fas" :class="MODULE_META[id].icon"></i></div>
+              <span class="redock-label">{{ MODULE_META[id].label }}</span>
+            </button>
+          </div>
+        </div>
+      </Teleport>
 
       <!-- Main content -->
       <div class="app-main">
@@ -279,197 +337,217 @@ body { padding: 0 !important; margin: 0 !important; }
 
 #body-wrapper { display: flex; min-height: 100vh; width: 100%; }
 
-/* ══ Auto-hide sidebar — Liquid Glass ══ */
+/* ══ Sidebar dock — Liquid Glass, three positions ══ */
 .module-sidebar {
   position: fixed;
-  left: 0; top: 0;
-  height: 100vh;
-  width: 96px;
-  /* Frosted glass base — more opaque fallback if backdrop-filter unsupported */
-  background: rgba(235, 235, 245, 0.65);
-  backdrop-filter: blur(60px) saturate(200%);
-  -webkit-backdrop-filter: blur(60px) saturate(200%);
-  border-right: 1px solid rgba(255, 255, 255, 0.45);
-  box-shadow:
-    6px 0 48px rgba(0, 0, 0, 0.10),
-    inset -1px 0 0 rgba(255, 255, 255, 0.55),
-    inset  1px 0 0 rgba(255, 255, 255, 0.20);
-  display: flex;
-  flex-direction: column;
-  padding: 12px 0;
   z-index: 500;
-  transform: translateX(calc(-96px + 5px));
-  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow-y: auto;
-  overflow-x: hidden;
+  background: rgba(235, 235, 245, 0.58);
+  backdrop-filter: blur(64px) saturate(200%);
+  -webkit-backdrop-filter: blur(64px) saturate(200%);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.14), inset 0 1px 0 rgba(255,255,255,0.55);
+  display: flex;
+  gap: 0;
+  transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+  scrollbar-width: none;
 }
-.module-sidebar:hover { transform: translateX(0); }
-
+.module-sidebar::-webkit-scrollbar { display: none; }
 .dark-mode .module-sidebar {
-  background: rgba(12, 12, 22, 0.60);
-  border-right: 1px solid rgba(255, 255, 255, 0.10);
-  box-shadow:
-    6px 0 48px rgba(0, 0, 0, 0.55),
-    inset -1px 0 0 rgba(255, 255, 255, 0.10),
-    inset  1px 0 0 rgba(255, 255, 255, 0.04);
+  background: rgba(12, 12, 22, 0.62);
+  box-shadow: 0 8px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.07);
 }
 
-/* Glassy edge peek strip */
-.module-sidebar::before {
-  content: '';
-  position: absolute;
-  right: 0; top: 0;
-  width: 5px; height: 100%;
-  background: linear-gradient(
-    to bottom,
-    rgba(255,255,255,0.70) 0%,
-    rgba(255,255,255,0.25) 50%,
-    rgba(255,255,255,0.45) 100%
-  );
-  opacity: 0.8;
-  pointer-events: none;
-  transition: opacity 0.22s;
+/* ── Left dock ── */
+.module-sidebar.pos-left {
+  left: 0; top: 50%;
+  transform: translateY(-50%) translateX(calc(-100% + 6px));
+  flex-direction: column;
+  padding: 10px 7px;
+  width: 56px;
+  border-radius: 0 18px 18px 0;
+  border: 1px solid rgba(255,255,255,0.42); border-left: none;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto; overflow-x: hidden;
 }
-.dark-mode .module-sidebar::before {
-  background: linear-gradient(
-    to bottom,
-    rgba(255,255,255,0.22) 0%,
-    rgba(255,255,255,0.06) 50%,
-    rgba(255,255,255,0.14) 100%
-  );
-}
-.module-sidebar:hover::before { opacity: 0; }
+.module-sidebar.pos-left:hover { transform: translateY(-50%) translateX(0); }
 
+/* ── Right dock ── */
+.module-sidebar.pos-right {
+  right: 0; left: auto; top: 50%;
+  transform: translateY(-50%) translateX(calc(100% - 6px));
+  flex-direction: column;
+  padding: 10px 7px;
+  width: 56px;
+  border-radius: 18px 0 0 18px;
+  border: 1px solid rgba(255,255,255,0.42); border-right: none;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto; overflow-x: hidden;
+}
+.module-sidebar.pos-right:hover { transform: translateY(-50%) translateX(0); }
+
+/* ── Bottom dock ── */
+.module-sidebar.pos-bottom {
+  bottom: 0; top: auto; left: 50%;
+  transform: translateX(-50%) translateY(calc(100% - 6px));
+  flex-direction: row;
+  padding: 7px 10px;
+  height: 56px;
+  width: auto; max-width: calc(100vw - 80px);
+  border-radius: 18px 18px 0 0;
+  border: 1px solid rgba(255,255,255,0.42); border-bottom: none;
+  overflow-x: auto; overflow-y: hidden;
+}
+.module-sidebar.pos-bottom:hover { transform: translateX(-50%) translateY(0); }
+
+.dark-mode .module-sidebar.pos-left,
+.dark-mode .module-sidebar.pos-right,
+.dark-mode .module-sidebar.pos-bottom { border-color: rgba(255,255,255,0.10); }
+
+/* Sidebar sections */
 .sidebar-modules {
   flex: 1;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 8px 6px 4px;
+  gap: 5px;
 }
-.sidebar-footer {
-  border-top: 1px solid rgba(120, 120, 140, 0.20);
-  padding: 8px 6px 4px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-.dark-mode .sidebar-footer {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
+.pos-left .sidebar-modules, .pos-right .sidebar-modules { flex-direction: column; }
+.pos-bottom .sidebar-modules { flex-direction: row; }
 
-/* Dock-style button — icon on top, tiny label below */
-.sidebar-btn {
+.sidebar-footer {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  width: 100%;
-  padding: 5px 4px;
-  background: transparent;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  position: relative;
-  transition: background 0.15s;
+  gap: 5px;
+}
+.pos-left  .sidebar-footer, .pos-right .sidebar-footer {
+  flex-direction: column;
+  border-top: 1px solid rgba(120,120,140,0.22);
+  padding-top: 6px; margin-top: 4px;
+}
+.pos-bottom .sidebar-footer {
+  flex-direction: row;
+  border-left: 1px solid rgba(120,120,140,0.22);
+  padding-left: 6px; margin-left: 4px;
+}
+.dark-mode .sidebar-footer { border-color: rgba(255,255,255,0.08) !important; }
+
+/* ── Button ── */
+.sidebar-btn {
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: 10px;
+  cursor: pointer; position: relative; padding: 2px; flex-shrink: 0;
 }
 .sidebar-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
-/* macOS squircle icon tile */
+/* Remove ×  (appears on hover over each icon) */
+.sidebar-remove {
+  position: absolute;
+  top: -2px; right: -2px;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: rgba(50,50,70,0.72);
+  color: rgba(255,255,255,0.92);
+  font-size: 0.52rem;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.15s;
+  z-index: 10; cursor: pointer; line-height: 1;
+}
+.sidebar-btn:hover .sidebar-remove { opacity: 1; pointer-events: auto; }
+
+/* ── Icon tile — translucent primary-color squircle ── */
 .sidebar-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 24%;        /* squircle approximation */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  overflow: hidden;
-  flex-shrink: 0;
-  box-shadow:
-    0 4px 14px rgba(0, 0, 0, 0.28),
-    0 1px  3px rgba(0, 0, 0, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.30);
+  width: 38px; height: 38px;
+  border-radius: 22%;
+  display: flex; align-items: center; justify-content: center;
+  position: relative; overflow: hidden; flex-shrink: 0;
+  background: color-mix(in srgb, var(--primary) 28%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 44%, rgba(255,255,255,0.16));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.22);
   transition:
     transform  0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
     box-shadow 0.22s ease,
     opacity    0.18s ease,
     filter     0.18s ease;
 }
-
-/* Diagonal gloss highlight (top-left → centre) */
+/* Diagonal gloss */
 .sidebar-icon::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(
-    148deg,
-    rgba(255,255,255,0.34) 0%,
-    rgba(255,255,255,0.10) 38%,
-    rgba(255,255,255,0.00) 62%
-  );
-  pointer-events: none;
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(148deg, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.07) 42%, rgba(255,255,255,0) 65%);
 }
-
 .sidebar-icon i {
-  font-size: 1.2rem;
-  color: #fff;
-  text-shadow: 0 1px 4px rgba(0,0,0,0.30);
-  position: relative;
-  z-index: 1;
+  font-size: 1.0rem;
+  color: rgba(255,255,255,0.95);
+  text-shadow: 0 1px 3px rgba(0,0,0,0.28);
+  position: relative; z-index: 1;
 }
 
-/* Hover: spring-scale lift */
+/* Hover: spring lift */
 .sidebar-btn:hover .sidebar-icon {
-  transform: scale(1.14) translateY(-3px);
-  box-shadow:
-    0 10px 26px rgba(0, 0, 0, 0.32),
-    0  3px  8px rgba(0, 0, 0, 0.20),
-    inset 0 1px 0 rgba(255, 255, 255, 0.32);
+  transform: scale(1.13) translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.24), 0 2px 6px rgba(0,0,0,0.14), inset 0 1px 0 rgba(255,255,255,0.26);
 }
 
-/* Active (module visible): vibrant; inactive (hidden): dimmed + desaturated */
-.sidebar-btn.is-hidden .sidebar-icon {
-  opacity: 0.42;
-  filter: saturate(0.55);
-}
+/* Inactive module: dimmed + desaturated */
+.sidebar-btn.is-hidden .sidebar-icon { opacity: 0.36; filter: saturate(0.35); }
 
-/* Small dot below button when active (macOS dock running indicator) */
+/* Active indicator dot */
 .sidebar-btn.is-active::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: rgba(80, 80, 100, 0.60);
-  box-shadow: 0 0 3px rgba(0,0,0,0.18);
-}
-.dark-mode .sidebar-btn.is-active::after {
-  background: rgba(255, 255, 255, 0.55);
+  content: ''; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 3px; height: 3px; border-radius: 50%;
+  background: color-mix(in srgb, var(--primary) 80%, rgba(255,255,255,0.6));
 }
 
-.sidebar-label {
-  font-size: 0.60rem;
-  font-weight: 500;
-  color: var(--text);
-  opacity: 0.75;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 84px;
-  text-align: center;
-  letter-spacing: 0.01em;
+/* Utility icons (position toggle, reset, redock add) */
+.sidebar-icon-util {
+  background: color-mix(in srgb, var(--primary) 12%, rgba(120,120,140,0.10));
+  border-color: rgba(120,120,140,0.22);
+  opacity: 0.60;
 }
-.sidebar-btn.is-hidden .sidebar-label { opacity: 0.35; }
+.sidebar-btn:hover .sidebar-icon-util { opacity: 1; transform: scale(1.10) translateY(-1px); }
 
-.sidebar-reset .sidebar-icon { opacity: 0.65; }
-.sidebar-reset:hover .sidebar-icon { opacity: 1; }
+/* ── Redock picker panel ── */
+.redock-panel {
+  position: fixed; z-index: 600;
+  background: rgba(235,235,245,0.90);
+  backdrop-filter: blur(48px) saturate(180%);
+  -webkit-backdrop-filter: blur(48px) saturate(180%);
+  border: 1px solid rgba(255,255,255,0.50);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.20), inset 0 1px 0 rgba(255,255,255,0.55);
+  padding: 12px 14px 14px;
+  min-width: 160px;
+}
+.redock-panel.dark-mode {
+  background: rgba(18,18,32,0.90);
+  border-color: rgba(255,255,255,0.10);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.60), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+/* Positions relative to each dock edge */
+.panel-left   { left: 64px;  bottom: 80px; }
+.panel-right  { right: 64px; bottom: 80px; }
+.panel-bottom { bottom: 64px; left: 50%; transform: translateX(-50%); }
+
+.redock-title {
+  font-size: 0.65rem; font-weight: 600;
+  color: var(--text); opacity: 0.55;
+  margin: 0 0 10px; text-transform: uppercase; letter-spacing: 0.06em;
+}
+.redock-grid { display: flex; flex-wrap: wrap; gap: 8px; max-width: 220px; }
+.redock-item {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  background: transparent; border: none; cursor: pointer;
+  border-radius: 10px; padding: 6px 4px;
+  transition: background 0.15s;
+}
+.redock-item:hover { background: rgba(0,0,0,0.06); }
+.redock-panel.dark-mode .redock-item:hover { background: rgba(255,255,255,0.06); }
+.redock-icon { width: 34px !important; height: 34px !important; }
+.redock-label {
+  font-size: 0.58rem; color: var(--text); opacity: 0.72;
+  white-space: nowrap; max-width: 52px;
+  overflow: hidden; text-overflow: ellipsis; text-align: center;
+}
 
 /* ══ Main content ══ */
 .app-main {

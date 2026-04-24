@@ -1,6 +1,9 @@
 import { defineStore } from 'pinia'
 import { db } from '../services/supabase'
 
+// Debounce timer for layout cloud saves (layout changes on every drag event)
+let _layoutSaveTimer = null
+
 export const useLabStore = defineStore('lab', {
   state: () => ({
     user: null,
@@ -277,23 +280,74 @@ export const useLabStore = defineStore('lab', {
       } catch { return this.getDefaultModuleLayout(); }
     },
 
+    // ── Cloud settings persistence ────────────────────────────────────────────
+
+    async saveCloudSettings(what) {
+      if (!this.user?.id) return;
+      const row = { user_id: this.user.id, ...what };
+      await db.from('user_settings').upsert(row, { onConflict: 'user_id' });
+    },
+
+    // Loads prefs + layout from Supabase and caches them in localStorage.
+    // App.vue awaits this before calling loadModuleLayout() so both sources
+    // see the same data regardless of whether the app runs as a browser tab
+    // or a standalone PWA (which has isolated localStorage).
+    async loadCloudSettings() {
+      if (!this.user?.id) return;
+
+      // Apply localStorage immediately so there's no flash of defaults
+      // while the network round-trip completes.
+      this.loadUserPreferences();
+
+      const { data } = await db
+        .from('user_settings')
+        .select('prefs, layout')
+        .eq('user_id', this.user.id)
+        .maybeSingle();
+
+      if (!data) return;   // new user — no cloud row yet, localStorage already applied
+
+      if (data.prefs && Object.keys(data.prefs).length) {
+        const p = data.prefs;
+        if (p.isDarkMode     !== undefined) this.isDarkMode     = p.isDarkMode;
+        if (p.uiSettings)                   this.uiSettings     = { ...this.uiSettings,     ...p.uiSettings };
+        if (p.globalSettings)               this.globalSettings = { ...this.globalSettings, ...p.globalSettings };
+        // Apply theme to DOM without re-triggering a cloud save
+        this.applyThemeToDOM();
+        // Keep localStorage in sync with cloud truth
+        localStorage.setItem(`lab_user_prefs_${this.user.id}`, JSON.stringify(p));
+      }
+
+      if (data.layout && Object.keys(data.layout).length) {
+        // Write cloud layout into localStorage so loadModuleLayout() picks it up
+        localStorage.setItem(`lab_module_layout_${this.user.id}`, JSON.stringify(data.layout));
+      }
+    },
+
+    // ── Preferences (theme color, dark mode, global calc settings) ───────────
+
     saveUserPreferences() {
       if (!this.user?.id) return;
       const prefs = {
-        isDarkMode: this.isDarkMode,
-        uiSettings: { ...this.uiSettings }
+        isDarkMode:     this.isDarkMode,
+        uiSettings:     { ...this.uiSettings },
+        globalSettings: { ...this.globalSettings },
       };
       localStorage.setItem(`lab_user_prefs_${this.user.id}`, JSON.stringify(prefs));
+      this.saveCloudSettings({ prefs });
     },
 
     loadUserPreferences() {
       if (!this.user?.id) return;
       const raw = localStorage.getItem(`lab_user_prefs_${this.user.id}`);
       if (!raw) return;
-      const prefs = JSON.parse(raw);
-      if (prefs.isDarkMode !== undefined) this.isDarkMode = prefs.isDarkMode;
-      if (prefs.uiSettings) this.uiSettings = { ...this.uiSettings, ...prefs.uiSettings };
-      this.updateThemeColors();
+      try {
+        const prefs = JSON.parse(raw);
+        if (prefs.isDarkMode     !== undefined) this.isDarkMode     = prefs.isDarkMode;
+        if (prefs.uiSettings)                   this.uiSettings     = { ...this.uiSettings,     ...prefs.uiSettings };
+        if (prefs.globalSettings)               this.globalSettings = { ...this.globalSettings, ...prefs.globalSettings };
+      } catch { /* corrupted cache — ignore */ }
+      this.applyThemeToDOM();
     },
 
     toggleDarkMode() {
@@ -301,19 +355,30 @@ export const useLabStore = defineStore('lab', {
       this.updateThemeColors();
     },
 
+    // Applies dark-mode classes and CSS variables to the DOM, then persists.
     updateThemeColors() {
-      // Apply dark-mode to body (for body.dark-mode CSS variable block in style.css)
-      if (this.isDarkMode) document.body.classList.add('dark-mode');
-      else document.body.classList.remove('dark-mode');
-      // Also apply to the Vue wrapper div so .dark-mode selector cascades to all children
-      const wrapper = document.getElementById('body-wrapper');
-      if (wrapper) {
-        if (this.isDarkMode) wrapper.classList.add('dark-mode');
-        else wrapper.classList.remove('dark-mode');
-      }
-      document.documentElement.style.setProperty('--primary', this.uiSettings.primaryColor);
-      document.documentElement.style.setProperty('--radius', this.uiSettings.borderRadius);
+      this.applyThemeToDOM();
       this.saveUserPreferences();
-    }
+    },
+
+    // DOM-only update — called during load so we don't trigger a redundant save.
+    applyThemeToDOM() {
+      const dark = this.isDarkMode;
+      document.body.classList.toggle('dark-mode', dark);
+      const wrapper = document.getElementById('body-wrapper');
+      if (wrapper) wrapper.classList.toggle('dark-mode', dark);
+      document.documentElement.style.setProperty('--primary', this.uiSettings.primaryColor);
+      document.documentElement.style.setProperty('--radius',  this.uiSettings.borderRadius);
+    },
+
+    // ── Module layout ─────────────────────────────────────────────────────────
+
+    saveModuleLayout(layout) {
+      if (!this.user?.id) return;
+      localStorage.setItem(`lab_module_layout_${this.user.id}`, JSON.stringify(layout));
+      // Debounce the cloud write — layout changes on every drag event
+      clearTimeout(_layoutSaveTimer);
+      _layoutSaveTimer = setTimeout(() => this.saveCloudSettings({ layout }), 600);
+    },
   }
 })

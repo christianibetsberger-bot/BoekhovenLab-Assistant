@@ -148,13 +148,32 @@ watch(
   { deep: true }
 )
 
+// Persist globalSettings (mmReactions, decimals) whenever they change.
+// These are mutated directly via v-model in GlobalSettings.vue with no explicit save call.
+let _settingsSaveTimeout
+watch(
+  () => store.globalSettings,
+  () => { clearTimeout(_settingsSaveTimeout); _settingsSaveTimeout = setTimeout(() => store.saveUserPreferences(), 400) },
+  { deep: true }
+)
+
+async function initSession(user) {
+  store.user = user
+  // loadCloudSettings fetches prefs + layout from Supabase and writes them into
+  // localStorage, so the subsequent loadLayout() call reads cloud-sourced data
+  // regardless of whether this is a browser tab or an isolated PWA context.
+  await store.loadCloudSettings()
+  store.loadCloudInventory()
+  loadLayout()
+}
+
 onMounted(() => {
   db.auth.getSession().then(({ data }) => {
-    if (data.session) { store.user = data.session.user; store.loadUserPreferences(); store.loadCloudInventory(); loadLayout() }
+    if (data.session) initSession(data.session.user)
   })
   db.auth.onAuthStateChange((event, session) => {
-    store.user = session?.user || null
-    if (store.user) { store.loadUserPreferences(); store.loadCloudInventory(); loadLayout() }
+    if (session?.user) initSession(session.user)
+    else store.user = null
   })
 })
 

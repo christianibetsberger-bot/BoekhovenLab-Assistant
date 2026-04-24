@@ -64,6 +64,11 @@ function clearDragState() {
   isDragging.value = false; dragOverEmpty.value = null
 }
 
+// Set isDragging on mousedown so columns expand BEFORE the browser initialises
+// the native drag (dragstart fires after the drag ghost is captured).
+function onHandleMouseDown()    { isDragging.value = true }
+function onHandleMouseUp()      { if (!dragging.value) isDragging.value = false }
+
 function onDragStart(id, col)   { dragging.value = { id, col }; isDragging.value = true }
 function onDragEnd()            { clearDragState() }
 function onDragOver(e, id, col) { e.preventDefault(); e.stopPropagation(); dragOverId.value = id; dragOverCol.value = col; dragOverEmpty.value = null }
@@ -177,13 +182,17 @@ const signOut = async () => { await db.auth.signOut(); window.location.reload() 
               @dragover="onDragOver($event, id, 'top')"
               @drop="onDrop($event, id, 'top')"
             >
-              <div class="drag-handle" draggable="true" @dragstart="onDragStart(id, 'top')" @dragend="onDragEnd" title="Drag to reorder">
+              <div class="drag-handle" draggable="true"
+                @mousedown="onHandleMouseDown" @mouseup="onHandleMouseUp"
+                @dragstart="onDragStart(id, 'top')" @dragend="onDragEnd" title="Drag to reorder">
                 <i class="fas fa-grip-lines"></i>
               </div>
               <component :is="MODULE_META[id].component" />
             </div>
           </template>
-          <div v-if="isDragging && !topHasVisible" class="empty-drop-hint">
+          <div v-show="isDragging && !topHasVisible" class="empty-drop-hint"
+            @dragover.prevent="onColDragOver($event, 'top')"
+            @drop.prevent="onColDrop($event, 'top')">
             <i class="fas fa-arrows-left-right"></i> Drop here — full width
           </div>
         </div>
@@ -191,11 +200,10 @@ const signOut = async () => { await db.auth.signOut(); window.location.reload() 
         <!-- Two-column workspace — flexbox so v-show:none removes column from flow -->
         <div class="workspace-row">
 
-          <!-- Left column: fixed width, visible when has content or dragging -->
+          <!-- Left column: always in DOM; CSS collapses when empty + not dragging -->
           <div
             class="ws-col ws-left"
-            v-show="leftHasVisible || isDragging"
-            :class="{ 'drop-zone-hover': dragOverEmpty === 'left' }"
+            :class="{ 'col-has-content': leftHasVisible, 'col-drag-open': isDragging, 'drop-zone-hover': dragOverEmpty === 'left' }"
             @dragover="onColDragOver($event, 'left')"
             @drop="onColDrop($event, 'left')"
           >
@@ -207,22 +215,25 @@ const signOut = async () => { await db.auth.signOut(); window.location.reload() 
                 @dragover="onDragOver($event, id, 'left')"
                 @drop="onDrop($event, id, 'left')"
               >
-                <div class="drag-handle" draggable="true" @dragstart="onDragStart(id, 'left')" @dragend="onDragEnd" title="Drag to reorder">
+                <div class="drag-handle" draggable="true"
+                  @mousedown="onHandleMouseDown" @mouseup="onHandleMouseUp"
+                  @dragstart="onDragStart(id, 'left')" @dragend="onDragEnd" title="Drag to reorder">
                   <i class="fas fa-grip-lines"></i>
                 </div>
                 <component :is="MODULE_META[id].component" />
               </div>
             </template>
-            <div v-if="isDragging && !leftHasVisible" class="empty-drop-hint">
+            <div v-show="isDragging && !leftHasVisible" class="empty-drop-hint"
+              @dragover.prevent="onColDragOver($event, 'left')"
+              @drop.prevent="onColDrop($event, 'left')">
               <i class="fas fa-compress-alt"></i> Drop here — narrow column
             </div>
           </div>
 
-          <!-- Right column: fills remaining space, visible when has content or dragging -->
+          <!-- Right column: always in DOM; CSS collapses when empty + not dragging -->
           <div
             class="ws-col ws-right"
-            v-show="rightHasVisible || isDragging"
-            :class="{ 'drop-zone-hover': dragOverEmpty === 'right' }"
+            :class="{ 'col-has-content': rightHasVisible, 'col-drag-open': isDragging, 'drop-zone-hover': dragOverEmpty === 'right' }"
             @dragover="onColDragOver($event, 'right')"
             @drop="onColDrop($event, 'right')"
           >
@@ -234,13 +245,17 @@ const signOut = async () => { await db.auth.signOut(); window.location.reload() 
                 @dragover="onDragOver($event, id, 'right')"
                 @drop="onDrop($event, id, 'right')"
               >
-                <div class="drag-handle" draggable="true" @dragstart="onDragStart(id, 'right')" @dragend="onDragEnd" title="Drag to reorder">
+                <div class="drag-handle" draggable="true"
+                  @mousedown="onHandleMouseDown" @mouseup="onHandleMouseUp"
+                  @dragstart="onDragStart(id, 'right')" @dragend="onDragEnd" title="Drag to reorder">
                   <i class="fas fa-grip-lines"></i>
                 </div>
                 <component :is="MODULE_META[id].component" />
               </div>
             </template>
-            <div v-if="isDragging && !rightHasVisible" class="empty-drop-hint">
+            <div v-show="isDragging && !rightHasVisible" class="empty-drop-hint"
+              @dragover.prevent="onColDragOver($event, 'right')"
+              @drop.prevent="onColDrop($event, 'right')">
               <i class="fas fa-expand-alt"></i> Drop here — wide column
             </div>
           </div>
@@ -379,14 +394,21 @@ body { padding: 0 !important; margin: 0 !important; }
   min-width: 0;
 }
 
-/* Left column: fixed max-width; expands to fill if right is hidden */
-.ws-left {
-  flex: 0 0 460px;
-}
+/* ── Column visibility: CSS-class driven so elements stay in DOM ──
+   Columns without content and not in a drag collapse to nothing.
+   col-has-content / col-drag-open are set by Vue bindings. */
+.ws-left.col-has-content,
+.ws-left.col-drag-open  { flex: 0 0 460px; }
 
-/* Right column: fills all remaining space */
-.ws-right {
-  flex: 1;
+.ws-right.col-has-content,
+.ws-right.col-drag-open  { flex: 1; min-width: 0; }
+
+/* Collapse when neither class is present */
+.ws-col:not(.col-has-content):not(.col-drag-open) {
+  flex: 0 0 0 !important;
+  min-width: 0 !important;
+  overflow: hidden;
+  gap: 0 !important;
 }
 
 /* ══ Module wrappers ══ */
@@ -431,7 +453,8 @@ body { padding: 0 !important; margin: 0 !important; }
 
 @media (max-width: 1200px) {
   .workspace-row { flex-direction: column; }
-  .ws-left { flex: 1 1 auto; }
+  .ws-left.col-has-content,
+  .ws-left.col-drag-open { flex: 1 1 auto; }
 }
 
 /* ══ Top zone wrapper ══ */
@@ -455,7 +478,7 @@ body { padding: 0 !important; margin: 0 !important; }
   font-size: 0.82rem;
   opacity: 0.4;
   transition: opacity 0.15s, border-color 0.15s, color 0.15s;
-  pointer-events: none;
+  cursor: copy;
 }
 
 .ws-col.drop-zone-hover,

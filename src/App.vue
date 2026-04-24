@@ -46,34 +46,53 @@ function isMinimized(id) { return !!layout.value.minimized[id] }
 function resetLayout() { layout.value = store.getDefaultModuleLayout(); saveLayout() }
 
 // Track which columns have at least one visible module (drives v-show on column divs)
+const topHasVisible   = computed(() => layout.value.topOrder.some(id   => !isMinimized(id)))
 const leftHasVisible  = computed(() => layout.value.leftOrder.some(id  => !isMinimized(id)))
 const rightHasVisible = computed(() => layout.value.rightOrder.some(id => !isMinimized(id)))
 
 // Drag & drop via handle strip
-const dragging   = ref(null)
-const dragOverId  = ref(null)
-const dragOverCol = ref(null)
+const dragging      = ref(null)
+const dragOverId    = ref(null)
+const dragOverCol   = ref(null)
+const isDragging    = ref(false)
+const dragOverEmpty = ref(null)   // 'top' | 'left' | 'right' | null
 
-function onDragStart(id, col) { dragging.value = { id, col } }
-function onDragOver(e, id, col) { e.preventDefault(); dragOverId.value = id; dragOverCol.value = col }
+const getList = c => c === 'left' ? layout.value.leftOrder : c === 'right' ? layout.value.rightOrder : layout.value.topOrder
+
+function clearDragState() {
+  dragging.value = null; dragOverId.value = null; dragOverCol.value = null
+  isDragging.value = false; dragOverEmpty.value = null
+}
+
+function onDragStart(id, col)   { dragging.value = { id, col }; isDragging.value = true }
+function onDragEnd()            { clearDragState() }
+function onDragOver(e, id, col) { e.preventDefault(); e.stopPropagation(); dragOverId.value = id; dragOverCol.value = col; dragOverEmpty.value = null }
 function onDrop(e, targetId, targetCol) {
-  e.preventDefault()
+  e.preventDefault(); e.stopPropagation()
   if (!dragging.value) return
   const { id: srcId, col: srcCol } = dragging.value
-  const getList = c => c === 'left' ? layout.value.leftOrder : c === 'right' ? layout.value.rightOrder : layout.value.topOrder
-  const srcList = getList(srcCol)
-  const tgtList = getList(targetCol)
-  const srcIdx  = srcList.indexOf(srcId)
-  const tgtIdx  = tgtList.indexOf(targetId)
+  const srcList = getList(srcCol), tgtList = getList(targetCol)
+  const srcIdx  = srcList.indexOf(srcId), tgtIdx = tgtList.indexOf(targetId)
   if (srcCol === targetCol) {
     srcList.splice(srcIdx, 1); srcList.splice(tgtIdx, 0, srcId)
   } else {
     srcList.splice(srcIdx, 1); tgtList.splice(tgtIdx, 0, srcId)
   }
-  dragging.value = null; dragOverId.value = null; dragOverCol.value = null
-  saveLayout()
+  clearDragState(); saveLayout()
 }
-function onDragEnd() { dragging.value = null; dragOverId.value = null; dragOverCol.value = null }
+
+// Column-level drop: fires when dropping on empty column background (not on a module)
+function onColDragOver(e, col) { e.preventDefault(); dragOverEmpty.value = col; dragOverId.value = null; dragOverCol.value = null }
+function onColDrop(e, col) {
+  e.preventDefault()
+  if (!dragging.value) return
+  const { id: srcId, col: srcCol } = dragging.value
+  const srcList = getList(srcCol), tgtList = getList(col)
+  const srcIdx = srcList.indexOf(srcId)
+  if (srcIdx !== -1) srcList.splice(srcIdx, 1)
+  if (!tgtList.includes(srcId)) tgtList.push(srcId)
+  clearDragState(); saveLayout()
+}
 
 // All module ids for sidebar (top → left → right order)
 const allModuleIds = computed(() => {
@@ -143,27 +162,43 @@ const signOut = async () => { await db.auth.signOut(); window.location.reload() 
           <button class="small danger" @click="signOut"><i class="fas fa-sign-out-alt"></i> Log Out</button>
         </div>
 
-        <!-- Full-width top modules (Lab Journal etc.) -->
-        <template v-for="id in layout.topOrder" :key="id">
-          <div
-            v-show="!isMinimized(id)"
-            class="module-wrapper top-module"
-            :class="{ 'drag-over': dragOverId === id && dragOverCol === 'top' }"
-            @dragover="onDragOver($event, id, 'top')"
-            @drop="onDrop($event, id, 'top')"
-          >
-            <div class="drag-handle" draggable="true" @dragstart="onDragStart(id, 'top')" @dragend="onDragEnd" title="Drag to reorder">
-              <i class="fas fa-grip-lines"></i>
+        <!-- Full-width top zone (Lab Journal etc.) — always rendered so it can receive drops -->
+        <div
+          class="top-zone"
+          :class="{ 'drop-zone-hover': dragOverEmpty === 'top' }"
+          @dragover="onColDragOver($event, 'top')"
+          @drop="onColDrop($event, 'top')"
+        >
+          <template v-for="id in layout.topOrder" :key="id">
+            <div
+              v-show="!isMinimized(id)"
+              class="module-wrapper top-module"
+              :class="{ 'drag-over': dragOverId === id && dragOverCol === 'top' }"
+              @dragover="onDragOver($event, id, 'top')"
+              @drop="onDrop($event, id, 'top')"
+            >
+              <div class="drag-handle" draggable="true" @dragstart="onDragStart(id, 'top')" @dragend="onDragEnd" title="Drag to reorder">
+                <i class="fas fa-grip-lines"></i>
+              </div>
+              <component :is="MODULE_META[id].component" />
             </div>
-            <component :is="MODULE_META[id].component" />
+          </template>
+          <div v-if="isDragging && !topHasVisible" class="empty-drop-hint">
+            <i class="fas fa-arrows-left-right"></i> Drop here — full width
           </div>
-        </template>
+        </div>
 
         <!-- Two-column workspace — flexbox so v-show:none removes column from flow -->
         <div class="workspace-row">
 
-          <!-- Left column: fixed width, disappears when all hidden -->
-          <div class="ws-col ws-left" v-show="leftHasVisible">
+          <!-- Left column: fixed width, visible when has content or dragging -->
+          <div
+            class="ws-col ws-left"
+            v-show="leftHasVisible || isDragging"
+            :class="{ 'drop-zone-hover': dragOverEmpty === 'left' }"
+            @dragover="onColDragOver($event, 'left')"
+            @drop="onColDrop($event, 'left')"
+          >
             <template v-for="id in layout.leftOrder" :key="id">
               <div
                 v-show="!isMinimized(id)"
@@ -178,10 +213,19 @@ const signOut = async () => { await db.auth.signOut(); window.location.reload() 
                 <component :is="MODULE_META[id].component" />
               </div>
             </template>
+            <div v-if="isDragging && !leftHasVisible" class="empty-drop-hint">
+              <i class="fas fa-compress-alt"></i> Drop here — narrow column
+            </div>
           </div>
 
-          <!-- Right column: fills remaining space, disappears when all hidden -->
-          <div class="ws-col ws-right" v-show="rightHasVisible">
+          <!-- Right column: fills remaining space, visible when has content or dragging -->
+          <div
+            class="ws-col ws-right"
+            v-show="rightHasVisible || isDragging"
+            :class="{ 'drop-zone-hover': dragOverEmpty === 'right' }"
+            @dragover="onColDragOver($event, 'right')"
+            @drop="onColDrop($event, 'right')"
+          >
             <template v-for="id in layout.rightOrder" :key="id">
               <div
                 v-show="!isMinimized(id)"
@@ -196,6 +240,9 @@ const signOut = async () => { await db.auth.signOut(); window.location.reload() 
                 <component :is="MODULE_META[id].component" />
               </div>
             </template>
+            <div v-if="isDragging && !rightHasVisible" class="empty-drop-hint">
+              <i class="fas fa-expand-alt"></i> Drop here — wide column
+            </div>
           </div>
 
         </div>
@@ -385,5 +432,42 @@ body { padding: 0 !important; margin: 0 !important; }
 @media (max-width: 1200px) {
   .workspace-row { flex-direction: column; }
   .ws-left { flex: 1 1 auto; }
+}
+
+/* ══ Top zone wrapper ══ */
+.top-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ══ Empty-column drop hints ══ */
+.empty-drop-hint {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 28px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 80px;
+  color: var(--text);
+  font-size: 0.82rem;
+  opacity: 0.4;
+  transition: opacity 0.15s, border-color 0.15s, color 0.15s;
+  pointer-events: none;
+}
+
+.ws-col.drop-zone-hover,
+.top-zone.drop-zone-hover {
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  border-radius: var(--radius);
+}
+
+.ws-col.drop-zone-hover .empty-drop-hint,
+.top-zone.drop-zone-hover .empty-drop-hint {
+  opacity: 0.9;
+  border-color: var(--primary);
+  color: var(--primary);
 }
 </style>

@@ -1,0 +1,16 @@
+{
+  "name": "BoekhovenLab Assistant",
+  "short_name": "Lab Assistant",
+  "description": "Integrated research toolkit for the Boekhoven Lab",
+  "display": "standalone",
+  "background_color": "#0E396E",
+  "theme_color": "#0E396E",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    }
+  ]
+}

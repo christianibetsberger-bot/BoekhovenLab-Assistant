@@ -222,12 +222,14 @@ export const useLabStore = defineStore('lab', {
 
     saveLocalDrafts() {
       if (!this.user?.id) return;
+      // Journal entries are excluded — they are authoritative in Supabase
+      // (auto-saved after 1 s) and must not be cached locally, since the
+      // browser and PWA each have isolated localStorage.
       const drafts = {
         reactions: JSON.parse(JSON.stringify(this.reactions)),
         matrices: JSON.parse(JSON.stringify(this.matrices)),
         reverseMatrices: JSON.parse(JSON.stringify(this.reverseMatrices)),
         wellPlates: JSON.parse(JSON.stringify(this.wellPlates)),
-        journalEntries: JSON.parse(JSON.stringify(this.journal.entries)),
         nextBlockId: this.nextBlockId,
         nextRmCompId: this.nextRmCompId
       };

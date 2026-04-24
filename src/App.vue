@@ -143,7 +143,7 @@ function redockModule(id) {
 
 let draftSaveTimeout
 watch(
-  [() => store.reactions, () => store.matrices, () => store.reverseMatrices, () => store.wellPlates, () => store.journal.entries],
+  [() => store.reactions, () => store.matrices, () => store.reverseMatrices, () => store.wellPlates],
   () => { clearTimeout(draftSaveTimeout); draftSaveTimeout = setTimeout(() => store.saveLocalDrafts(), 800) },
   { deep: true }
 )

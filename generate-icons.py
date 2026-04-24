@@ -1,168 +1,117 @@
 """
-Generate PNG icons for BoekhovenLab Assistant PWA.
-Draws the Erlenmeyer flask icon in 512x512 and 192x192.
+Generate PNG icons for BoekhovenLab Assistant PWA — coacervate droplet design.
+Draws a polydisperse cluster of liquid droplets (coacervates) with a
+radial-gradient approximation: translucent body + bright upper-left highlight.
 Run: python3 generate-icons.py
 """
 
 from PIL import Image, ImageDraw
-import math, os
+import os
 
-def cubic_bezier(p0, p1, p2, p3, steps=32):
-    pts = []
-    for i in range(steps + 1):
-        t = i / steps
-        u = 1 - t
-        x = u**3*p0[0] + 3*u**2*t*p1[0] + 3*u*t**2*p2[0] + t**3*p3[0]
-        y = u**3*p0[1] + 3*u**2*t*p1[1] + 3*u*t**2*p2[1] + t**3*p3[1]
-        pts.append((x, y))
-    return pts
+# ---------------------------------------------------------------------------
+# Droplet definitions — (cx, cy, r) in 512×512 space
+# Ordered largest → smallest so painter's algorithm works correctly.
+# ---------------------------------------------------------------------------
+DROPLETS = [
+    (210, 238, 118),   # main large
+    (322, 298,  76),   # second large — overlaps main (coalescence)
+    (390, 155,  50),   # medium upper-right
+    (128, 372,  36),   # medium lower-left
+    (416, 276,  22),   # small right
+    (105, 190,  15),   # micro upper-left
+    (422, 394,  11),   # micro lower-right
+    (170, 462,   8),   # micro bottom
+]
 
-def flask_polygon(scale=1.0):
-    """Build the flask outline polygon (coords in 512x512 space, then scaled)."""
-    s = scale
-    pts = []
-    pts.append((206*s, 65*s))
-    pts.append((206*s, 190*s))
-    pts += cubic_bezier((206*s,190*s),(148*s,220*s),(84*s,294*s),(66*s,368*s))
-    pts += cubic_bezier((66*s,368*s),(48*s,428*s),(72*s,466*s),(132*s,472*s))
-    pts.append((380*s, 472*s))
-    pts += cubic_bezier((380*s,472*s),(440*s,466*s),(464*s,428*s),(446*s,368*s))
-    pts += cubic_bezier((446*s,368*s),(428*s,294*s),(364*s,220*s),(306*s,190*s))
-    pts.append((306*s, 65*s))
-    return [(int(round(x)), int(round(y))) for x, y in pts]
+# Stroke opacity fractions matching the SVG design
+STROKE_OPACITIES = [0.72, 0.65, 0.60, 0.55, 0.50, 0.45, 0.40, 0.35]
 
-def liquid_polygon(scale=1.0):
-    """Clip-like polygon: liquid region inside flask below y=358."""
-    s = scale
-    top = 358 * s
-    pts = []
-    # Left edge: points on flask path around y≈358
-    pts += cubic_bezier((206*s,190*s),(148*s,220*s),(84*s,294*s),(66*s,368*s))
-    pts += cubic_bezier((66*s,368*s),(48*s,428*s),(72*s,466*s),(132*s,472*s))
-    pts.append((380*s, 472*s))
-    pts += cubic_bezier((380*s,472*s),(440*s,466*s),(464*s,428*s),(446*s,368*s))
-    # Only keep points below top
-    pts = [(x, y) for x, y in pts if y >= top]
-    pts = [(int(round(x)), int(round(y))) for x, y in pts]
-    return pts
 
-def make_icon(size, color_top=(26,82,150), color_bottom=(8,45,88)):
-    s = size / 512  # scale factor
+def draw_droplet(result, cx, cy, r, stroke_opacity, scale):
+    """
+    Composite one coacervate droplet onto *result* (RGBA Image).
+    Approximates the SVG radial gradient with three layered ellipses:
+      1. Translucent body (very low alpha, covers the full circle)
+      2. Highlight zone (upper-left offset, ~55% radius, medium alpha)
+      3. Specular spot (upper-left offset, ~18% radius, high alpha)
+    Plus a white stroke outline.
+    """
+    cx = int(round(cx * scale))
+    cy = int(round(cy * scale))
+    r  = int(round(r  * scale))
+    if r < 1:
+        return result
 
-    # 1. Gradient background layer
-    bg = Image.new('RGBA', (size, size), (0,0,0,0))
+    size = result.size[0]
+    layer = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+
+    # 1. Translucent body — white at ~7 % opacity (100% – stop at edge of gradient)
+    d.ellipse([cx-r, cy-r, cx+r, cy+r], fill=(255, 255, 255, 18))
+
+    # 2. Highlight zone — offset upper-left, ~55% of r, white at ~38% opacity
+    hx = cx - int(r * 0.20)
+    hy = cy - int(r * 0.24)
+    hr = max(1, int(r * 0.56))
+    d.ellipse([hx-hr, hy-hr, hx+hr, hy+hr], fill=(255, 255, 255, 97))
+
+    # 3. Specular spot — tighter upper-left, white at ~87% opacity
+    sx = cx - int(r * 0.30)
+    sy = cy - int(r * 0.36)
+    sr = max(1, int(r * 0.19))
+    d.ellipse([sx-sr, sy-sr, sx+sr, sy+sr], fill=(255, 255, 255, 222))
+
+    # 4. Stroke outline
+    sw = max(1, int(6.5 * scale))  # scaled from 512-space stroke-width
+    sa = int(stroke_opacity * 255)
+    d.ellipse([cx-r, cy-r, cx+r, cy+r], outline=(255, 255, 255, sa), width=sw)
+
+    return Image.alpha_composite(result, layer)
+
+
+def make_icon(size, color_top=(26, 82, 150), color_bottom=(8, 45, 88)):
+    s = size / 512  # uniform scale factor
+
+    # ── 1. Gradient background ───────────────────────────────────────────────
+    bg = Image.new('RGBA', (size, size), (0, 0, 0, 0))
     bg_draw = ImageDraw.Draw(bg)
     for y in range(size):
-        t = y / (size - 1)
-        r = int(color_top[0]*(1-t) + color_bottom[0]*t)
-        g = int(color_top[1]*(1-t) + color_bottom[1]*t)
-        b = int(color_top[2]*(1-t) + color_bottom[2]*t)
-        bg_draw.line([(0,y),(size,y)], fill=(r,g,b,255))
+        t = y / max(size - 1, 1)
+        r = int(color_top[0] * (1 - t) + color_bottom[0] * t)
+        g = int(color_top[1] * (1 - t) + color_bottom[1] * t)
+        b = int(color_top[2] * (1 - t) + color_bottom[2] * t)
+        bg_draw.line([(0, y), (size, y)], fill=(r, g, b, 255))
 
-    # 2. Squircle mask (rx=114 on 512px ≈ 22%)
+    # ── 2. Squircle mask (rx = 114/512 ≈ 22 %) ──────────────────────────────
     radius = int(114 * s)
     mask = Image.new('L', (size, size), 0)
-    mask_draw = ImageDraw.Draw(mask)
-    mask_draw.rounded_rectangle([0,0,size-1,size-1], radius=radius, fill=255)
-    result = Image.new('RGBA', (size, size), (0,0,0,0))
-    result.paste(bg, (0,0), mask)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        [0, 0, size - 1, size - 1], radius=radius, fill=255)
 
-    # 3. Gloss overlay
-    gloss = Image.new('RGBA', (size, size), (0,0,0,0))
+    result = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    result.paste(bg, (0, 0), mask)
+
+    # ── 3. Gloss overlay (white 0→0 % fade from top to 50 %) ────────────────
+    gloss = Image.new('RGBA', (size, size), (0, 0, 0, 0))
     gloss_draw = ImageDraw.Draw(gloss)
-    gloss_stop = int(0.55 * size)
-    for y in range(gloss_stop):
-        alpha = int(71 * (1 - y / gloss_stop))
-        gloss_draw.line([(0,y),(size,y)], fill=(255,255,255,alpha))
-    gloss_masked = Image.new('RGBA', (size, size), (0,0,0,0))
-    gloss_masked.paste(gloss, (0,0), mask)
+    stop = max(1, int(0.50 * size))
+    for y in range(stop):
+        alpha = int(64 * (1 - y / stop))
+        gloss_draw.line([(0, y), (size, y)], fill=(255, 255, 255, alpha))
+    gloss_masked = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    gloss_masked.paste(gloss, (0, 0), mask)
     result = Image.alpha_composite(result, gloss_masked)
 
-    draw = ImageDraw.Draw(result)
-    poly = flask_polygon(s)
-
-    # 4. Flask glass body: translucent white fill
-    fill_layer = Image.new('RGBA', (size, size), (0,0,0,0))
-    fill_draw = ImageDraw.Draw(fill_layer)
-    fill_draw.polygon(poly, fill=(255,255,255,26))
-    result = Image.alpha_composite(result, fill_layer)
-
-    # 5. Liquid fill region: clipped rectangle intersected with flask shape
-    # Draw a clipped liquid by compositing a white rect over a flask mask
-    flask_mask = Image.new('L', (size, size), 0)
-    flask_mask_draw = ImageDraw.Draw(flask_mask)
-    flask_mask_draw.polygon(poly, fill=255)
-
-    liquid = Image.new('RGBA', (size, size), (0,0,0,0))
-    liquid_draw = ImageDraw.Draw(liquid)
-    ly = int(358 * s)
-    liquid_draw.rectangle([0, ly, size, size], fill=(255,255,255,72))
-    # Apply flask mask to liquid
-    liquid_masked = Image.new('RGBA', (size, size), (0,0,0,0))
-    liquid_masked.paste(liquid, (0,0), flask_mask)
-    result = Image.alpha_composite(result, liquid_masked)
-
-    # 6. Molecule inside liquid (also clipped to flask mask)
-    mol = Image.new('RGBA', (size, size), (0,0,0,0))
-    mol_draw = ImageDraw.Draw(mol)
-    # Central atom
-    cx, cy = int(256*s), int(426*s)
-    r_c = int(22*s)
-    mol_draw.ellipse([cx-r_c, cy-r_c, cx+r_c, cy+r_c], fill=(255,255,255,235))
-    # Left bond + atom
-    lx, ly2 = int(170*s), int(380*s)
-    mol_draw.line([(int(238*s), int(410*s)), (int(182*s), int(386*s))],
-                  fill=(255,255,255,217), width=int(10*s))
-    r_l = int(16*s)
-    mol_draw.ellipse([lx-r_l, ly2-r_l, lx+r_l, ly2+r_l], fill=(255,255,255,224))
-    # Right bond + atom
-    rx2, ry2 = int(342*s), int(380*s)
-    mol_draw.line([(int(274*s), int(410*s)), (int(330*s), int(386*s))],
-                  fill=(255,255,255,217), width=int(10*s))
-    r_r = int(16*s)
-    mol_draw.ellipse([rx2-r_r, ry2-r_r, rx2+r_r, ry2+r_r], fill=(255,255,255,224))
-    # Down bond + small atom
-    dx, dy_top = int(256*s), int(448*s)
-    mol_draw.line([(dx, dy_top), (dx, int(463*s))],
-                  fill=(255,255,255,199), width=int(10*s))
-    da_y = int(471*s); r_d = int(13*s)
-    mol_draw.ellipse([dx-r_d, da_y-r_d, dx+r_d, da_y+r_d], fill=(255,255,255,199))
-    # Micro bubbles
-    for (bx, by, br, ba) in [(148,447,9,97),(354,455,7,77),(308,424,5,66)]:
-        bx2, by2, br2 = int(bx*s), int(by*s), max(1,int(br*s))
-        mol_draw.ellipse([bx2-br2, by2-br2, bx2+br2, by2+br2], fill=(255,255,255,ba))
-    mol_masked = Image.new('RGBA', (size, size), (0,0,0,0))
-    mol_masked.paste(mol, (0,0), flask_mask)
-    result = Image.alpha_composite(result, mol_masked)
-
-    # 7. Flask outline stroke (white, 14px)
-    draw = ImageDraw.Draw(result)
-    stroke_w = max(3, int(14*s))
-    draw.polygon(poly, outline=(255,255,255,230), width=stroke_w)
-
-    # 8. Neck stopper / rim cap
-    nx1, ny1 = int(190*s), int(50*s)
-    nx2, ny2 = int(322*s), int(70*s)
-    rx_neck = int(10*s)
-    draw.rounded_rectangle([nx1, ny1, nx2, ny2], radius=rx_neck, fill=(255,255,255,230))
-
-    # 9. Specular highlight on flask shoulder
-    spec = [
-        (int(288*s),int(200*s)), (int(332*s),int(224*s)), (int(382*s),int(274*s)),
-        (int(402*s),int(330*s)), (int(406*s),int(342*s)), (int(402*s),int(354*s)),
-        (int(394*s),int(356*s)), (int(385*s),int(358*s)), (int(372*s),int(344*s)),
-        (int(368*s),int(332*s)), (int(350*s),int(280*s)), (int(306*s),int(234*s)),
-        (int(278*s),int(216*s)),
-    ]
-    spec_layer = Image.new('RGBA', (size, size), (0,0,0,0))
-    ImageDraw.Draw(spec_layer).polygon(spec, fill=(255,255,255,41))
-    result = Image.alpha_composite(result, spec_layer)
+    # ── 4. Coacervate droplets ───────────────────────────────────────────────
+    for (cx, cy, r), so in zip(DROPLETS, STROKE_OPACITIES):
+        result = draw_droplet(result, cx, cy, r, so, s)
 
     return result
 
+
 # ── Generate and save ────────────────────────────────────────────────────────
 
-out_dir = os.path.join(os.path.dirname(__file__), 'public')
+out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'public')
 
 for size in [512, 192]:
     img = make_icon(size)

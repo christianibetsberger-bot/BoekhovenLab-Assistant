@@ -233,10 +233,9 @@ export const useLabStore = defineStore('lab', {
 
     getDefaultModuleLayout() {
       return {
-        // Order of modules in each column (by module id)
-        leftOrder: ['globalSettings', 'standardStock', 'sequenceCalc', 'archiveManager', 'inventoryManager'],
+        topOrder:   ['labJournal'],
+        leftOrder:  ['globalSettings', 'standardStock', 'sequenceCalc', 'archiveManager', 'inventoryManager'],
         rightOrder: ['reactionPlan', 'matrixPlanner', 'screeningPlanner', 'phasePredictor', 'wellPlateEditor'],
-        // Which modules are minimized (id -> true)
         minimized: {}
       };
     },
@@ -253,13 +252,10 @@ export const useLabStore = defineStore('lab', {
       try {
         const saved = JSON.parse(raw);
         const def = this.getDefaultModuleLayout();
-        // Merge saved with default to handle new modules added after user saved
-        const mergeOrders = (saved, def) => {
-          const allIds = def.filter(id => !saved.includes(id));
-          return [...saved, ...allIds];
-        };
+        const mergeOrders = (s, d) => [...s, ...d.filter(id => !s.includes(id))];
         return {
-          leftOrder: mergeOrders(saved.leftOrder || [], def.leftOrder),
+          topOrder:   mergeOrders(saved.topOrder   || [], def.topOrder),
+          leftOrder:  mergeOrders(saved.leftOrder  || [], def.leftOrder),
           rightOrder: mergeOrders(saved.rightOrder || [], def.rightOrder),
           minimized: saved.minimized || {}
         };

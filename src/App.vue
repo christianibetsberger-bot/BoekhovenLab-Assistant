@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, watch, ref, computed, markRaw } from 'vue'
 import { db } from './services/supabase'
 import { useLabStore } from './stores/labStore'
+import { useDynamicIcon } from './composables/useDynamicIcon.js'
 
 import AuthLogin from './components/AuthLogin.vue'
 import LabJournal from './components/LabJournal.vue'
@@ -17,6 +18,7 @@ import WellPlateEditor from './components/WellPlateEditor.vue'
 import ArchiveManager from './components/ArchiveManager.vue'
 
 const store = useLabStore()
+useDynamicIcon()
 
 // Icons match each component's actual <h2> fa- class
 const MODULE_META = {

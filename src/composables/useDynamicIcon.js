@@ -169,7 +169,8 @@ async function applyIcon(color) {
       })()
       ati.href = pngUrl
 
-      // Rewrite manifest blob so the install-time icon matches the user's color
+      // Rewrite manifest blob so the install-time icon matches the user's color.
+      // Static PNGs are included as fallback so the dock always has a real PNG.
       const manifest = JSON.stringify({
         name: 'BoekhovenLab Assistant',
         short_name: 'Lab Assistant',
@@ -179,8 +180,10 @@ async function applyIcon(color) {
         theme_color: color,
         start_url: '/',
         icons: [
-          { src: pngUrl,        sizes: '512x512', type: 'image/png',      purpose: 'any maskable' },
-          { src: '/favicon.svg', sizes: 'any',     type: 'image/svg+xml'                           },
+          { src: pngUrl,         sizes: '512x512', type: 'image/png',      purpose: 'any maskable' },
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png',      purpose: 'any maskable' },
+          { src: '/icon-192.png', sizes: '192x192', type: 'image/png',      purpose: 'any maskable' },
+          { src: '/favicon.svg',  sizes: 'any',     type: 'image/svg+xml'                           },
         ],
       })
       const blob = new Blob([manifest], { type: 'application/json' })

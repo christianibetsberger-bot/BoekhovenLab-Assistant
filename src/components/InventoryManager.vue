@@ -114,7 +114,7 @@ const calculatedGcFallback = (sequence) => {
 const viewProperties = (item) => { viewingItem.value = item; }
 const toggleScope = (item) => { item.scope = (item.scope || 'Global') === 'Personal' ? 'Global' : 'Personal'; }
 const addInventoryItem = () => { 
-    const newItem = { id: 'inv_' + store.nextInvId++, code: 'NEW', cas: '', itemClass: 'Other', name: 'New Stock', stock: 100, stockUnit: 'µM', location: '', sequence: '', oligoType: 'DNA', manualMw: null, tm: 0, scope: inventoryMode.value };
+    const newItem = { id: 'inv_' + crypto.randomUUID(), code: 'NEW', cas: '', itemClass: 'Other', name: 'New Stock', stock: 100, stockUnit: 'µM', location: '', sequence: '', oligoType: 'DNA', manualMw: null, tm: 0, scope: inventoryMode.value };
     store.inventory.unshift(newItem); 
     store.saveItemToCloud(newItem);
 }
@@ -126,7 +126,7 @@ const emptyInventory = () => {
 }
 const createAliquot = (parentItem) => {
     let newItem = JSON.parse(JSON.stringify(parentItem));
-    newItem.id = 'inv_aliq_' + store.nextInvId++;
+    newItem.id = 'inv_aliq_' + crypto.randomUUID();
     newItem.scope = parentItem.scope || 'Global';
     let suffixNum = 1;
     let baseCode = parentItem.code;
@@ -214,7 +214,7 @@ const importInventory = (event) => {
                         let parsedMw = !isNaN(mass) ? mass : null;
                         
                         importedItems.push({
-                            id: 'inv_txt_' + store.nextInvId++, code: 'TXT', cas: '', itemClass: 'DNA', name: name,
+                            id: 'inv_txt_' + crypto.randomUUID(), code: 'TXT', cas: '', itemClass: 'DNA', name: name,
                             stock: !isNaN(conc) ? conc : 100, stockUnit: 'µM', location: '', sequence: formattedSeq,
                             length: parsedLength, gc: calculatedGcFallback(seq), tm: calcSeqTm(seq),
                             mw: parsedMw !== null ? parsedMw : calcSeqMw(seq, oligoType), oligoType: oligoType,
@@ -311,7 +311,7 @@ const importInventory = (event) => {
                     let calcMw = rawSeq ? calcSeqMw(rawSeq, oligoType) : 0;
 
                     importedItems.push({
-                        id: 'inv_imp_' + store.nextInvId++, code: code || 'IMP', cas: casNum || '', itemClass: itemClass, name: name || 'Unnamed',
+                        id: 'inv_imp_' + crypto.randomUUID(), code: code || 'IMP', cas: casNum || '', itemClass: itemClass, name: name || 'Unnamed',
                         stock: stock, stockUnit: unit, location: box ? box.toString() : '', sublocation: subloc || '', catalogNum: catalog || '', unitSize: uSize || '',
                         sequence: formattedSeq, length: parsedLength, gc: parsedGc, tm: calcSeqTm(rawSeq), mw: parsedMw !== null ? parsedMw : calcMw,
                         oligoType: oligoType, extinction: calcExt, manualMw: parsedMw

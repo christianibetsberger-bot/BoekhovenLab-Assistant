@@ -63,9 +63,6 @@ export const useLabStore = defineStore('lab', {
     archivedPlates: [],
 
     journal: { entries: [], activeId: null, nextId: 1 },
-    nextInvId: 100, nextReactionId: 2, nextMatrixId: 2, nextBlockId: 100,
-    nextRmId: 1, nextRmCompId: 100,
-    nextPlateId: 1,
     selectedWellInvRef: '',
     viewingItem: null
   }),
@@ -101,8 +98,6 @@ export const useLabStore = defineStore('lab', {
           this.cloudReactions = allRxns.filter(r => r.scope !== 'Archived');
           this.archivedReactions = allRxns.filter(r => r.scope === 'Archived');
           this.reactions = this.cloudReactions.filter(r => registry.rxnIds.includes(r.id)).map(r => JSON.parse(JSON.stringify(r)));
-          const maxId = Math.max(0, ...allRxns.map(r => r.id));
-          if (maxId >= this.nextReactionId) this.nextReactionId = maxId + 1;
       }
 
       // 3. Load Matrices
@@ -112,8 +107,6 @@ export const useLabStore = defineStore('lab', {
           this.cloudMatrices = allMats.filter(m => m.scope !== 'Archived');
           this.archivedMatrices = allMats.filter(m => m.scope === 'Archived');
           this.matrices = this.cloudMatrices.filter(m => registry.matIds.includes(m.id)).map(m => JSON.parse(JSON.stringify(m)));
-          const maxId = Math.max(0, ...allMats.map(m => m.id));
-          if (maxId >= this.nextMatrixId) this.nextMatrixId = maxId + 1;
       }
 
       // 4. Load Screenings
@@ -123,8 +116,6 @@ export const useLabStore = defineStore('lab', {
           this.cloudReverseMatrices = allScrs.filter(s => s.scope !== 'Archived');
           this.archivedReverseMatrices = allScrs.filter(s => s.scope === 'Archived');
           this.reverseMatrices = this.cloudReverseMatrices.filter(s => registry.scrIds.includes(s.id)).map(s => JSON.parse(JSON.stringify(s)));
-          const maxId = Math.max(0, ...allScrs.map(s => s.id));
-          if (maxId >= this.nextRmId) this.nextRmId = maxId + 1;
       }
 
       // 5. Load Plates
@@ -134,8 +125,6 @@ export const useLabStore = defineStore('lab', {
           this.cloudPlates = allPlts.filter(p => p.scope !== 'Archived');
           this.archivedPlates = allPlts.filter(p => p.scope === 'Archived');
           this.wellPlates = this.cloudPlates.filter(p => registry.pltIds.includes(p.id)).map(p => JSON.parse(JSON.stringify(p)));
-          const maxId = Math.max(0, ...allPlts.map(p => p.id));
-          if (maxId >= this.nextPlateId) this.nextPlateId = maxId + 1;
       }
 
       // Restore local workspace drafts — unsaved items and unsaved changes survive refresh
@@ -143,9 +132,6 @@ export const useLabStore = defineStore('lab', {
       if (draftRaw) {
         try {
           const drafts = JSON.parse(draftRaw);
-          // Sub-counters (block/component IDs) are not derivable from cloud, restore from draft
-          if ((drafts.nextBlockId || 0) > this.nextBlockId) this.nextBlockId = drafts.nextBlockId;
-          if ((drafts.nextRmCompId || 0) > this.nextRmCompId) this.nextRmCompId = drafts.nextRmCompId;
           // Prefer draft state for workspace — it has the latest local edits including unsaved blocks
           if (drafts.reactions?.length > 0) this.reactions = drafts.reactions;
           if (drafts.matrices?.length > 0) this.matrices = drafts.matrices;
@@ -159,21 +145,20 @@ export const useLabStore = defineStore('lab', {
 
     async saveItemToCloud(item) {
       if (!this.user) return;
-      const payload = { owner_id: this.user.id, scope: item.scope || 'Global', item_data: item };
-      await db.from('inventory').delete().eq('item_data->>id', item.id.toString());
-      const { error } = await db.from('inventory').insert([payload]);
+      const payload = { item_id: String(item.id), owner_id: this.user.id, scope: item.scope || 'Global', item_data: item };
+      const { error } = await db.from('inventory').upsert(payload, { onConflict: 'item_id' });
       if (error) alert("Error saving inventory: " + error.message);
     },
 
     async saveToCloud(tableName, payloadData) {
         if (!this.user) return;
         const payload = {
+            item_id: String(payloadData.id),
             owner_id: this.user.id,
-            scope: payloadData.scope || 'Personal', 
+            scope: payloadData.scope || 'Personal',
             data: payloadData
         };
-        await db.from(tableName).delete().eq('data->>id', payloadData.id.toString());
-        const { error } = await db.from(tableName).insert([payload]);
+        const { error } = await db.from(tableName).upsert(payload, { onConflict: 'item_id' });
         
         if (error) {
             alert(`Permission Denied: Only the creator can modify this protocol.`);
@@ -195,7 +180,7 @@ export const useLabStore = defineStore('lab', {
 
     async deleteFromCloud(tableName, itemId) {
         if (!this.user) return;
-        const { error } = await db.from(tableName).delete().eq('data->>id', itemId.toString());
+        const { error } = await db.from(tableName).delete().eq('item_id', String(itemId));
         
         if (error) {
             alert("Permission Denied: You can only permanently delete your own protocols.");
@@ -230,8 +215,6 @@ export const useLabStore = defineStore('lab', {
         matrices: JSON.parse(JSON.stringify(this.matrices)),
         reverseMatrices: JSON.parse(JSON.stringify(this.reverseMatrices)),
         wellPlates: JSON.parse(JSON.stringify(this.wellPlates)),
-        nextBlockId: this.nextBlockId,
-        nextRmCompId: this.nextRmCompId
       };
       localStorage.setItem(`lab_local_drafts_${this.user.id}`, JSON.stringify(drafts));
     },

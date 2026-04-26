@@ -28,7 +28,7 @@ const filterBlockInventory = (query, scope) => {
 // --- Reaction Logic ---
 const addReaction = () => { 
     store.reactions.unshift({ 
-        id: store.nextReactionId++, 
+        id: crypto.randomUUID(),
         name: 'New Protocol', 
         targetVolume: 30, 
         targetVolumeUnit: 'µL', 
@@ -60,7 +60,7 @@ const removeItem = (reaction, itemIndex) => { reaction.items.splice(itemIndex, 1
 
 const duplicateReaction = (index) => {
     const copy = JSON.parse(JSON.stringify(store.reactions[index]));
-    copy.id = store.nextReactionId++;
+    copy.id = crypto.randomUUID();
     copy.name += ' (Copy)';
     copy.scope = 'Personal';
     copy.owner_id = store.user.id; 

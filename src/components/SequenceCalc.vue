@@ -108,7 +108,7 @@ const dnaMassConcentration = computed(() => {
 const saveDnaToInventory = () => {
     const rawSeq = store.dnaCalc.sequence.trim();
     const newItem = {
-        id: 'mod_' + store.nextInvId++, code: store.dnaCalc.saveCode || 'CALC', cas: '', 
+        id: 'mod_' + crypto.randomUUID(), code: store.dnaCalc.saveCode || 'CALC', cas: '',
         itemClass: store.dnaCalc.saveClass, name: store.dnaCalc.saveName, 
         stock: parseFloat(store.formatNum(dnaConcentration.value)), stockUnit: 'µM', 
         location: '', sublocation: '', catalogNum: '', unitSize: '', 

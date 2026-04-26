@@ -52,7 +52,7 @@ const calculatedStdVolume = computed(() => {
 // Save Method
 const saveStdToInventory = () => {
     const newItem = {
-        id: 'std_' + store.nextInvId++, 
+        id: 'std_' + crypto.randomUUID(),
         code: store.stdCalc.saveCode || 'STD', 
         cas: store.stdCalc.saveCas, 
         itemClass: store.stdCalc.saveClass, 

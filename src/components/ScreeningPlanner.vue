@@ -53,7 +53,7 @@ const getWellId = (r, c) => { return String.fromCharCode(65 + r) + (c + 1); }
 // --- Screening Logic ---
 const addReverseMatrix = () => {
     store.reverseMatrices.unshift({
-        id: store.nextRmId++, 
+        id: crypto.randomUUID(),
         name: 'New Screening', 
         targetVolume: 30, 
         targetVolumeUnit: 'µL',
@@ -101,7 +101,7 @@ const archiveReverseMatrix = async (index) => {
 // Fixed: Added persistence because duplicating adds a new item to screen
 const duplicateReverseMatrix = (index) => {
     const copy = JSON.parse(JSON.stringify(store.reverseMatrices[index]));
-    copy.id = store.nextRmId++; 
+    copy.id = crypto.randomUUID();
     copy.name += ' (Copy)';
     copy.scope = 'Personal';
     copy.owner_id = store.user.id;
@@ -111,7 +111,7 @@ const duplicateReverseMatrix = (index) => {
 
 const addReverseMatrixComponent = (rm) => {
     rm.components.push({ 
-        id: 'rmc_' + store.nextRmCompId++, invId: '', searchQuery: '', searchScope: 'Global', 
+        id: 'rmc_' + crypto.randomUUID(), invId: '', searchQuery: '', searchScope: 'Global',
         inputType: 'conc', targetUnit: 'µM', labware: '', grid: {},
         quickRow: '', quickRowVal: null, quickCol: '', quickColVal: null,
         gradDir: 'none', gradIndex: '', gradStart: null, gradEnd: null, gradStep: null

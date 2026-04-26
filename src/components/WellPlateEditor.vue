@@ -38,7 +38,7 @@ const filterBlockInventory = (query, scope) => {
 // --- Plate Management Actions ---
 const addWellPlate = () => { 
     store.wellPlates.unshift({ 
-        id: store.nextPlateId++, 
+        id: crypto.randomUUID(),
         name: 'New Plate', 
         format: 96, 
         selectedWell: null, 
@@ -75,7 +75,7 @@ const archivePlate = async (index) => {
 
 const duplicateWellPlate = (index) => {
     const copy = JSON.parse(JSON.stringify(store.wellPlates[index]));
-    copy.id = store.nextPlateId++; 
+    copy.id = crypto.randomUUID();
     copy.name += ' (Copy)';
     copy.scope = 'Personal';
     copy.owner_id = store.user.id;

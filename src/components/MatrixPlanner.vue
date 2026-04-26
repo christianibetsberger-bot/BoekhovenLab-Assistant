@@ -28,7 +28,7 @@ const getWellId = (r, c) => { return String.fromCharCode(65 + r) + (c + 1); }
 // --- Matrix Logic ---
 const addMatrix = () => { 
     store.matrices.unshift({ 
-        id: store.nextMatrixId++, 
+        id: crypto.randomUUID(),
         name: 'New Matrix Grid', 
         targetVolume: 30, 
         targetVolumeUnit: 'µL', 
@@ -65,7 +65,7 @@ const closePlanInWorkspace = (index) => {
     store.saveWorkspaceState(); 
 }
 
-const addBlockToMatrix = (matrix) => { matrix.customBlocks.push({ id: 'blk_' + store.nextBlockId++, name: 'New Block', itemIds: [], searchQuery: '', searchScope: 'Global', labware: '' }); }
+const addBlockToMatrix = (matrix) => { matrix.customBlocks.push({ id: 'blk_' + crypto.randomUUID(), name: 'New Block', itemIds: [], searchQuery: '', searchScope: 'Global', labware: '' }); }
 const addFixedAdditive = (matrix) => {
     if(!matrix.fixedAdditives) matrix.fixedAdditives = [];
     matrix.fixedAdditives.push({ name: 'New Component', vol: 1, searchQuery: '', searchScope: 'Global', labware: '' });
@@ -80,7 +80,7 @@ const archiveMatrix = async (index) => {
 }
 const duplicateMatrix = (index) => {
     const copy = JSON.parse(JSON.stringify(store.matrices[index]));
-    copy.id = store.nextMatrixId++; 
+    copy.id = crypto.randomUUID();
     copy.name += ' (Copy)';
     copy.scope = 'Personal';
     copy.owner_id = store.user.id;

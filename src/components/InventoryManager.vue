@@ -118,7 +118,11 @@ const addInventoryItem = () => {
     store.inventory.unshift(newItem); 
     store.saveItemToCloud(newItem);
 }
-const removeInventoryItem = (id) => { const idx = store.inventory.findIndex(i => i.id === id); if(idx !== -1) store.inventory.splice(idx, 1); }
+const removeInventoryItem = (id) => {
+    const idx = store.inventory.findIndex(i => i.id === id);
+    if (idx !== -1) store.inventory.splice(idx, 1);
+    store.deleteItemFromCloud(id);
+}
 const emptyInventory = () => {
     if(confirm(`Are you sure you want to empty the ENTIRE ${inventoryMode.value} inventory?`)) {
         store.inventory = store.inventory.filter(i => (i.scope || 'Global') !== inventoryMode.value);
@@ -440,9 +444,7 @@ const importInventory = (event) => {
             <button @click="importTargetMode = inventoryMode; excelUpload.click()" style="flex-grow: 1; height: 40px;">
                 <i class="fas fa-file-excel"></i> Import
             </button>
-            <button class="danger" @click="emptyInventory" style="flex-grow: 1; height: 40px;">
-                <i class="fas fa-trash-can"></i> Empty {{ inventoryMode }}
-            </button>
+
             <input type="file" ref="excelUpload" @change="importInventory" accept=".xlsx, .xls, .csv, .txt" style="display: none;">
         </div>
     </div>

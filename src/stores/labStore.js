@@ -150,6 +150,11 @@ export const useLabStore = defineStore('lab', {
       if (error) alert("Error saving inventory: " + error.message);
     },
 
+    async deleteItemFromCloud(itemId) {
+      if (!this.user) return;
+      await db.from('inventory').delete().eq('item_id', String(itemId));
+    },
+
     async saveToCloud(tableName, payloadData) {
         if (!this.user) return;
         const payload = {

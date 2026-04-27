@@ -415,30 +415,41 @@ const generateLabelsPDF = () => {
         doc.rect(tinyX, tinyY, tw, th)
         doc.setLineDash([])
 
-        // Code — bold, 5.5 pt, truncated at 12 chars
-        const code = (item.code || '—')
-        const displayCode = code.length > 12 ? code.substring(0, 12) + '…' : code
-        doc.setFont('helvetica', 'bold')
-        doc.setFontSize(5.5)
-        doc.setTextColor(0, 0, 0)
-        doc.text(displayCode, tinyX + 0.8, tinyY + 2.2)
+        const px   = tinyX + 0.8
+        const maxW = tw - 1.6   // 22.4 mm usable width
 
-        // Concentration | MW — regular, 4 pt
-        const mwDisplay = item.mw ? Math.round(item.mw) : '—'
-        const concStr   = `${item.stock ?? '—'} ${item.stockUnit || 'µM'}  |  ${mwDisplay} Da`
+        // Name — bold, 6 pt — largest element
+        const nameStr = item.name || ''
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(6)
+        doc.setTextColor(10, 10, 10)
+        doc.text(doc.splitTextToSize(nameStr, maxW)[0] || '', px, tinyY + 2.0)
+
+        // Code — small, 3.5 pt, muted
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(3.5)
+        doc.setTextColor(100, 100, 100)
+        doc.text(item.code || '', px, tinyY + 3.7)
+
+        // Conc | MW — 4 pt
+        const mwDisplay = item.mw ? Math.round(item.mw) : ''
+        const concBase  = `${item.stock ?? ''} ${item.stockUnit || 'µM'}`.trim()
+        const concStr   = mwDisplay ? `${concBase}  |  ${mwDisplay} Da` : concBase
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(4)
-        doc.text(concStr, tinyX + 0.8, tinyY + 4.8)
+        doc.setTextColor(20, 20, 20)
+        doc.text(concStr, px, tinyY + 5.1)
 
-        // Sequence — monospace, 3.5 pt, wrapped
+        // Sequence — courier 3.5 pt, one line if it fits, wraps only if needed
         const seq = cleanSeqForLabel(item.sequence)
         if (seq) {
-            const seqLines = wrapSeq(seq, 14)
             doc.setFont('courier', 'normal')
             doc.setFontSize(3.5)
+            doc.setTextColor(40, 40, 40)
+            const seqLines = doc.splitTextToSize(seq, maxW)
             seqLines.forEach((line, li) => {
-                const lineY = tinyY + 7.2 + li * 1.6
-                if (lineY < tinyY + th - 0.4) doc.text(line, tinyX + 0.8, lineY)
+                const lineY = tinyY + 6.7 + li * 1.5
+                if (lineY < tinyY + th - 0.4) doc.text(line, px, lineY)
             })
         }
     })

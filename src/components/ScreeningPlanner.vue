@@ -208,8 +208,7 @@ const calcRMCellHTML = (rm, rIndex, cIndex) => {
 }
 
 const saveReverseMatrixToJournal = (rm) => {
-    const activeJournalEntry = store.journal.entries.find(e => e.id === store.journal.activeId);
-    if (!activeJournalEntry) { alert("Please select an active journal entry first."); return; }
+    if (!store.journal.activeId) { alert("Please select an active journal entry first."); return; }
     const unit = rm.targetVolumeUnit || 'µL';
     const tv = Number(rm.targetVolume);
     let html = `<br><br><div style="border: 1px solid var(--border); padding: 15px; border-radius: var(--radius); background: var(--surface);">`;
@@ -257,7 +256,7 @@ const saveReverseMatrixToJournal = (rm) => {
         }
     }
     html += `</tbody></table></div></div><br>`;
-    activeJournalEntry.content += html;
+    store.appendToActiveJournal(html);
     alert(`Successfully appended Screening to Lab Journal!`);
 }
 

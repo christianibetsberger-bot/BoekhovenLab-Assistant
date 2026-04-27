@@ -63,6 +63,7 @@ export const useLabStore = defineStore('lab', {
     archivedPlates: [],
 
     journal: { entries: [], activeId: null, nextId: 1 },
+    journalNeedsSync: 0,
     selectedWellInvRef: '',
     viewingItem: null
   }),
@@ -202,6 +203,14 @@ export const useLabStore = defineStore('lab', {
         }
 
         this.saveWorkspaceState();
+    },
+
+    appendToActiveJournal(html) {
+      const entry = this.journal.entries.find(e => e.id === this.journal.activeId)
+      if (!entry) return false
+      entry.content = (entry.content || '') + html
+      this.journalNeedsSync++
+      return true
     },
 
     formatNum(num) {

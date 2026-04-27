@@ -160,8 +160,7 @@ const calculateMatrixCell = (matrix, rowBlockId, colBlockId) => {
 
 // --- Integrations ---
 const saveMatrixToJournal = (matrix) => {
-    const activeJournalEntry = store.journal.entries.find(e => e.id === store.journal.activeId);
-    if (!activeJournalEntry) { alert("Please select an active journal entry first."); return; }
+    if (!store.journal.activeId) { alert("Please select an active journal entry first."); return; }
     
     const unit = matrix.targetVolumeUnit || 'µL';
     let html = `<br><br><div style="border: 1px solid var(--border); padding: 15px; border-radius: var(--radius); background: var(--surface);">`;
@@ -198,7 +197,7 @@ const saveMatrixToJournal = (matrix) => {
         html += `<p style="opacity: 0.7; font-style: italic;">Matrix is empty (select row and column blocks).</p>`;
     }
     html += `</div><br>`;
-    activeJournalEntry.content += html;
+    store.appendToActiveJournal(html);
     alert(`Successfully appended Matrix to Lab Journal!`);
 }
 

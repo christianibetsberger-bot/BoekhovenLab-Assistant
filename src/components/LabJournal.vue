@@ -56,6 +56,11 @@ const syncEditor = () => {
     }
 }
 
+watch(() => store.journalNeedsSync, () => {
+    nextTick(() => syncEditor())
+    saveToDb()
+})
+
 const addJournalEntry = async () => {
     const { data: { user } } = await db.auth.getUser();
     if (!user) {

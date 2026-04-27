@@ -124,8 +124,7 @@ const selectReactionItem = (item, inv) => {
 
 // --- Cross-Module Integrations ---
 const saveReactionToJournal = (reaction) => {
-    const activeJournalEntry = store.journal.entries.find(e => e.id === store.journal.activeId);
-    if (!activeJournalEntry) { alert("Please select an active journal entry first."); return; }
+    if (!store.journal.activeId) { alert("Please select an active journal entry first."); return; }
     
     const unit = reaction.targetVolumeUnit || 'µL';
     let html = `<br><br><div style="border: 1px solid var(--border); padding: 15px; border-radius: var(--radius); background: var(--surface);">`;
@@ -151,7 +150,7 @@ const saveReactionToJournal = (reaction) => {
     html += `<tr style="background-color: var(--summary-bg); font-weight: bold;"><td style="border: 1px solid var(--border); padding: 8px;">TOTAL</td><td style="border: 1px solid var(--border); padding: 8px;">-</td><td style="border: 1px solid var(--border); padding: 8px;">${store.formatNum(reaction.targetVolume)}</td><td style="border: 1px solid var(--border); padding: 8px;">${store.formatNum(reaction.targetVolume * store.globalSettings.mmReactions)}</td></tr>`;
     html += `</tbody></table></div></div><br>`;
     
-    activeJournalEntry.content += html;
+    store.appendToActiveJournal(html);
     alert(`Successfully appended Protocol to Lab Journal!`);
 }
 

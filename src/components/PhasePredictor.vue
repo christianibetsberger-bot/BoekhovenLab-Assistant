@@ -669,6 +669,55 @@ const render2DPlot = () => {
   })
 
   const traces2d = [...Object.values(classTraces).filter(t => t.x.length > 0), traceUnknown, traceTarget]
+
+  if (boundaryData.value && showBoundary.value && boundaryData.value.probs) {
+    const bData = boundaryData.value
+    const axisToArray = { anion: bData.x, cation: bData.y, salt: bData.z }
+    const bxArr = axisToArray[xKey]
+    const byArr = axisToArray[yKey]
+
+    Object.keys(bData.probs).forEach(phaseId => {
+      const pId = parseInt(phaseId, 10)
+      if (pId === 0) return
+      const rawProb = bData.probs[phaseId]
+      if (Math.max(...rawProb) < 0.3) return
+
+      const uniqueX = [...new Set(bxArr)].sort((a, b) => a - b)
+      const uniqueY = [...new Set(byArr)].sort((a, b) => a - b)
+
+      const sumMap = {}, countMap = {}
+      for (let i = 0; i < bxArr.length; i++) {
+        const key = `${bxArr[i]}_${byArr[i]}`
+        sumMap[key] = (sumMap[key] || 0) + rawProb[i]
+        countMap[key] = (countMap[key] || 0) + 1
+      }
+      const zGrid = uniqueY.map(yv => uniqueX.map(xv => {
+        const key = `${xv}_${yv}`
+        return countMap[key] ? sumMap[key] / countMap[key] : 0
+      }))
+
+      const baseColor = phaseColors[pId] || 'rgba(148, 163, 184, 1)'
+      const fillColor = baseColor.replace('1)', '0.28)')
+      const lineColor = baseColor.replace('1)', '0.85)')
+
+      traces2d.unshift({
+        type: 'contour',
+        x: uniqueX,
+        y: uniqueY,
+        z: zGrid,
+        showscale: false,
+        showlegend: false,
+        hoverinfo: 'none',
+        zauto: false,
+        zmin: 0,
+        zmax: 1,
+        colorscale: [[0, 'rgba(0,0,0,0)'], [0.38, 'rgba(0,0,0,0)'], [0.40, fillColor], [1, fillColor]],
+        contours: { start: 0.40, end: 1.0, size: 1.0, coloring: 'fill', showlabels: false },
+        line: { color: lineColor, width: 1.5 }
+      })
+    })
+  }
+
   const layout2d = {
     annotations: [{ text: fixedLabel, x: 0.5, y: 1.06, xref: 'paper', yref: 'paper', showarrow: false, font: { color: '#aaaaaa', size: 10 } }],
     xaxis: { title: { text: xLabel, font: { color: '#dddddd', size: 11 } }, color: '#dddddd', gridcolor: '#444444', zerolinecolor: '#888888', range: [config.value[xKey + 'Min'], config.value[xKey + 'Max']] },
@@ -843,10 +892,17 @@ const calculateBoundary = async () => {
 
   isCalculatingBoundary.value = true;
   try {
+    let sendConfig = config.value
+    if (fixedAxis.value) {
+      const fa = fixedAxis.value
+      const fixedVal = config.value[fa + 'Min']
+      const epsilon = Math.max(0.01, Math.abs(fixedVal) * 0.005)
+      sendConfig = { ...config.value, [fa + 'Min']: fixedVal - epsilon, [fa + 'Max']: fixedVal + epsilon }
+    }
     const response = await fetch('https://experiment-backend-s71q.onrender.com/api/phase-boundary', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ config: config.value, experiments: experiments.value })
+      body: JSON.stringify({ config: sendConfig, experiments: experiments.value })
     });
     
     if (!response.ok) throw new Error('Boundary calculation failed.');

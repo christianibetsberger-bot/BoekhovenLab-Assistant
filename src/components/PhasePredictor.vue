@@ -675,30 +675,33 @@ const render2DPlot = () => {
     const axisToArray = { anion: bData.x, cation: bData.y, salt: bData.z }
     const bxArr = axisToArray[xKey]
     const byArr = axisToArray[yKey]
+    const fixedArr = axisToArray[fixed]
+
+    // Pick the single grid value on the fixed axis closest to the actual fixed value.
+    // This gives the exact same XY grid plane the 3D isosurface slices through.
+    const targetVal = config.value[fixed + 'Min']
+    const uniqueFixed = [...new Set(fixedArr)].sort((a, b) => a - b)
+    const closestFixed = uniqueFixed.reduce((best, v) =>
+      Math.abs(v - targetVal) < Math.abs(best - targetVal) ? v : best, uniqueFixed[0])
+    const sliceIdx = []
+    for (let i = 0; i < fixedArr.length; i++) {
+      if (Math.abs(fixedArr[i] - closestFixed) < 1e-9) sliceIdx.push(i)
+    }
+
+    const uniqueX = [...new Set(sliceIdx.map(i => bxArr[i]))].sort((a, b) => a - b)
+    const uniqueY = [...new Set(sliceIdx.map(i => byArr[i]))].sort((a, b) => a - b)
 
     Object.keys(bData.probs).forEach(phaseId => {
       const pId = parseInt(phaseId, 10)
       if (pId === 0) return
       const rawProb = bData.probs[phaseId]
-      if (Math.max(...rawProb) < 0.3) return
+      if (Math.max(...sliceIdx.map(i => rawProb[i])) < 0.3) return
 
-      const uniqueX = [...new Set(bxArr)].sort((a, b) => a - b)
-      const uniqueY = [...new Set(byArr)].sort((a, b) => a - b)
-
-      const sumMap = {}, countMap = {}
-      for (let i = 0; i < bxArr.length; i++) {
-        const key = `${bxArr[i]}_${byArr[i]}`
-        sumMap[key] = (sumMap[key] || 0) + rawProb[i]
-        countMap[key] = (countMap[key] || 0) + 1
-      }
-      const zGrid = uniqueY.map(yv => uniqueX.map(xv => {
-        const key = `${xv}_${yv}`
-        return countMap[key] ? sumMap[key] / countMap[key] : 0
-      }))
+      const probMap = {}
+      for (const i of sliceIdx) probMap[`${bxArr[i]}_${byArr[i]}`] = rawProb[i]
+      const zGrid = uniqueY.map(yv => uniqueX.map(xv => probMap[`${xv}_${yv}`] ?? 0))
 
       const baseColor = phaseColors[pId] || 'rgba(148, 163, 184, 1)'
-      const fillColor = baseColor.replace('1)', '0.45)')
-
       traces2d.unshift({
         type: 'heatmap',
         x: uniqueX,
@@ -711,7 +714,7 @@ const render2DPlot = () => {
         zmin: 0,
         zmax: 1,
         zsmooth: 'best',
-        colorscale: [[0, 'rgba(0,0,0,0)'], [0.399, 'rgba(0,0,0,0)'], [0.40, fillColor], [1, fillColor]]
+        colorscale: [[0, 'rgba(0,0,0,0)'], [0.399, 'rgba(0,0,0,0)'], [0.40, baseColor.replace('1)', '0.45)')], [1, baseColor.replace('1)', '0.45)')]]
       })
     })
   }

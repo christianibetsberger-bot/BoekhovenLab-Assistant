@@ -182,9 +182,9 @@
               </button>
             </div>
           </div>
-          <div class="plot-area" :style="fixedAxis ? 'display:flex; flex-direction:row; gap:2px;' : ''">
-            <div v-if="fixedAxis" id="phase-2d-plot" style="width:38%; height:100%; flex-shrink:0;"></div>
-            <div id="phase-ternary-plot" :style="fixedAxis ? 'width:calc(62% - 2px); height:100%; flex-shrink:0;' : 'width:100%; height:100%;'"></div>
+          <div class="plot-area" :style="fixedAxis ? 'display:grid; grid-template-columns:38fr 62fr; gap:2px; overflow:hidden;' : ''">
+            <div v-if="fixedAxis" id="phase-2d-plot" style="height:100%; min-width:0; overflow:hidden;"></div>
+            <div id="phase-ternary-plot" :style="fixedAxis ? 'height:100%; min-width:0; overflow:hidden;' : 'width:100%; height:100%;'"></div>
           </div>
         </div>
 

@@ -623,9 +623,11 @@ const renderPlot = () => {
       zaxis: { range: [config.value.saltMin, config.value.saltMax], title: { text: `${config.value.saltName} (${config.value.saltUnit})`, font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } }
     },
     paper_bgcolor: '#000000',
-    margin: { l: 0, r: fixedAxis.value ? 60 : 0, b: 0, t: 0 },
+    margin: { l: 0, r: fixedAxis.value ? 110 : 0, b: 0, t: 0 },
     showlegend: true,
-    legend: { orientation: "h", y: 0.05, x: 0.5, xanchor: 'center', font: { color: '#ffffff', size: 10 } }
+    legend: fixedAxis.value
+      ? { orientation: 'v', x: 1.02, xanchor: 'left', y: 0.5, yanchor: 'middle', font: { color: '#ffffff', size: 9 } }
+      : { orientation: 'h', y: 0.05, x: 0.5, xanchor: 'center', font: { color: '#ffffff', size: 10 } }
   }
 
   Plotly.react('phase-ternary-plot', traces, layout, { displayModeBar: false, responsive: true })

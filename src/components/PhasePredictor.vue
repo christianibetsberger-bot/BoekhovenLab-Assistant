@@ -183,8 +183,8 @@
             </div>
           </div>
           <div class="plot-area" :style="fixedAxis ? 'display:flex; flex-direction:row; gap:2px;' : ''">
-            <div v-if="fixedAxis" id="phase-2d-plot" style="flex:1; min-width:0; height:100%;"></div>
-            <div id="phase-ternary-plot" :style="fixedAxis ? 'flex:1.4; min-width:0; height:100%;' : 'width:100%; height:100%;'"></div>
+            <div v-if="fixedAxis" id="phase-2d-plot" style="width:38%; height:100%; flex-shrink:0;"></div>
+            <div id="phase-ternary-plot" :style="fixedAxis ? 'width:calc(62% - 2px); height:100%; flex-shrink:0;' : 'width:100%; height:100%;'"></div>
           </div>
         </div>
 

@@ -697,11 +697,10 @@ const render2DPlot = () => {
       }))
 
       const baseColor = phaseColors[pId] || 'rgba(148, 163, 184, 1)'
-      const fillColor = baseColor.replace('1)', '0.28)')
-      const lineColor = baseColor.replace('1)', '0.85)')
+      const fillColor = baseColor.replace('1)', '0.45)')
 
       traces2d.unshift({
-        type: 'contour',
+        type: 'heatmap',
         x: uniqueX,
         y: uniqueY,
         z: zGrid,
@@ -711,9 +710,8 @@ const render2DPlot = () => {
         zauto: false,
         zmin: 0,
         zmax: 1,
-        colorscale: [[0, 'rgba(0,0,0,0)'], [0.38, 'rgba(0,0,0,0)'], [0.40, fillColor], [1, fillColor]],
-        contours: { start: 0.40, end: 1.0, size: 1.0, coloring: 'fill', showlabels: false },
-        line: { color: lineColor, width: 1.5 }
+        zsmooth: 'best',
+        colorscale: [[0, 'rgba(0,0,0,0)'], [0.399, 'rgba(0,0,0,0)'], [0.40, fillColor], [1, fillColor]]
       })
     })
   }

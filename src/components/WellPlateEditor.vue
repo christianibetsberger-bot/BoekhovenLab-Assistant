@@ -261,6 +261,9 @@ const exportAndrewPlus = (plate) => {
 
     if (transfers.length === 0) { alert("No pipetting transfers found in the plate."); return; }
 
+    // Water must be pipetted first so other reagents are diluted into it
+    transfers.sort((a, b) => (a.type === 'water' ? -1 : b.type === 'water' ? 1 : 0));
+
     const generateHex = (len) => [...Array(len)].map(() => Math.floor(Math.random() * 16).toString(16)).join('');
     const generateUUID = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
         const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);

@@ -623,8 +623,8 @@ const renderPlot = () => {
       zaxis: { range: [config.value.saltMin, config.value.saltMax], title: { text: `${config.value.saltName} (${config.value.saltUnit})`, font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } }
     },
     paper_bgcolor: '#000000',
-    margin: { l: 0, r: 0, b: 0, t: 0 },
-    showlegend: !fixedAxis.value,
+    margin: { l: 0, r: fixedAxis.value ? 60 : 0, b: 0, t: 0 },
+    showlegend: true,
     legend: { orientation: "h", y: 0.05, x: 0.5, xanchor: 'center', font: { color: '#ffffff', size: 10 } }
   }
 
@@ -672,9 +672,8 @@ const render2DPlot = () => {
     xaxis: { title: { text: xLabel, font: { color: '#dddddd', size: 11 } }, color: '#dddddd', gridcolor: '#444444', zerolinecolor: '#888888', range: [config.value[xKey + 'Min'], config.value[xKey + 'Max']] },
     yaxis: { title: { text: yLabel, font: { color: '#dddddd', size: 11 } }, color: '#dddddd', gridcolor: '#444444', zerolinecolor: '#888888', range: [config.value[yKey + 'Min'], config.value[yKey + 'Max']] },
     paper_bgcolor: '#000000', plot_bgcolor: '#000000',
-    margin: { l: 50, r: 10, b: 65, t: 30 },
-    showlegend: true,
-    legend: { orientation: 'h', y: -0.35, x: 0.5, xanchor: 'center', font: { color: '#ffffff', size: 9 } }
+    margin: { l: 50, r: 10, b: 50, t: 30 },
+    showlegend: false
   }
   Plotly.react('phase-2d-plot', traces2d, layout2d, { displayModeBar: false, responsive: true })
 }

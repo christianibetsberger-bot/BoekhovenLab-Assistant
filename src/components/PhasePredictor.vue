@@ -165,7 +165,7 @@
       <div class="col-right">
         <div class="internal-section" style="display: flex; flex-direction: column;">
           <div class="flex-between" style="margin-bottom: 10px;">
-            <h3 style="margin: 0; border: none; padding: 0;">3. Phase Map (3D Space)</h3>
+            <h3 style="margin: 0; border: none; padding: 0;">3. Phase Map ({{ fixedAxis ? '2D Slice + 3D' : '3D Space' }})</h3>
             <div style="display: flex; gap: 10px; align-items: center;">
               <span v-if="boundaryData" style="font-size: 0.75rem; opacity: 0.7;">
                 {{ boundaryData.n_labeled }} pts · phases {{ boundaryData.phases_used?.join(', ') }}
@@ -182,8 +182,9 @@
               </button>
             </div>
           </div>
-          <div class="plot-area">
-            <div id="phase-ternary-plot" style="width: 100%; height: 100%;"></div>
+          <div class="plot-area" :style="fixedAxis ? 'display:flex; gap:5px;' : ''">
+            <div v-if="fixedAxis" id="phase-2d-plot" style="flex:1; min-width:0; height:100%;"></div>
+            <div id="phase-ternary-plot" :style="fixedAxis ? 'flex:1; min-width:0; height:100%;' : 'width:100%; height:100%;'"></div>
           </div>
         </div>
 
@@ -340,6 +341,14 @@ const config = ref({
   strategy: 'safe',
   numSuggestions: 96,
   minDistanceFactor: 0.05
+})
+
+// Detect when exactly one axis is collapsed (min === max) → show 2D slice alongside 3D
+const fixedAxis = computed(() => {
+  if (config.value.anionMin === config.value.anionMax) return 'anion'
+  if (config.value.cationMin === config.value.cationMax) return 'cation'
+  if (config.value.saltMin === config.value.saltMax) return 'salt'
+  return null
 })
 
 const experiments = ref([])
@@ -620,6 +629,53 @@ const renderPlot = () => {
   }
 
   Plotly.react('phase-ternary-plot', traces, layout, { displayModeBar: false, responsive: true })
+  nextTick(() => render2DPlot())
+}
+
+const render2DPlot = () => {
+  const plotDiv = document.getElementById('phase-2d-plot')
+  if (!plotDiv || !fixedAxis.value) return
+
+  const fixed = fixedAxis.value
+  const [xKey, yKey] = ['anion', 'cation', 'salt'].filter(a => a !== fixed)
+  const xLabel = `${config.value[xKey + 'Name']} (${config.value[xKey + 'Unit']})`
+  const yLabel = `${config.value[yKey + 'Name']} (${config.value[yKey + 'Unit']})`
+  const fixedLabel = `${config.value[fixed + 'Name']} = ${config.value[fixed + 'Min']} ${config.value[fixed + 'Unit']}`
+
+  const classTraces = {}
+  for (let i = 0; i <= 4; i++) {
+    classTraces[i] = { type: 'scatter', mode: 'markers', x: [], y: [], text: [], name: phaseNames[i],
+      marker: { color: phaseColors[i], size: 8, symbol: 'circle', line: { color: '#fff', width: 0.5 } } }
+  }
+  const traceUnknown = { type: 'scatter', mode: 'markers', x: [], y: [], text: [], name: 'Untested',
+    marker: { color: '#94a3b8', size: 4, symbol: 'circle' } }
+  const traceTarget = { type: 'scatter', mode: 'markers', x: [], y: [], text: [], name: 'AI Target',
+    marker: { color: phaseColors[-1], size: 7, symbol: 'cross', line: { color: '#fff', width: 1 } } }
+
+  const allData = [...experiments.value, ...suggestions.value]
+  allData.forEach(exp => {
+    const statusName = exp.phase === -1 ? 'AI Target' : (phaseNames[exp.phase] || `Phase ${exp.phase}`)
+    const xVal = exp[xKey], yVal = exp[yKey]
+    const label = `ID: ${exp.sampleId || 'Manual'} | ${statusName} | ${xLabel}: ${xVal} | ${yLabel}: ${yVal}`
+    if (exp.phase >= 0 && exp.phase <= 4) {
+      classTraces[exp.phase].x.push(xVal); classTraces[exp.phase].y.push(yVal); classTraces[exp.phase].text.push(label)
+    } else if (exp.sampleId > 0 && !experiments.value.some(e => e.sampleId === exp.sampleId)) {
+      traceTarget.x.push(xVal); traceTarget.y.push(yVal); traceTarget.text.push(label)
+    } else {
+      traceUnknown.x.push(xVal); traceUnknown.y.push(yVal); traceUnknown.text.push(label)
+    }
+  })
+
+  const traces2d = [...Object.values(classTraces).filter(t => t.x.length > 0), traceUnknown, traceTarget]
+  const layout2d = {
+    annotations: [{ text: fixedLabel, x: 0.5, y: 1.06, xref: 'paper', yref: 'paper', showarrow: false, font: { color: '#aaaaaa', size: 10 } }],
+    xaxis: { title: { text: xLabel, font: { color: '#dddddd', size: 11 } }, color: '#dddddd', gridcolor: '#444444', zerolinecolor: '#888888', range: [config.value[xKey + 'Min'], config.value[xKey + 'Max']] },
+    yaxis: { title: { text: yLabel, font: { color: '#dddddd', size: 11 } }, color: '#dddddd', gridcolor: '#444444', zerolinecolor: '#888888', range: [config.value[yKey + 'Min'], config.value[yKey + 'Max']] },
+    paper_bgcolor: '#000000', plot_bgcolor: '#000000',
+    margin: { l: 50, r: 10, b: 50, t: 30 },
+    showlegend: false
+  }
+  Plotly.react('phase-2d-plot', traces2d, layout2d, { displayModeBar: false, responsive: true })
 }
 
 watch([experiments, suggestions, config], () => { renderPlot() }, { deep: true })

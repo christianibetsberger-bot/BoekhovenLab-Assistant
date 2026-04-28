@@ -213,6 +213,28 @@ export const useLabStore = defineStore('lab', {
       return true
     },
 
+    formatSeqTriplets(rawSeq) {
+      if (!rawSeq) return ''
+      const clean = String(rawSeq).replace(/\s+/g, '')
+      // Preserve 5'/3' notation if present
+      let prefix = '', suffix = '', inner = clean
+      const fp = inner.match(/^5'-?/i)
+      if (fp) { prefix = fp[0]; inner = inner.slice(prefix.length) }
+      const sp = inner.match(/-?3'$/i)
+      if (sp) { suffix = sp[0]; inner = inner.slice(0, inner.length - suffix.length) }
+      // Walk character by character; modifications [X] count as one token, not toward triplet count
+      let result = '', baseCount = 0, i = 0
+      while (i < inner.length) {
+        if (inner[i] === '[') {
+          const end = inner.indexOf(']', i)
+          if (end !== -1) { result += inner.substring(i, end + 1); i = end + 1; continue }
+        }
+        if (baseCount > 0 && baseCount % 3 === 0) result += ' '
+        result += inner[i]; baseCount++; i++
+      }
+      return prefix + result + suffix
+    },
+
     formatNum(num) {
       if (num === null || num === undefined || isNaN(num)) return (0).toFixed(this.globalSettings.decimals);
       const factor = Math.pow(10, this.globalSettings.decimals);

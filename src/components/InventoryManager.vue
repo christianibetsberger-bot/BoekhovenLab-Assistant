@@ -479,7 +479,7 @@ const generateLabelsPDF = () => {
                 </div>
                 <div class="input-group" style="margin-top: 15px;">
                     <label>Manual Sequence (5' to 3')</label>
-                    <textarea v-model="viewingItem.sequence" rows="3" @input="updateManualSequence(viewingItem)" placeholder="Paste sequence (ATGC...) or [Mod]ATGC..."></textarea>
+                    <textarea :value="store.formatSeqTriplets(viewingItem.sequence)" @input="viewingItem.sequence = $event.target.value.replace(/\s+/g, ''); updateManualSequence(viewingItem)" rows="3" placeholder="Paste sequence (ATGC...) or [Mod]ATGC..."></textarea>
                 </div>
                 <div class="input-group">
                     <label>Manual Mass/Mw (Da)</label>

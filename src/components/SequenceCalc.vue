@@ -144,7 +144,7 @@ const saveDnaToInventory = () => {
     
     <div class="input-group">
         <label>Sequence (5' to 3') <span class="icon-muted" style="font-size: 0.7rem;">[Modifications] allowed</span></label>
-        <textarea v-model="store.dnaCalc.sequence" rows="3" placeholder="Paste sequence (ATGC...) or [DSPC]ATGC..."></textarea>
+        <textarea :value="store.formatSeqTriplets(store.dnaCalc.sequence)" @input="store.dnaCalc.sequence = $event.target.value.replace(/\s+/g, '')" rows="3" placeholder="Paste sequence (ATGC...) or [DSPC]ATGC..."></textarea>
     </div>
     
     <div class="grid-2">

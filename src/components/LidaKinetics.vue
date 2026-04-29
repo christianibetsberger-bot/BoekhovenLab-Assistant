@@ -61,7 +61,7 @@
 
         <!-- Units -->
         <section class="lida-section">
-          <h3><i class="fas fa-ruler icon-muted"></i> Units</h3>
+          <h3><i class="fas fa-ruler icon-muted"></i> Units &amp; Replication Limits</h3>
           <div class="grid-3-col">
             <div class="input-group">
               <label>T4-Ligase</label>
@@ -84,6 +84,20 @@
                 <option value="mM">mM</option>
                 <option value="µM">µM</option>
               </select>
+            </div>
+          </div>
+          <div class="grid-3-col" style="margin-top:8px;">
+            <div class="input-group" title="Max yieldable [R] in µM (LIMIT_B in the notebook). 100 % conversion = limit_uM.">
+              <label>limit_uM ([R]ₘₐₓ, µM)</label>
+              <input type="number" step="any" min="0" v-model.number="dataset.kinetics.limit_uM" />
+            </div>
+            <div class="input-group" title="Initial [A] = [a] (µM). Default 2.8.">
+              <label>A₀ (µM)</label>
+              <input type="number" step="any" min="0" v-model.number="dataset.kinetics.A0" />
+            </div>
+            <div class="input-group" title="Initial [B] = [b] (µM). Default 1.4.">
+              <label>B₀ (µM)</label>
+              <input type="number" step="any" min="0" v-model.number="dataset.kinetics.B0" />
             </div>
           </div>
         </section>
@@ -203,7 +217,7 @@
                   <td>{{ g.timeCourse.length }}</td>
                   <td><strong>{{ formatNum(g.maxConversion) }}</strong></td>
                   <td>
-                    <span v-if="g.fit && g.fit.Cmax != null" :title="`${g.fit.model}: Cmax=${g.fit.Cmax.toFixed(1)} k=${g.fit.k.toFixed(3)}`">
+                    <span v-if="g.fit && g.fit.ku != null" :title="fitTooltip(g.fit)">
                       <i class="fas fa-check" style="color:var(--success);"></i>
                     </span>
                     <span v-else style="opacity:0.4;">—</span>
@@ -360,6 +374,8 @@ function emptyDataset() {
     name: '',
     scope: 'Personal',
     units: { ligase: 'mM', atp: 'mM', mg2: 'mM' },
+    // Replication-kinetics initial conditions; defaults match the antimony model.
+    kinetics: { limit_uM: 1.4, A0: 2.8, B0: 1.4 },
     experiments: [],
     config: {
       ranges: { tMin: 20, tMax: 50, ligaseMin: 0, ligaseMax: 10, atpMin: 0, atpMax: 10, mg2Min: 0, mg2Max: 20 },
@@ -407,6 +423,29 @@ function formatNum(n) {
 function truncateSeq(s) {
   if (!s) return ''
   return s.length > 14 ? s.slice(0, 12) + '…' : s
+}
+
+function sci(n, p = 3) {
+  if (n == null || isNaN(n)) return '—'
+  const abs = Math.abs(n)
+  if (abs === 0) return '0'
+  if (abs < 1e-3 || abs >= 1e3) return Number(n).toExponential(p)
+  return Number(n).toPrecision(p + 1)
+}
+
+function fitTooltip(fit) {
+  if (!fit) return ''
+  const parts = [
+    `model: ${fit.model || '—'}`,
+    `ku = ${sci(fit.ku)}`,
+    `k1 = ${sci(fit.k1)}`,
+    `k2 = ${sci(fit.k2)}`,
+    `kr = ${sci(fit.kr)}`,
+    `k_bg = ${sci(fit.k_bg)}`,
+  ]
+  if (fit.limit_uM != null) parts.push(`limit = ${fit.limit_uM} µM`)
+  if (fit.seed_uM != null && fit.seed_uM > 0) parts.push(`seed = ${sci(fit.seed_uM)} µM`)
+  return parts.join('\n')
 }
 
 function newDataset() {
@@ -680,20 +719,42 @@ function renderCurves() {
   }
 
   const maxYield = Math.max(1, ...dataset.experiments.map(g => g.maxConversion))
-  const traces = dataset.experiments.map((g, i) => {
+  const traces = []
+  dataset.experiments.forEach((g, i) => {
     const intensity = g.maxConversion / maxYield
     const r = Math.round(255 * (1 - intensity))
     const gC = Math.round(120 + 120 * intensity)
     const b = Math.round(40 + 60 * (1 - intensity))
-    return {
+    const color = `rgb(${r},${gC},${b})`
+    const label = `${truncateSeq(g.sequence)} (T${formatNum(g.conditions.temperature)})`
+
+    // Raw timepoints (markers only when a fit curve exists, otherwise lines+markers).
+    const hasFitCurve = g.fit && Array.isArray(g.fit.simT) && g.fit.simT.length > 0
+    traces.push({
       type: 'scatter',
-      mode: 'lines+markers',
-      name: `${truncateSeq(g.sequence)} (T${formatNum(g.conditions.temperature)})`,
+      mode: hasFitCurve ? 'markers' : 'lines+markers',
+      name: label,
+      legendgroup: g.groupId,
       x: g.timeCourse.map(p => p.time),
       y: g.timeCourse.map(p => p.conversion),
-      line: { color: `rgb(${r},${gC},${b})`, width: 2 },
-      marker: { size: 6 },
+      line: { color, width: 2 },
+      marker: { size: 7, color, line: { width: 1, color: 'rgba(0,0,0,0.4)' } },
       hovertemplate: `<b>${esc(g.sequence)}</b><br>Time: %{x} min<br>Conv: %{y:.1f}%<extra></extra>`,
+    })
+
+    // Simulated replication-kinetics curve overlay.
+    if (hasFitCurve) {
+      traces.push({
+        type: 'scatter',
+        mode: 'lines',
+        name: `${label} fit`,
+        legendgroup: g.groupId,
+        showlegend: false,
+        x: g.fit.simT,
+        y: g.fit.simY,
+        line: { color, width: 2 },
+        hovertemplate: `<b>fit</b><br>%{x:.0f} min · %{y:.1f}%<extra></extra>`,
+      })
     }
   })
 
@@ -767,7 +828,12 @@ async function callBackend(url, body) {
 
 async function fitKinetics() {
   isFitting.value = true
-  const result = await callBackend(ENDPOINTS.fit, { experiments: dataset.experiments })
+  const result = await callBackend(ENDPOINTS.fit, {
+    experiments: dataset.experiments,
+    limit_uM: dataset.kinetics.limit_uM,
+    A0: dataset.kinetics.A0,
+    B0: dataset.kinetics.B0,
+  })
   isFitting.value = false
   if (!result) return
   const fitsById = Object.fromEntries((result.fits || []).map(f => [f.groupId, f]))
@@ -811,6 +877,7 @@ async function saveToCloud() {
     name: dataset.name || 'Untitled LIDA Dataset',
     scope: dataset.scope,
     units: dataset.units,
+    kinetics: dataset.kinetics,
     experiments: dataset.experiments,
     config: dataset.config,
     suggestions: aiSuggestions.value,
@@ -819,7 +886,15 @@ async function saveToCloud() {
 }
 
 async function loadFromLibrary(item) {
-  Object.assign(dataset, JSON.parse(JSON.stringify(item)))
+  const fresh = emptyDataset()
+  const loaded = JSON.parse(JSON.stringify(item))
+  // Backfill any missing top-level keys (e.g., `kinetics` for datasets saved
+  // before the replication-model fit was wired up).
+  for (const k of Object.keys(fresh)) {
+    if (loaded[k] == null) loaded[k] = fresh[k]
+  }
+  loaded.kinetics = { ...fresh.kinetics, ...(loaded.kinetics || {}) }
+  Object.assign(dataset, loaded)
   showLibrary.value = false
   aiSuggestions.value = item.suggestions || []
   seqCandidates.value = []

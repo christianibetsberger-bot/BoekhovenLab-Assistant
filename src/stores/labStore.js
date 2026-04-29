@@ -62,6 +62,9 @@ export const useLabStore = defineStore('lab', {
     cloudPlates: [],
     archivedPlates: [],
 
+    cloudKinetics: [],
+    archivedKinetics: [],
+
     journal: { entries: [], activeId: null, nextId: 1 },
     journalNeedsSync: 0,
     selectedWellInvRef: '',
@@ -128,6 +131,14 @@ export const useLabStore = defineStore('lab', {
           this.wellPlates = this.cloudPlates.filter(p => registry.pltIds.includes(p.id)).map(p => JSON.parse(JSON.stringify(p)));
       }
 
+      // 6. Load Kinetics
+      const { data: kinData } = await db.from('kinetics_data').select('*');
+      if (kinData) {
+          const allKin = kinData.map(row => { const obj = row.data; obj.owner_id = row.owner_id; return obj; });
+          this.cloudKinetics = allKin.filter(k => k.scope !== 'Archived');
+          this.archivedKinetics = allKin.filter(k => k.scope === 'Archived');
+      }
+
       // Restore local workspace drafts — unsaved items and unsaved changes survive refresh
       const draftRaw = localStorage.getItem(`lab_local_drafts_${this.user.id}`);
       if (draftRaw) {
@@ -178,6 +189,7 @@ export const useLabStore = defineStore('lab', {
             if (tableName === 'matrices') { this.cloudMatrices = mapped.filter(m => m.scope !== 'Archived'); this.archivedMatrices = mapped.filter(m => m.scope === 'Archived'); }
             if (tableName === 'screenings') { this.cloudReverseMatrices = mapped.filter(s => s.scope !== 'Archived'); this.archivedReverseMatrices = mapped.filter(s => s.scope === 'Archived'); }
             if (tableName === 'plates') { this.cloudPlates = mapped.filter(p => p.scope !== 'Archived'); this.archivedPlates = mapped.filter(p => p.scope === 'Archived'); }
+            if (tableName === 'kinetics_data') { this.cloudKinetics = mapped.filter(k => k.scope !== 'Archived'); this.archivedKinetics = mapped.filter(k => k.scope === 'Archived'); }
         }
 
         // Ensure registry is updated after a save (especially for new items)
@@ -187,12 +199,12 @@ export const useLabStore = defineStore('lab', {
     async deleteFromCloud(tableName, itemId) {
         if (!this.user) return;
         const { error } = await db.from(tableName).delete().eq('item_id', String(itemId));
-        
+
         if (error) {
             alert("Permission Denied: You can only permanently delete your own protocols.");
             return;
         }
-        
+
         const { data } = await db.from(tableName).select('*');
         if (data) {
             const mapped = data.map(row => { const obj = row.data; obj.owner_id = row.owner_id; return obj; });
@@ -200,6 +212,7 @@ export const useLabStore = defineStore('lab', {
             if (tableName === 'matrices') { this.cloudMatrices = mapped.filter(m => m.scope !== 'Archived'); this.archivedMatrices = mapped.filter(m => m.scope === 'Archived'); }
             if (tableName === 'screenings') { this.cloudReverseMatrices = mapped.filter(s => s.scope !== 'Archived'); this.archivedReverseMatrices = mapped.filter(s => s.scope === 'Archived'); }
             if (tableName === 'plates') { this.cloudPlates = mapped.filter(p => p.scope !== 'Archived'); this.archivedPlates = mapped.filter(p => p.scope === 'Archived'); }
+            if (tableName === 'kinetics_data') { this.cloudKinetics = mapped.filter(k => k.scope !== 'Archived'); this.archivedKinetics = mapped.filter(k => k.scope === 'Archived'); }
         }
 
         this.saveWorkspaceState();
@@ -259,7 +272,7 @@ export const useLabStore = defineStore('lab', {
       return {
         topOrder:        ['labJournal'],
         leftOrder:       ['globalSettings', 'standardStock', 'sequenceCalc', 'archiveManager', 'inventoryManager'],
-        rightOrder:      ['reactionPlan', 'matrixPlanner', 'screeningPlanner', 'phasePredictor', 'wellPlateEditor'],
+        rightOrder:      ['reactionPlan', 'matrixPlanner', 'screeningPlanner', 'phasePredictor', 'lidaKinetics', 'wellPlateEditor'],
         minimized:       {},
         sidebarPosition: 'left',   // 'left' | 'right' | 'bottom'
         sidebarHidden:   {}        // id → true  (removed from sidebar but still in layout orders)

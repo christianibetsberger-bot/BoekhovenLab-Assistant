@@ -14,8 +14,11 @@ import ReactionPlan from './components/ReactionPlan.vue'
 import MatrixPlanner from './components/MatrixPlanner.vue'
 import ScreeningPlanner from './components/ScreeningPlanner.vue'
 import PhasePredictor from './components/PhasePredictor.vue'
+import LidaKinetics from './components/LidaKinetics.vue'
 import WellPlateEditor from './components/WellPlateEditor.vue'
 import ArchiveManager from './components/ArchiveManager.vue'
+
+import lidaIcon from './assets/lida-icon.svg?raw'
 
 const store = useLabStore()
 useDynamicIcon()
@@ -32,6 +35,7 @@ const MODULE_META = {
   matrixPlanner:    { label: 'Matrix',      icon: 'fa-table-cells',       component: markRaw(MatrixPlanner) },
   screeningPlanner: { label: 'Screening',   icon: 'fa-table-cells-large', component: markRaw(ScreeningPlanner) },
   phasePredictor:   { label: 'Phase Map',   icon: 'fa-brain',             component: markRaw(PhasePredictor) },
+  lidaKinetics:     { label: 'LIDA Kinetics', icon: 'fa-dna',  svgIcon: lidaIcon, component: markRaw(LidaKinetics) },
   wellPlateEditor:  { label: 'Well Plate',  icon: 'fa-border-all',        component: markRaw(WellPlateEditor) },
 }
 
@@ -207,7 +211,8 @@ onUnmounted(() => document.removeEventListener('click', _closeRedock))
               <i class="fas fa-xmark"></i>
             </span>
             <div class="sidebar-icon">
-              <i class="fas" :class="MODULE_META[id].icon"></i>
+              <span v-if="MODULE_META[id].svgIcon" class="sidebar-svg" v-html="MODULE_META[id].svgIcon"></span>
+              <i v-else class="fas" :class="MODULE_META[id].icon"></i>
             </div>
           </button>
         </div>
@@ -235,7 +240,10 @@ onUnmounted(() => document.removeEventListener('click', _closeRedock))
           <div class="redock-grid">
             <button v-for="id in removedModuleIds" :key="id" class="redock-item"
               :title="MODULE_META[id].label" @click="redockModule(id)">
-              <div class="sidebar-icon redock-icon"><i class="fas" :class="MODULE_META[id].icon"></i></div>
+              <div class="sidebar-icon redock-icon">
+                <span v-if="MODULE_META[id].svgIcon" class="sidebar-svg" v-html="MODULE_META[id].svgIcon"></span>
+                <i v-else class="fas" :class="MODULE_META[id].icon"></i>
+              </div>
               <span class="redock-label">{{ MODULE_META[id].label }}</span>
             </button>
           </div>
@@ -502,6 +510,14 @@ body { padding: 0 !important; margin: 0 !important; }
   text-shadow: 0 1px 3px rgba(0,0,0,0.28);
   position: relative; z-index: 1;
 }
+.sidebar-svg {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  color: rgba(255,255,255,0.95);
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.28));
+  position: relative; z-index: 1;
+}
+.sidebar-svg svg { width: 100%; height: 100%; display: block; }
 
 /* Hover: spring lift */
 .sidebar-btn:hover .sidebar-icon {

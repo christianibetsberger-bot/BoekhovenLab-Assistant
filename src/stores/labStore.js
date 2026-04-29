@@ -266,11 +266,6 @@ export const useLabStore = defineStore('lab', {
       };
     },
 
-    saveModuleLayout(layout) {
-      if (!this.user?.id) return;
-      localStorage.setItem(`lab_module_layout_${this.user.id}`, JSON.stringify(layout));
-    },
-
     loadModuleLayout() {
       if (!this.user?.id) return this.getDefaultModuleLayout();
       const raw = localStorage.getItem(`lab_module_layout_${this.user.id}`);

@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { concentrationRatio, dimsCompatible, CONC_UNITS } from '../utils/units.js'
+import { esc } from '../utils/htmlSafe'
 
 const store = useLabStore()
 const activeDropdown = ref(null)
@@ -116,12 +117,12 @@ const calculateMatrixCell = (matrix, rowBlockId, colBlockId) => {
         if(item) {
             const ratio = concentrationRatio(matrix.rowTargetConc, matrix.rowTargetConcUnit || 'µM', item.stock, item.stockUnit || 'µM');
             if (ratio === null) {
-                htmlStr += `<strong>Row:</strong> <span style="color: var(--danger);"><i class="fas fa-triangle-exclamation"></i> [${item.code}] ${item.name}: unit mismatch (stock: ${item.stockUnit || 'µM'} vs target: ${matrix.rowTargetConcUnit || 'µM'})</span><br>`;
+                htmlStr += `<strong>Row:</strong> <span style="color: var(--danger);"><i class="fas fa-triangle-exclamation"></i> [${esc(item.code)}] ${esc(item.name)}: unit mismatch (stock: ${esc(item.stockUnit || 'µM')} vs target: ${esc(matrix.rowTargetConcUnit || 'µM')})</span><br>`;
                 return;
             }
             let v = ratio * tv;
             totalVol += v;
-            htmlStr += `<strong>Row:</strong> &nbsp;<span class="inv-ref" contenteditable="false" data-labware="${rowBlock.labware || ''}"><i class="fas fa-tag"></i>&nbsp;[${item.code}] ${item.name} (${store.formatNum(item.stock)} ${item.stockUnit || 'µM'})&nbsp;<i class="fas fa-times" style="cursor:pointer; margin-left:4px; opacity: 0.7;" onclick="let ce = this.closest('[contenteditable]'); this.parentElement.remove(); if(ce) ce.dispatchEvent(new Event('input', {bubbles: true}));" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7"></i></span>&nbsp; ${store.formatNum(v)} ${unit} (${matrix.rowTargetConc} ${matrix.rowTargetConcUnit || 'µM'})<br>`;
+            htmlStr += `<strong>Row:</strong> &nbsp;<span class="inv-ref" contenteditable="false" data-labware="${esc(rowBlock.labware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(v))} ${esc(unit)} (${esc(matrix.rowTargetConc)} ${esc(matrix.rowTargetConcUnit || 'µM')})<br>`;
         }
     });
 
@@ -130,12 +131,12 @@ const calculateMatrixCell = (matrix, rowBlockId, colBlockId) => {
         if(item) {
             const ratio = concentrationRatio(matrix.colTargetConc, matrix.colTargetConcUnit || 'µM', item.stock, item.stockUnit || 'µM');
             if (ratio === null) {
-                htmlStr += `<strong>Col:</strong> <span style="color: var(--danger);"><i class="fas fa-triangle-exclamation"></i> [${item.code}] ${item.name}: unit mismatch (stock: ${item.stockUnit || 'µM'} vs target: ${matrix.colTargetConcUnit || 'µM'})</span><br>`;
+                htmlStr += `<strong>Col:</strong> <span style="color: var(--danger);"><i class="fas fa-triangle-exclamation"></i> [${esc(item.code)}] ${esc(item.name)}: unit mismatch (stock: ${esc(item.stockUnit || 'µM')} vs target: ${esc(matrix.colTargetConcUnit || 'µM')})</span><br>`;
                 return;
             }
             let v = ratio * tv;
             totalVol += v;
-            htmlStr += `<strong>Col:</strong> &nbsp;<span class="inv-ref" contenteditable="false" data-labware="${colBlock.labware || ''}"><i class="fas fa-tag"></i>&nbsp;[${item.code}] ${item.name} (${store.formatNum(item.stock)} ${item.stockUnit || 'µM'})&nbsp;<i class="fas fa-times" style="cursor:pointer; margin-left:4px; opacity: 0.7;" onclick="let ce = this.closest('[contenteditable]'); this.parentElement.remove(); if(ce) ce.dispatchEvent(new Event('input', {bubbles: true}));" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7"></i></span>&nbsp; ${store.formatNum(v)} ${unit} (${matrix.colTargetConc} ${matrix.colTargetConcUnit || 'µM'})<br>`;
+            htmlStr += `<strong>Col:</strong> &nbsp;<span class="inv-ref" contenteditable="false" data-labware="${esc(colBlock.labware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(v))} ${esc(unit)} (${esc(matrix.colTargetConc)} ${esc(matrix.colTargetConcUnit || 'µM')})<br>`;
         }
     });
     
@@ -144,7 +145,7 @@ const calculateMatrixCell = (matrix, rowBlockId, colBlockId) => {
         matrix.fixedAdditives.forEach(add => {
             let vol = Number(add.vol) || 0;
             fixedVolTotal += vol;
-            fixedHtml += `&nbsp;<span class="inv-ref" contenteditable="false" data-labware="${add.labware || ''}" style="background-color: #6b7280;"><i class="fas fa-flask"></i>&nbsp;${add.name}&nbsp;<i class="fas fa-times" style="cursor:pointer; margin-left:4px; opacity: 0.7;" onclick="let ce = this.closest('[contenteditable]'); this.parentElement.remove(); if(ce) ce.dispatchEvent(new Event('input', {bubbles: true}));" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7"></i></span>&nbsp; ${store.formatNum(vol)} ${unit}<br>`;
+            fixedHtml += `&nbsp;<span class="inv-ref" contenteditable="false" data-labware="${esc(add.labware || '')}" style="background-color: #6b7280;"><i class="fas fa-flask"></i>&nbsp;${esc(add.name)}&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(vol))} ${esc(unit)}<br>`;
         });
     }
     
@@ -164,14 +165,14 @@ const saveMatrixToJournal = (matrix) => {
     
     const unit = matrix.targetVolumeUnit || 'µL';
     let html = `<br><br><div style="border: 1px solid var(--border); padding: 15px; border-radius: var(--radius); background: var(--surface);">`;
-    html += `<h3 style="margin-top: 0; color: var(--primary);"><i class="fas fa-table-cells"></i> Matrix Grid: ${matrix.name || 'Untitled'}</h3>`;
-    html += `<p style="font-size: 0.85rem; margin-bottom: 10px;">Row Target: ${matrix.rowTargetConc} ${matrix.rowTargetConcUnit || 'µM'} | Col Target: ${matrix.colTargetConc} ${matrix.colTargetConcUnit || 'µM'}</p>`;
-    
+    html += `<h3 style="margin-top: 0; color: var(--primary);"><i class="fas fa-table-cells"></i> Matrix Grid: ${esc(matrix.name || 'Untitled')}</h3>`;
+    html += `<p style="font-size: 0.85rem; margin-bottom: 10px;">Row Target: ${esc(matrix.rowTargetConc)} ${esc(matrix.rowTargetConcUnit || 'µM')} | Col Target: ${esc(matrix.colTargetConc)} ${esc(matrix.colTargetConcUnit || 'µM')}</p>`;
+
     let fixedText = [];
     if(matrix.fixedAdditives && matrix.fixedAdditives.length > 0) {
         matrix.fixedAdditives.forEach(add => {
             let vol = Number(add.vol) || 0;
-            fixedText.push(`&nbsp;<span class="inv-ref" contenteditable="false" style="background-color: #6b7280;"><i class="fas fa-flask"></i>&nbsp;${add.name}&nbsp;</span>&nbsp; (${store.formatNum(vol)} ${unit})`);
+            fixedText.push(`&nbsp;<span class="inv-ref" contenteditable="false" style="background-color: #6b7280;"><i class="fas fa-flask"></i>&nbsp;${esc(add.name)}&nbsp;</span>&nbsp; (${esc(store.formatNum(vol))} ${esc(unit)})`);
         });
         html += `<p style="font-size: 0.85rem; margin-bottom: 15px;"><strong>Fixed Additives:</strong> ${fixedText.join(', ')}</p>`;
     }
@@ -180,12 +181,12 @@ const saveMatrixToJournal = (matrix) => {
         html += `<div class="table-responsive"><table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left; border: 1px solid var(--border);">`;
         html += `<thead><tr><th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;"></th>`;
         matrix.selectedCols.forEach(colId => {
-            html += `<th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px; text-align: center;">${getBlockName(matrix, colId)} (Col)</th>`;
+            html += `<th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px; text-align: center;">${esc(getBlockName(matrix, colId))} (Col)</th>`;
         });
         html += `</tr></thead><tbody>`;
-        
+
         matrix.selectedRows.forEach(rowId => {
-            html += `<tr><th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px; text-align: center;">${getBlockName(matrix, rowId)} (Row)</th>`;
+            html += `<tr><th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px; text-align: center;">${esc(getBlockName(matrix, rowId))} (Row)</th>`;
             matrix.selectedCols.forEach(colId => {
                 let cellHtml = calculateMatrixCell(matrix, rowId, colId);
                 html += `<td style="border: 1px solid var(--border); padding: 8px; vertical-align: top;">${cellHtml}</td>`;

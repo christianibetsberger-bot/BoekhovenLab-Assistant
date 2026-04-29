@@ -1,6 +1,7 @@
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useLabStore } from '../stores/labStore'
+import { esc, sanitize } from '../utils/htmlSafe'
 
 const store = useLabStore()
 const activeDropdown = ref(null)
@@ -95,12 +96,12 @@ const selectWell = (plate, wellId) => {
     plate.selectedWell = wellId;
     nextTick(() => {
         const editor = document.getElementById('wellEditor_' + plate.id);
-        if (editor) editor.innerHTML = plate.wells[wellId] || '';
+        if (editor) editor.innerHTML = sanitize(plate.wells[wellId] || '');
     });
 }
 const updateWellContent = (plate, event) => {
     if (!plate.selectedWell) return;
-    plate.wells[plate.selectedWell] = event.target.innerHTML;
+    plate.wells[plate.selectedWell] = sanitize(event.target.innerHTML);
 }
 const formatWellDoc = (plate, cmd, value = null) => {
     const editor = document.getElementById('wellEditor_' + plate.id);
@@ -114,12 +115,27 @@ const insertInventoryRefToWell = (plate) => {
     const editor = document.getElementById('wellEditor_' + plate.id);
     if (item && editor) {
         editor.focus();
-        const html = `&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${item.code}] ${item.name} (${store.formatNum(item.stock)} ${item.stockUnit || 'µM'})&nbsp;<i class="fas fa-times" style="cursor:pointer; margin-left:4px; opacity: 0.7;" onclick="let ce = this.closest('[contenteditable]'); this.parentElement.remove(); if(ce) ce.dispatchEvent(new Event('input', {bubbles: true}));" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7"></i></span>&nbsp;`;
+        const html = `&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp;`;
         document.execCommand('insertHTML', false, html);
-        plate.wells[plate.selectedWell] = editor.innerHTML;
+        plate.wells[plate.selectedWell] = sanitize(editor.innerHTML);
     }
     store.selectedWellInvRef = '';
 }
+
+// Delegated handler: clicking the × on any inv-ref chip removes it.
+// Bound at document level since well editors are dynamically created per-plate.
+const onWellEditorClick = (e) => {
+    const target = e.target
+    if (!target?.classList?.contains('inv-ref-remove')) return
+    const editor = target.closest('[id^="wellEditor_"]')
+    if (!editor) return
+    target.closest('.inv-ref')?.remove()
+    const plateId = editor.id.replace('wellEditor_', '')
+    const plate = store.wellPlates.find(p => p.id === plateId)
+    if (plate?.selectedWell) plate.wells[plate.selectedWell] = sanitize(editor.innerHTML)
+}
+onMounted(() => document.addEventListener('click', onWellEditorClick))
+onBeforeUnmount(() => document.removeEventListener('click', onWellEditorClick))
 
 // --- Integrations ---
 const savePlateToJournal = (plate) => {
@@ -127,7 +143,7 @@ const savePlateToJournal = (plate) => {
     if (!activeJournalEntry) { alert("Please select an active journal entry first."); return; }
     
     let html = `<br><br><div style="border: 1px solid var(--border); padding: 15px; border-radius: var(--radius); background: var(--surface);">`;
-    html += `<h3 style="margin-top: 0; color: var(--primary);"><i class="fas fa-border-all"></i> Plate Map: ${plate.name} (${plate.format}-Well)</h3>`;
+    html += `<h3 style="margin-top: 0; color: var(--primary);"><i class="fas fa-border-all"></i> Plate Map: ${esc(plate.name)} (${esc(plate.format)}-Well)</h3>`;
     html += `<div class="table-responsive"><table style="width: 100%; border-collapse: collapse; font-size: 0.75rem; text-align: left; border: 1px solid var(--border);">`;
     
     const rows = getPlateRows(plate.format);

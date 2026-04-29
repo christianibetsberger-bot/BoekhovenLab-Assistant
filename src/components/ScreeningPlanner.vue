@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { concentrationRatio, compatibleUnits, dimsCompatible, defaultUnitForDim, CONC_UNITS } from '../utils/units.js'
+import { esc } from '../utils/htmlSafe'
 
 const store = useLabStore()
 const activeDropdown = ref(null)
@@ -183,18 +184,18 @@ const calcRMCellHTML = (rm, rIndex, cIndex) => {
             if (invItem) {
                 let v = 0; let displayTarget = '';
                 if (comp.inputType === 'vol') {
-                    v = targetVal; displayTarget = `${targetVal} ${unit} (Fixed)`;
+                    v = targetVal; displayTarget = `${esc(targetVal)} ${esc(unit)} (Fixed)`;
                 } else {
                     const ratio = concentrationRatio(targetVal, comp.targetUnit, Number(invItem.stock), invItem.stockUnit || 'µM');
                     if (ratio === null) {
-                        htmlStr += `<span style="color: var(--danger); font-size: 0.85rem;"><i class="fas fa-triangle-exclamation"></i> ${invItem.code}: unit mismatch (stock: ${invItem.stockUnit || 'µM'} vs target: ${comp.targetUnit})</span><br>`;
+                        htmlStr += `<span style="color: var(--danger); font-size: 0.85rem;"><i class="fas fa-triangle-exclamation"></i> ${esc(invItem.code)}: unit mismatch (stock: ${esc(invItem.stockUnit || 'µM')} vs target: ${esc(comp.targetUnit)})</span><br>`;
                         return;
                     }
                     v = ratio * tv;
-                    displayTarget = `${targetVal} ${comp.targetUnit}`;
+                    displayTarget = `${esc(targetVal)} ${esc(comp.targetUnit)}`;
                 }
                 totalVol += v;
-                htmlStr += `&nbsp;<span class="inv-ref" contenteditable="false" data-labware="${comp.labware || ''}"><i class="fas fa-tag"></i>&nbsp;[${invItem.code}] ${invItem.name} (${store.formatNum(invItem.stock)} ${invItem.stockUnit || 'µM'})&nbsp;<i class="fas fa-times" style="cursor:pointer; margin-left:4px; opacity: 0.7;" onclick="let ce = this.closest('[contenteditable]'); this.parentElement.remove(); if(ce) ce.dispatchEvent(new Event('input', {bubbles: true}));" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7"></i></span>&nbsp; ${store.formatNum(v)} ${unit} (${displayTarget})<br>`;
+                htmlStr += `&nbsp;<span class="inv-ref" contenteditable="false" data-labware="${esc(comp.labware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(invItem.code)}] ${esc(invItem.name)} (${esc(store.formatNum(invItem.stock))} ${esc(invItem.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(v))} ${esc(unit)} (${displayTarget})<br>`;
             }
         }
     });
@@ -212,17 +213,17 @@ const saveReverseMatrixToJournal = (rm) => {
     const unit = rm.targetVolumeUnit || 'µL';
     const tv = Number(rm.targetVolume);
     let html = `<br><br><div style="border: 1px solid var(--border); padding: 15px; border-radius: var(--radius); background: var(--surface);">`;
-    html += `<h3 style="margin-top: 0; color: var(--primary);"><i class="fas fa-table-cells-large"></i> Screening: ${rm.name || 'Untitled'}</h3>`;
+    html += `<h3 style="margin-top: 0; color: var(--primary);"><i class="fas fa-table-cells-large"></i> Screening: ${esc(rm.name || 'Untitled')}</h3>`;
     html += `<div class="table-responsive"><table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left; border: 1px solid var(--border);">`;
     html += `<thead><tr><th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;">Well</th>`;
-    
+
     rm.components.forEach(comp => {
         const name = comp.invId ? getInvName(comp.invId).split(' (')[0] : 'Unknown';
         const targetUnitLabel = comp.inputType === 'vol' ? unit : (comp.targetUnit || 'µM');
-        html += `<th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;">${name} Target (${targetUnitLabel})</th>`;
-        html += `<th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;">${name} Vol (${unit})</th>`;
+        html += `<th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;">${esc(name)} Target (${esc(targetUnitLabel)})</th>`;
+        html += `<th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;">${esc(name)} Vol (${esc(unit)})</th>`;
     });
-    html += `<th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;">MQ H₂O (${unit})</th></tr></thead><tbody>`;
+    html += `<th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;">MQ H₂O (${esc(unit)})</th></tr></thead><tbody>`;
     
     for (let r = 0; r < rm.rows; r++) {
         for (let c = 0; c < rm.cols; c++) {

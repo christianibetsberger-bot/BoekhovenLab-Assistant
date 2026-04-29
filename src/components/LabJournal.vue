@@ -2,6 +2,7 @@
 import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase' // Using your Supabase client
+import { esc, sanitize } from '../utils/htmlSafe'
 import * as XLSX from 'xlsx'
 import html2pdf from 'html2pdf.js'
 
@@ -45,14 +46,14 @@ const formatDoc = (cmd, value = null) => {
 
 const updateRtfContent = () => {
     if (activeJournalEntry.value && journalEditor.value) {
-        activeJournalEntry.value.content = journalEditor.value.innerHTML;
+        activeJournalEntry.value.content = sanitize(journalEditor.value.innerHTML);
         saveToDb(); // Trigger auto-save
     }
 }
 
 const syncEditor = () => {
     if (journalEditor.value && activeJournalEntry.value) {
-        journalEditor.value.innerHTML = activeJournalEntry.value.content || '';
+        journalEditor.value.innerHTML = sanitize(activeJournalEntry.value.content || '');
     }
 }
 
@@ -147,7 +148,7 @@ const insertInventoryRef = () => {
     const item = store.inventory.find(i => i.id === store.selectedInvRef);
     if (item) {
         if (journalEditor.value) journalEditor.value.focus();
-        const html = `&nbsp;<span class="inv-ref" contenteditable="false"><i class="fas fa-tag"></i>&nbsp;[${item.code}] ${item.name} (${store.formatNum(item.stock)} ${item.stockUnit || 'µM'})&nbsp;<i class="fas fa-times" style="cursor:pointer; margin-left:4px; opacity: 0.7;" onclick="let ce = this.closest('[contenteditable]'); this.parentElement.remove(); if(ce) ce.dispatchEvent(new Event('input', {bubbles: true}));" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7"></i></span>&nbsp;`;
+        const html = `&nbsp;<span class="inv-ref" contenteditable="false"><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp;`;
         document.execCommand('insertHTML', false, html);
         updateRtfContent();
     }
@@ -219,8 +220,20 @@ const exportJournal = (type) => {
     }
 }
 
+// Delegated handler: clicking the × on any inv-ref chip removes it.
+// Replaces the inline onclick="..." baked into chip HTML — that pattern
+// allowed XSS via stored content and is now stripped by sanitize().
+const onEditorClick = (e) => {
+    const target = e.target
+    if (target?.classList?.contains('inv-ref-remove')) {
+        target.closest('.inv-ref')?.remove()
+        updateRtfContent()
+    }
+}
+
 // --- Fetch from Supabase on Mount ---
 onMounted(async () => {
+    if (journalEditor.value) journalEditor.value.addEventListener('click', onEditorClick)
     const { data: { user } } = await db.auth.getUser();
 
     if (user) {

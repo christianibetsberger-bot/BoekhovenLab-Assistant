@@ -305,6 +305,7 @@
 <script setup>
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { db } from '../services/supabase'
+import { esc } from '../utils/htmlSafe'
 import { useLabStore } from '../stores/labStore'
 import Plotly from 'plotly.js-dist-min'
 
@@ -506,8 +507,8 @@ const exportSuggestionsToPlate = () => {
     let startCol = parseInt(match[2]) - 1;
 
     const getInventoryTag = (inv, vol, targetConc) => {
-        if (!inv) return `<strong>Unknown Component:</strong> ${vol} µL (${targetConc} mM)<br>`;
-        return `&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${inv.code}] ${inv.name} (${store.formatNum(inv.stock)} ${inv.stockUnit || 'µM'})&nbsp;<i class="fas fa-times" style="cursor:pointer; margin-left:4px; opacity: 0.7;" onclick="let ce = this.closest('[contenteditable]'); this.parentElement.remove(); if(ce) ce.dispatchEvent(new Event('input', {bubbles: true}));" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7"></i></span>&nbsp; ${vol} µL (${targetConc} mM)<br>`;
+        if (!inv) return `<strong>Unknown Component:</strong> ${esc(vol)} µL (${esc(targetConc)} mM)<br>`;
+        return `&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(inv.code)}] ${esc(inv.name)} (${esc(store.formatNum(inv.stock))} ${esc(inv.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(vol)} µL (${esc(targetConc)} mM)<br>`;
     };
     
     suggestions.value.forEach((sug, i) => {

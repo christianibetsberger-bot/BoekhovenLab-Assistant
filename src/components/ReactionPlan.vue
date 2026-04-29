@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { concentrationRatio, compatibleUnits, dimsCompatible, defaultUnitForDim, CONC_UNITS } from '../utils/units.js'
+import { esc } from '../utils/htmlSafe'
 
 const store = useLabStore()
 const activeDropdown = ref(null)
@@ -128,19 +129,19 @@ const saveReactionToJournal = (reaction) => {
     
     const unit = reaction.targetVolumeUnit || 'µL';
     let html = `<br><br><div style="border: 1px solid var(--border); padding: 15px; border-radius: var(--radius); background: var(--surface);">`;
-    html += `<h3 style="margin-top: 0; color: var(--primary);"><i class="fas fa-flask"></i> Protocol: ${reaction.name || 'Untitled'}</h3>`;
+    html += `<h3 style="margin-top: 0; color: var(--primary);"><i class="fas fa-flask"></i> Protocol: ${esc(reaction.name || 'Untitled')}</h3>`;
     html += `<div class="table-responsive"><table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left; border: 1px solid var(--border);">`;
-    html += `<thead><tr><th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;">Component</th><th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;">Target</th><th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;">1x Vol (${unit})</th><th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;">MM Vol (${unit})</th></tr></thead><tbody>`;
-    
+    html += `<thead><tr><th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;">Component</th><th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;">Target</th><th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;">1x Vol (${esc(unit)})</th><th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 8px;">MM Vol (${esc(unit)})</th></tr></thead><tbody>`;
+
     let total1x = 0;
     reaction.items.forEach(item => {
         const invItem = store.inventory.find(i => i.id === item.invId);
-        const nameTag = invItem ? `&nbsp;<span class="inv-ref" contenteditable="false"><i class="fas fa-tag"></i>&nbsp;[${invItem.code}] ${invItem.name} (${store.formatNum(invItem.stock)} ${invItem.stockUnit || 'µM'})&nbsp;<i class="fas fa-times" style="cursor:pointer; margin-left:4px; opacity: 0.7;" onclick="let ce = this.closest('[contenteditable]'); this.parentElement.remove(); if(ce) ce.dispatchEvent(new Event('input', {bubbles: true}));" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7"></i></span>&nbsp;` : 'Unknown';
-        const target = item.isFixed ? 'Fixed' : `${item.target} ${item.targetUnit || 'µM'}`;
+        const nameTag = invItem ? `&nbsp;<span class="inv-ref" contenteditable="false"><i class="fas fa-tag"></i>&nbsp;[${esc(invItem.code)}] ${esc(invItem.name)} (${esc(store.formatNum(invItem.stock))} ${esc(invItem.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp;` : 'Unknown';
+        const target = item.isFixed ? 'Fixed' : `${esc(item.target)} ${esc(item.targetUnit || 'µM')}`;
         const vol1x = calc1xVol(reaction, item);
         const volMM = calcMMVol(reaction, item);
         total1x += vol1x;
-        html += `<tr><td style="border: 1px solid var(--border); padding: 8px;">${nameTag}</td><td style="border: 1px solid var(--border); padding: 8px;">${target}</td><td style="border: 1px solid var(--border); padding: 8px;">${store.formatNum(vol1x)}</td><td style="border: 1px solid var(--border); padding: 8px;">${store.formatNum(volMM)}</td></tr>`;
+        html += `<tr><td style="border: 1px solid var(--border); padding: 8px;">${nameTag}</td><td style="border: 1px solid var(--border); padding: 8px;">${target}</td><td style="border: 1px solid var(--border); padding: 8px;">${esc(store.formatNum(vol1x))}</td><td style="border: 1px solid var(--border); padding: 8px;">${esc(store.formatNum(volMM))}</td></tr>`;
     });
     
     const h2o1x = Math.max(0, reaction.targetVolume - total1x);
@@ -162,17 +163,17 @@ const saveReactionToWell = (reaction) => {
     const wId = reaction.targetWell.toUpperCase().trim();
     const unit = reaction.targetVolumeUnit || 'µL';
     
-    let html = `<strong style="color: var(--primary);">${reaction.name || 'Protocol'}</strong><br>`;
+    let html = `<strong style="color: var(--primary);">${esc(reaction.name || 'Protocol')}</strong><br>`;
     reaction.items.forEach(item => {
         const invItem = store.inventory.find(i => i.id === item.invId);
         if (invItem) {
             const vol1x = calc1xVol(reaction, item);
-            const targetText = item.isFixed ? '(Fixed)' : `(${item.target} ${item.targetUnit || 'µM'})`;
-            html += `&nbsp;<span class="inv-ref" contenteditable="false" data-labware="${item.labware || ''}"><i class="fas fa-tag"></i>&nbsp;[${invItem.code}] ${invItem.name} (${store.formatNum(invItem.stock)} ${invItem.stockUnit || 'µM'})&nbsp;<i class="fas fa-times" style="cursor:pointer; margin-left:4px; opacity: 0.7;" onclick="let ce = this.closest('[contenteditable]'); this.parentElement.remove(); if(ce) ce.dispatchEvent(new Event('input', {bubbles: true}));" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7"></i></span>&nbsp; ${store.formatNum(vol1x)} ${unit} ${targetText}<br>`;
+            const targetText = item.isFixed ? '(Fixed)' : `(${esc(item.target)} ${esc(item.targetUnit || 'µM')})`;
+            html += `&nbsp;<span class="inv-ref" contenteditable="false" data-labware="${esc(item.labware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(invItem.code)}] ${esc(invItem.name)} (${esc(store.formatNum(invItem.stock))} ${esc(invItem.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(vol1x))} ${esc(unit)} ${targetText}<br>`;
         }
     });
     const h2o1x = Math.max(0, reaction.targetVolume - reactionTotalVol(reaction));
-    html += `<strong>MQ H₂O:</strong> ${store.formatNum(h2o1x)} ${unit}`;
+    html += `<strong>MQ H₂O:</strong> ${esc(store.formatNum(h2o1x))} ${esc(unit)}`;
     
     plate.wells[wId] = html;
     alert(`Successfully sent ${reaction.name || 'Protocol'} to Plate: ${plate.name}, Well: ${wId}`);

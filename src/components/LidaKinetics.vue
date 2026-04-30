@@ -224,7 +224,6 @@
                   <td>
                     <span v-if="g.fit && g.fit.ku != null" :title="fitTooltip(g.fit)">
                       <i class="fas fa-check" style="color:var(--success);"></i>
-                      <span v-if="g.fit.replicateCount > 1" style="font-size:0.7rem; opacity:0.7; margin-left:2px;">n={{ g.fit.replicateCount }}</span>
                     </span>
                     <span v-else style="opacity:0.4;">—</span>
                   </td>
@@ -441,19 +440,14 @@ function sci(n, p = 3) {
 
 function fitTooltip(fit) {
   if (!fit) return ''
-  const parts = [`model: ${fit.model || '—'}`]
-  const showParam = (p, label) => {
-    const val = fit[p]
-    const std = fit[`${p}_std`]
-    if (val == null) return
-    parts.push(std != null && std > 0 ? `${label} = ${sci(val)} ± ${sci(std)}` : `${label} = ${sci(val)}`)
-  }
-  showParam('ku', 'ku')
-  showParam('k1', 'k1')
-  showParam('k2', 'k2')
-  showParam('kr', 'kr')
-  showParam('k_bg', 'k_bg')
-  if (fit.replicateCount > 1) parts.push(`replicates: ${fit.replicateCount}`)
+  const parts = [
+    `model: ${fit.model || '—'}`,
+    `ku = ${sci(fit.ku)}`,
+    `k1 = ${sci(fit.k1)}`,
+    `k2 = ${sci(fit.k2)}`,
+    `kr = ${sci(fit.kr)}`,
+    `k_bg = ${sci(fit.k_bg)}`,
+  ]
   if (fit.limit_uM != null) parts.push(`limit = ${fit.limit_uM} µM`)
   if (fit.seed_uM != null && fit.seed_uM > 0) parts.push(`seed = ${sci(fit.seed_uM)} µM`)
   return parts.join('\n')
@@ -900,80 +894,34 @@ async function callBackend(url, body) {
 async function fitKinetics() {
   isFitting.value = true
 
-  // Expand groups with replicates into separate backend entries.
-  const REP_SEP = '|||rep'
-  const flatExps = []
-  for (const g of dataset.experiments) {
-    if (g.replicates?.length > 1) {
-      for (const rep of g.replicates) {
-        flatExps.push({
-          groupId: `${g.groupId}${REP_SEP}${rep.replicateId}`,
-          sequence: g.sequence,
-          conditions: g.conditions,
-          timeCourse: rep.timeCourse,
-        })
+  // For replicate groups, average the time courses before fitting (one fit per group).
+  const expsToFit = dataset.experiments.map(g => {
+    if (!g.replicates || g.replicates.length <= 1) return g
+    const timeMap = new Map()
+    for (const rep of g.replicates) {
+      for (const pt of rep.timeCourse) {
+        if (!timeMap.has(pt.time)) timeMap.set(pt.time, [])
+        timeMap.get(pt.time).push(pt.conversion)
       }
-    } else {
-      flatExps.push(g)
     }
-  }
+    const meanTimeCourse = [...timeMap.entries()]
+      .map(([time, vals]) => ({ time, conversion: vals.reduce((a, b) => a + b, 0) / vals.length }))
+      .sort((a, b) => a.time - b.time)
+    return { ...g, timeCourse: meanTimeCourse }
+  })
 
   const result = await callBackend(ENDPOINTS.fit, {
-    experiments: flatExps,
+    experiments: expsToFit,
     limit_uM: dataset.kinetics.limit_uM,
     A0: dataset.kinetics.A0,
     B0: dataset.kinetics.B0,
   })
   isFitting.value = false
   if (!result) return
-
   const fitsById = Object.fromEntries((result.fits || []).map(f => [f.groupId, f]))
-
   for (const g of dataset.experiments) {
-    if (g.replicates?.length > 1) {
-      // Collect individual replicate fits.
-      const repFits = g.replicates
-        .map(rep => ({ replicateId: rep.replicateId, ...fitsById[`${g.groupId}${REP_SEP}${rep.replicateId}`] }))
-        .filter(f => f.ku != null)
-      if (!repFits.length) continue
-
-      // Average kinetic parameters.
-      const PARAMS = ['ku', 'k1', 'k2', 'kr', 'k_bg']
-      const means = {}
-      const paramStds = {}
-      for (const p of PARAMS) {
-        const vals = repFits.map(f => f[p]).filter(v => v != null && !isNaN(v))
-        if (!vals.length) { means[p] = null; continue }
-        means[p] = vals.reduce((a, b) => a + b, 0) / vals.length
-        const variance = vals.reduce((s, v) => s + (v - means[p]) ** 2, 0) / Math.max(1, vals.length)
-        paramStds[`${p}_std`] = Math.sqrt(variance)
-      }
-
-      // Average simulated curves: interpolate each replicate onto a common time grid.
-      const validFits = repFits.filter(f => f.simT?.length > 0)
-      let simT = null, simY = null
-      if (validFits.length > 0) {
-        const tMax = Math.max(...validFits.map(f => Math.max(...f.simT)))
-        simT = Array.from({ length: 100 }, (_, i) => (i / 99) * tMax)
-        const allY = validFits.map(f => interpLinear(f.simT, f.simY, simT))
-        simY = simT.map((_, i) => allY.reduce((s, y) => s + y[i], 0) / allY.length)
-      }
-
-      g.fit = {
-        ...means,
-        ...paramStds,
-        model: repFits[0]?.model,
-        limit_uM: repFits[0]?.limit_uM,
-        seed_uM: repFits[0]?.seed_uM,
-        replicateCount: repFits.length,
-        replicateFits: repFits,
-        simT,
-        simY,
-      }
-    } else {
-      const f = fitsById[g.groupId]
-      if (f) g.fit = f
-    }
+    const f = fitsById[g.groupId]
+    if (f) g.fit = f
   }
 }
 

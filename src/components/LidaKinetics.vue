@@ -563,7 +563,12 @@ function onCsvFileSelected(e) {
 }
 
 function groupKey(seq, c) {
-  return `${seq}|T${c.temperature}|L${c.ligase}|A${c.atp}|M${c.mg2}|E${c.env}`
+  // Round numeric conditions to 6 d.p. to absorb CSV float-parse noise while
+  // still treating any real difference as a distinct group. Two rows only share
+  // a groupKey — and can therefore be replicates — when sequence AND every
+  // condition are exactly the same.
+  const r = n => Math.round(Number(n) * 1e6) / 1e6
+  return `${seq}|T${r(c.temperature)}|L${r(c.ligase)}|A${r(c.atp)}|M${r(c.mg2)}|E${String(c.env || '').trim()}`
 }
 
 function parseCsv(text) {
@@ -610,11 +615,14 @@ function parseCsv(text) {
 
   if (!rows.length) { parseError.value = 'No valid rows found.'; return }
 
-  // Auto-detect replicates when no Replicate column: same (group, time) repeated = replicate.
+  // Auto-detect replicates (no Replicate column):
+  // Two rows are replicates iff they share the EXACT same sequence, every condition,
+  // AND the same time point — only conversion% differs. Anything else → different group.
   if (!hasReplCol) {
     const seenGroupTime = new Map()
     for (const r of rows) {
-      const tk = `${groupKey(r.sequence, r.conditions)}|||${r.time}`
+      const tRounded = Math.round(r.time * 1e6) / 1e6
+      const tk = `${groupKey(r.sequence, r.conditions)}|||${tRounded}`
       const n = (seenGroupTime.get(tk) || 0) + 1
       seenGroupTime.set(tk, n)
       r.replicateId = String(n)

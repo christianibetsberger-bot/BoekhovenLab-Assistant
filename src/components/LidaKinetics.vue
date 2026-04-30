@@ -217,7 +217,7 @@
                   <td class="env-cell" :title="g.conditions.env">{{ g.conditions.env || '—' }}</td>
                   <td>{{ g.timeCourse.length }}</td>
                   <td>
-                    <span v-if="g.replicates?.length > 1" style="font-weight:600; color:var(--primary);">{{ g.replicates.length }}</span>
+                    <span v-if="replicateCount(g) > 1" style="font-weight:600; color:var(--primary);">{{ replicateCount(g) }}</span>
                     <span v-else style="opacity:0.35;">—</span>
                   </td>
                   <td><strong>{{ formatNum(g.maxConversion) }}</strong></td>
@@ -775,8 +775,8 @@ function renderCurves() {
     const gC = Math.round(120 + 120 * intensity)
     const b = Math.round(40 + 60 * (1 - intensity))
     const color = `rgb(${r},${gC},${b})`
-    const nRep = g.replicates?.length > 1 ? g.replicates.length : 0
-    const label = nRep > 0
+    const nRep = replicateCount(g)
+    const label = nRep > 1
       ? `${truncateSeq(g.sequence)} (T${formatNum(g.conditions.temperature)}, n=${nRep})`
       : `${truncateSeq(g.sequence)} (T${formatNum(g.conditions.temperature)})`
 
@@ -891,24 +891,31 @@ async function callBackend(url, body) {
   }
 }
 
+function replicateCount(g) {
+  if (g.replicates?.length > 1) return g.replicates.length
+  // Fall back: count max occurrences of any time value in the raw time course.
+  const freq = new Map()
+  for (const pt of g.timeCourse) freq.set(pt.time, (freq.get(pt.time) || 0) + 1)
+  return Math.max(1, ...freq.values())
+}
+
+function meanTimeCourse(timeCourse) {
+  const timeMap = new Map()
+  for (const pt of timeCourse) {
+    if (!timeMap.has(pt.time)) timeMap.set(pt.time, [])
+    timeMap.get(pt.time).push(pt.conversion)
+  }
+  return [...timeMap.entries()]
+    .map(([time, vals]) => ({ time, conversion: vals.reduce((a, b) => a + b, 0) / vals.length }))
+    .sort((a, b) => a.time - b.time)
+}
+
 async function fitKinetics() {
   isFitting.value = true
 
-  // For replicate groups, average the time courses before fitting (one fit per group).
-  const expsToFit = dataset.experiments.map(g => {
-    if (!g.replicates || g.replicates.length <= 1) return g
-    const timeMap = new Map()
-    for (const rep of g.replicates) {
-      for (const pt of rep.timeCourse) {
-        if (!timeMap.has(pt.time)) timeMap.set(pt.time, [])
-        timeMap.get(pt.time).push(pt.conversion)
-      }
-    }
-    const meanTimeCourse = [...timeMap.entries()]
-      .map(([time, vals]) => ({ time, conversion: vals.reduce((a, b) => a + b, 0) / vals.length }))
-      .sort((a, b) => a.time - b.time)
-    return { ...g, timeCourse: meanTimeCourse }
-  })
+  // Always average duplicate time points before fitting so any rows sharing the same
+  // (sequence + conditions) are treated as replicates regardless of how they were detected.
+  const expsToFit = dataset.experiments.map(g => ({ ...g, timeCourse: meanTimeCourse(g.timeCourse) }))
 
   const result = await callBackend(ENDPOINTS.fit, {
     experiments: expsToFit,

@@ -768,41 +768,38 @@ function plotLayoutDark(title) {
   }
 }
 
+const PASTEL_COLORS = [
+  'rgb(255,179,186)', 'rgb(186,225,255)', 'rgb(186,255,201)', 'rgb(255,223,186)',
+  'rgb(232,186,255)', 'rgb(255,255,186)', 'rgb(186,255,232)', 'rgb(255,186,230)',
+  'rgb(217,235,255)', 'rgb(255,217,186)', 'rgb(210,255,210)', 'rgb(255,210,240)',
+]
+
 function renderCurves() {
   if (!curvePlotEl.value) return
-  if (!dataset.experiments.length) {
-    Plotly.purge(curvePlotEl.value)
-    return
-  }
+  if (!dataset.experiments.length) { Plotly.purge(curvePlotEl.value); return }
 
-  const maxYield = Math.max(1, ...dataset.experiments.map(g => g.maxConversion))
   const traces = []
   dataset.experiments.forEach((g, i) => {
-    const intensity = g.maxConversion / maxYield
-    const r = Math.round(255 * (1 - intensity))
-    const gC = Math.round(120 + 120 * intensity)
-    const b = Math.round(40 + 60 * (1 - intensity))
-    const color = `rgb(${r},${gC},${b})`
+    const color = PASTEL_COLORS[i % PASTEL_COLORS.length]
     const nRep = replicateCount(g)
     const label = nRep > 1
       ? `${truncateSeq(g.sequence)} (T${formatNum(g.conditions.temperature)}, n=${nRep})`
       : `${truncateSeq(g.sequence)} (T${formatNum(g.conditions.temperature)})`
 
-    // Raw timepoints (markers only when a fit curve exists, otherwise lines+markers).
-    const hasFitCurve = g.fit && Array.isArray(g.fit.simT) && g.fit.simT.length > 0
+    // Raw data points — always markers only, no connecting lines.
     traces.push({
       type: 'scatter',
-      mode: hasFitCurve ? 'markers' : 'lines+markers',
+      mode: 'markers',
       name: label,
       legendgroup: g.groupId,
       x: g.timeCourse.map(p => p.time),
       y: g.timeCourse.map(p => p.conversion),
-      line: { color, width: 2 },
-      marker: { size: 7, color, line: { width: 1, color: 'rgba(0,0,0,0.4)' } },
+      marker: { size: 8, color, line: { width: 1, color: 'rgba(0,0,0,0.25)' } },
       hovertemplate: `<b>${esc(g.sequence)}</b><br>Time: %{x} min<br>Conv: %{y:.1f}%<extra></extra>`,
     })
 
-    // Simulated replication-kinetics curve overlay.
+    // Mean fit curve overlay (line only, same color, slightly darker).
+    const hasFitCurve = g.fit && Array.isArray(g.fit.simT) && g.fit.simT.length > 0
     if (hasFitCurve) {
       traces.push({
         type: 'scatter',
@@ -812,7 +809,7 @@ function renderCurves() {
         showlegend: false,
         x: g.fit.simT,
         y: g.fit.simY,
-        line: { color, width: 2 },
+        line: { color, width: 2.5 },
         hovertemplate: `<b>fit</b><br>%{x:.0f} min · %{y:.1f}%<extra></extra>`,
       })
     }
@@ -827,33 +824,40 @@ function renderCurves() {
 
 function renderHeatmap() {
   if (!heatPlotEl.value) return
-  if (!dataset.experiments.length) {
-    Plotly.purge(heatPlotEl.value)
-    return
-  }
-  const xVals = dataset.experiments.map(g => g.conditions[heatX.value])
-  const yVals = dataset.experiments.map(g => g.conditions[heatY.value])
-  const z = dataset.experiments.map(g => g.maxConversion)
+  if (!dataset.experiments.length) { Plotly.purge(heatPlotEl.value); return }
 
+  // Build sorted unique axis values.
+  const xUniq = [...new Set(dataset.experiments.map(g => g.conditions[heatX.value]))].sort((a, b) => a - b)
+  const yUniq = [...new Set(dataset.experiments.map(g => g.conditions[heatY.value]))].sort((a, b) => a - b)
+
+  // z[row][col] = mean maxConversion at (xUniq[col], yUniq[row]); null = no data.
+  const z = yUniq.map(yv =>
+    xUniq.map(xv => {
+      const hits = dataset.experiments.filter(g =>
+        g.conditions[heatX.value] === xv && g.conditions[heatY.value] === yv
+      )
+      return hits.length ? hits.reduce((s, g) => s + g.maxConversion, 0) / hits.length : null
+    })
+  )
+
+  const isDark = store.isDarkMode
   const trace = {
-    type: 'scatter',
-    mode: 'markers',
-    x: xVals,
-    y: yVals,
-    marker: {
-      size: 14,
-      color: z,
-      colorscale: 'Viridis',
-      cmin: 0,
-      cmax: 100,
-      colorbar: { title: { text: 'Max %', font: { size: 10 } }, thickness: 12 },
-      line: { width: 1, color: 'rgba(0,0,0,0.4)' },
-    },
-    hovertemplate: `${heatX.value}: %{x}<br>${heatY.value}: %{y}<br>Max conv: %{marker.color:.1f}%<extra></extra>`,
+    type: 'heatmap',
+    x: xUniq,
+    y: yUniq,
+    z,
+    colorscale: 'Viridis',
+    zmin: 0,
+    zmax: 100,
+    connectgaps: false,
+    colorbar: { title: { text: 'Max %', font: { size: 10 } }, thickness: 12 },
+    hovertemplate: `${heatX.value}: %{x}<br>${heatY.value}: %{y}<br>Max conv: %{z:.1f}%<extra></extra>`,
   }
-  const layout = plotLayoutDark(`Max Conversion by ${heatX.value} × ${heatY.value}`)
+  const layout = plotLayoutDark(`Max Conversion: ${heatX.value} × ${heatY.value}`)
   layout.xaxis.title = { text: heatX.value, font: { size: 10 } }
   layout.yaxis.title = { text: heatY.value, font: { size: 10 } }
+  layout.xaxis.type = 'category'
+  layout.yaxis.type = 'category'
   Plotly.react(heatPlotEl.value, [trace], layout, { responsive: true, displayModeBar: false })
 }
 

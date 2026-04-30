@@ -913,22 +913,57 @@ function meanTimeCourse(timeCourse) {
 async function fitKinetics() {
   isFitting.value = true
 
-  // Always average duplicate time points before fitting so any rows sharing the same
-  // (sequence + conditions) are treated as replicates regardless of how they were detected.
-  const expsToFit = dataset.experiments.map(g => ({ ...g, timeCourse: meanTimeCourse(g.timeCourse) }))
+  // Expand replicate groups into one entry per replicate for individual fitting.
+  const REP_SEP = '|||rep'
+  const flatExps = []
+  for (const g of dataset.experiments) {
+    if (g.replicates?.length > 1) {
+      for (const rep of g.replicates) {
+        flatExps.push({
+          groupId: `${g.groupId}${REP_SEP}${rep.replicateId}`,
+          sequence: g.sequence,
+          conditions: g.conditions,
+          timeCourse: rep.timeCourse,
+        })
+      }
+    } else {
+      // No replicates — deduplicate time points just in case.
+      flatExps.push({ ...g, timeCourse: meanTimeCourse(g.timeCourse) })
+    }
+  }
 
   const result = await callBackend(ENDPOINTS.fit, {
-    experiments: expsToFit,
+    experiments: flatExps,
     limit_uM: dataset.kinetics.limit_uM,
     A0: dataset.kinetics.A0,
     B0: dataset.kinetics.B0,
   })
   isFitting.value = false
   if (!result) return
+
   const fitsById = Object.fromEntries((result.fits || []).map(f => [f.groupId, f]))
+
   for (const g of dataset.experiments) {
-    const f = fitsById[g.groupId]
-    if (f) g.fit = f
+    if (g.replicates?.length > 1) {
+      // Collect individual replicate fits that succeeded.
+      const repFits = g.replicates
+        .map(rep => fitsById[`${g.groupId}${REP_SEP}${rep.replicateId}`])
+        .filter(f => f?.ku != null && f.simT?.length > 0)
+      if (!repFits.length) continue
+
+      // Average simulated curves on a shared time grid.
+      const tMax = Math.max(...repFits.map(f => Math.max(...f.simT)))
+      const simT = Array.from({ length: 100 }, (_, i) => (i / 99) * tMax)
+      const allY = repFits.map(f => interpLinear(f.simT, f.simY, simT))
+      const simY = simT.map((_, i) => allY.reduce((s, y) => s + y[i], 0) / allY.length)
+
+      // Tooltip uses the lowest-cost replicate's parameters.
+      const bestFit = repFits.reduce((a, b) => ((a.cost ?? Infinity) < (b.cost ?? Infinity) ? a : b))
+      g.fit = { ...bestFit, simT, simY, replicateCount: repFits.length }
+    } else {
+      const f = fitsById[g.groupId]
+      if (f) g.fit = f
+    }
   }
 }
 

@@ -178,16 +178,38 @@
             </button>
           </div>
 
+          <!-- Wellplate picker — always visible so the user can link the plate before or after loading CSV -->
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; font-size:0.8rem;">
+            <label style="white-space:nowrap; font-weight:600;">Wellplate used:</label>
+            <select v-model="prLinkedPlateId" style="font-size:0.8rem; padding:3px 6px; flex:1; min-width:120px;">
+              <option :value="null">— none (positional fallback) —</option>
+              <option v-for="p in prAvailablePlates" :key="p.id" :value="p.id">{{ p.name }}</option>
+            </select>
+            <span v-if="prLinkedPlateId" style="color:var(--success-color,#10b981); white-space:nowrap;">
+              <i class="fas fa-link"></i> {{ prMappedWellCount }} wells mapped
+            </span>
+          </div>
+
           <template v-if="prODMap">
-            <!-- Mapping controls -->
+            <!-- Show/filter control -->
             <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; font-size:0.8rem;">
-              <label>Map to:</label>
-              <select v-model="prMapSource" style="font-size:0.8rem; padding:3px 6px;">
-                <option value="untested">Untested experiments (phase = –1)</option>
-                <option value="all">All experiments (overwrite phase)</option>
-              </select>
-              <label>Starting well:</label>
-              <input type="text" v-model="prStartWell" maxlength="3" style="width:46px; font-size:0.8rem; padding:3px 6px; text-transform:uppercase;" placeholder="A1" />
+              <template v-if="!prLinkedPlateId">
+                <label>Map to:</label>
+                <select v-model="prMapSource" style="font-size:0.8rem; padding:3px 6px;">
+                  <option value="untested">Untested (phase = –1)</option>
+                  <option value="all">All experiments</option>
+                </select>
+                <label>Starting well:</label>
+                <input type="text" v-model="prStartWell" maxlength="3" style="width:46px; font-size:0.8rem; padding:3px 6px; text-transform:uppercase;" placeholder="A1" />
+              </template>
+              <template v-else>
+                <label>Show:</label>
+                <select v-model="prMapSource" style="font-size:0.8rem; padding:3px 6px;">
+                  <option value="untested">Untested wells only</option>
+                  <option value="all">All matched wells</option>
+                </select>
+                <span style="opacity:0.6; font-size:0.75rem;">Well positions taken directly from the linked plate.</span>
+              </template>
             </div>
 
             <!-- OD → Phase legend -->
@@ -224,9 +246,9 @@
             </div>
           </template>
 
-          <p v-else style="font-size:0.75rem; opacity:0.6; margin:4px 0 0;">
-            Import a plate-reader CSV (semicolon- or comma-delimited, wells A1–H12, time as HH:MM:SS).
-            The highest OD reading in the first 5 minutes per well is used for phase classification.
+          <p v-if="!prODMap" style="font-size:0.75rem; opacity:0.6; margin:4px 0 0;">
+            Select the wellplate that was used for the experiment, then load the plate-reader CSV.
+            Each well in the CSV is matched directly to the sample that was pipetted into that well.
           </p>
         </div>
       </div>
@@ -890,9 +912,41 @@ const OD_THRESHOLDS = [
 ]
 
 const prInputRef = ref(null)
-const prODMap    = ref(null)
+const prODMap     = ref(null)
 const prMapSource = ref('untested')
 const prStartWell = ref('A1')
+const prLinkedPlateId = ref(null)
+
+// All plates available for linking (workspace + cloud, deduplicated).
+const prAvailablePlates = computed(() => {
+  const all = [...(store.wellPlates || []), ...(store.cloudPlates || [])]
+  const seen = new Set()
+  return all.filter(p => { if (seen.has(p.id)) return false; seen.add(p.id); return true })
+})
+
+const prLinkedPlate = computed(() =>
+  prAvailablePlates.value.find(p => p.id === prLinkedPlateId.value) || null
+)
+
+// Parse each well's HTML to find the sampleId embedded as [NNNN] by exportSuggestionsToPlate.
+const prWellToSampleId = computed(() => {
+  if (!prLinkedPlate.value) return {}
+  const map = {}
+  for (const [wellId, html] of Object.entries(prLinkedPlate.value.wells || {})) {
+    if (!html) continue
+    const m = html.match(/\[(\d+)\]/)
+    if (m) map[wellId] = parseInt(m[1])
+  }
+  return map
+})
+
+const prMappedWellCount = computed(() => Object.keys(prWellToSampleId.value).length)
+
+const prSampleIdToExp = computed(() => {
+  const map = {}
+  for (const exp of experiments.value) map[String(exp.sampleId)] = exp
+  return map
+})
 
 function odToPhase(od) {
   for (const t of OD_THRESHOLDS) { if (od < t.max) return t.phase }
@@ -937,6 +991,25 @@ const onPlatereaderCsvSelected = async (event) => {
 
 const prPreviewItems = computed(() => {
   if (!prODMap.value) return []
+
+  // ── Plate-based mapping (preferred): well position in CSV = well in the linked plate ──
+  if (prLinkedPlate.value) {
+    const wellToSid = prWellToSampleId.value
+    const sidToExp  = prSampleIdToExp.value
+    return Object.entries(prODMap.value)
+      .map(([wellId, od]) => {
+        const sampleId = wellToSid[wellId]
+        if (!sampleId) return null
+        const exp = sidToExp[String(sampleId)]
+        if (!exp) return null
+        if (prMapSource.value === 'untested' && exp.phase !== -1) return null
+        return { wellId, exp, od, newPhase: odToPhase(od) }
+      })
+      .filter(Boolean)
+      .sort((a, b) => ALL_WELLS_96.indexOf(a.wellId) - ALL_WELLS_96.indexOf(b.wellId))
+  }
+
+  // ── Positional fallback (no plate linked) ──
   const sw = (prStartWell.value || 'A1').toUpperCase().trim()
   const m = sw.match(/^([A-H])(\d{1,2})$/)
   if (!m) return []

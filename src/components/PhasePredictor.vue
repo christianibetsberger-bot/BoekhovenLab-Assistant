@@ -165,20 +165,63 @@
         <div class="internal-section">
           <h3><i class="fas fa-microscope" style="font-size:0.85rem; opacity:0.65;"></i> Platereader Import</h3>
 
-          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
-            <button class="small" @click="prInputRef.click()">
-              <i class="fas fa-upload"></i> Load Platereader CSV
-            </button>
-            <input type="file" ref="prInputRef" accept=".csv,.CSV,.txt" style="display:none" @change="onPlatereaderCsvSelected" />
-            <span v-if="prODMap" style="font-size:0.75rem; color:var(--success-color,#10b981);">
-              <i class="fas fa-check-circle"></i> {{ Object.keys(prODMap).length }} wells · max OD in first 5 min
-            </span>
-            <button v-if="prODMap" class="small danger-btn" @click="prODMap = null" style="padding:2px 8px;">
-              <i class="fas fa-times"></i>
+          <!-- Row 1: instrument + file + wellplate -->
+          <div style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+            <select v-model="prReaderType" style="font-size:0.8rem; padding:4px 8px; font-weight:600; white-space:nowrap;" title="Select which plate reader was used">
+              <option value="reader2">Platereader 2</option>
+              <option value="reader1" disabled>Platereader 1 (template pending)</option>
+            </select>
+            <div style="display:flex; gap:6px; align-items:center; min-width:0;">
+              <button class="small" @click="prInputRef.click()"><i class="fas fa-upload"></i> Load CSV</button>
+              <input type="file" ref="prInputRef" accept=".csv,.CSV,.txt" style="display:none" @change="onPlatereaderCsvSelected" />
+              <span v-if="prODMap" style="font-size:0.75rem; color:var(--success-color,#10b981); white-space:nowrap;">
+                <i class="fas fa-check-circle"></i> {{ Object.keys(prODMap).length }} wells loaded
+              </span>
+              <button v-if="prODMap" class="small danger-btn" @click="prODMap = null" style="padding:2px 8px;"><i class="fas fa-times"></i></button>
+            </div>
+            <button class="small" @click="prShowSettings = !prShowSettings" :style="prShowSettings ? 'background:var(--primary);color:#fff;' : ''" style="white-space:nowrap; padding:4px 8px;">
+              <i class="fas fa-sliders"></i> Settings
             </button>
           </div>
 
-          <!-- Wellplate picker — always visible so the user can link the plate before or after loading CSV -->
+          <!-- Settings panel -->
+          <div v-if="prShowSettings" style="border:1px solid var(--border-color,#e2e8f0); border-radius:6px; padding:10px; margin-bottom:8px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
+            <div style="font-weight:700; font-size:0.75rem; text-transform:uppercase; letter-spacing:.4px; opacity:.7;">OD → Phase Thresholds</div>
+            <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px;">
+              <div class="input-group" style="margin:0;">
+                <label style="font-size:0.7rem;">Clear / Ph 1</label>
+                <input type="number" step="0.01" min="0" max="1" v-model.number="prPhaseBoundaries.phase0max" style="padding:3px 5px; font-size:0.8rem;" />
+              </div>
+              <div class="input-group" style="margin:0;">
+                <label style="font-size:0.7rem;">Ph 1 / Ph 2</label>
+                <input type="number" step="0.01" min="0" max="2" v-model.number="prPhaseBoundaries.phase1max" style="padding:3px 5px; font-size:0.8rem;" />
+              </div>
+              <div class="input-group" style="margin:0;">
+                <label style="font-size:0.7rem;">Ph 2 / Ph 3</label>
+                <input type="number" step="0.01" min="0" max="2" v-model.number="prPhaseBoundaries.phase2max" style="padding:3px 5px; font-size:0.8rem;" />
+              </div>
+              <div class="input-group" style="margin:0;">
+                <label style="font-size:0.7rem;">Ph 3 / Ph 4</label>
+                <input type="number" step="0.01" min="0" max="5" v-model.number="prPhaseBoundaries.phase3max" style="padding:3px 5px; font-size:0.8rem;" />
+              </div>
+            </div>
+            <div style="font-weight:700; font-size:0.75rem; text-transform:uppercase; letter-spacing:.4px; opacity:.7; margin-top:4px;">Dissolution Detection</div>
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+              <label class="checkbox-label" style="font-size:0.8rem;">
+                <input type="checkbox" v-model="prDissolutionEnabled" /> Enable
+              </label>
+              <template v-if="prDissolutionEnabled">
+                <div class="input-group" style="margin:0; display:flex; align-items:center; gap:6px;">
+                  <label style="font-size:0.75rem; white-space:nowrap;">OD drops below</label>
+                  <input type="number" step="0.01" min="0" max="2" v-model.number="prDissolutionThreshold" style="width:64px; padding:3px 5px; font-size:0.8rem;" />
+                  <span style="opacity:.6; font-size:0.75rem;">→ classified as Clear (dissolved)</span>
+                </div>
+              </template>
+              <span v-else style="opacity:.55; font-size:0.75rem;">If OD drops below a threshold after peaking, classify the well as Clear (dissolved droplets).</span>
+            </div>
+          </div>
+
+          <!-- Wellplate picker -->
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; font-size:0.8rem;">
             <label style="white-space:nowrap; font-weight:600;">Wellplate used:</label>
             <select v-model="prLinkedPlateId" style="font-size:0.8rem; padding:3px 6px; flex:1; min-width:120px;">
@@ -211,11 +254,14 @@
               </template>
             </div>
 
-            <!-- OD → Phase legend -->
+            <!-- OD → Phase legend (live thresholds) -->
             <div style="display:flex; gap:6px; flex-wrap:wrap; font-size:0.7rem; margin-bottom:8px; padding:5px 8px; background:var(--summary-bg,#f1f5f9); border-radius:4px;">
-              <span v-for="t in OD_THRESHOLDS" :key="t.phase" style="display:flex; align-items:center; gap:3px;">
+              <span v-for="t in OD_THRESHOLDS_DISPLAY" :key="t.phase" style="display:flex; align-items:center; gap:3px;">
                 <span :style="{ display:'inline-block', width:'10px', height:'10px', borderRadius:'2px', background: getPhaseColor(t.phase, 0.35), border:`1px solid ${getPhaseColor(t.phase,1)}` }"></span>
                 {{ t.label }}: {{ t.range }}
+              </span>
+              <span v-if="prDissolutionEnabled" style="display:flex; align-items:center; gap:3px; opacity:.75;">
+                <i class="fas fa-arrow-down" style="font-size:0.65rem;"></i> Dissolved if OD&nbsp;≤&nbsp;{{ prDissolutionThreshold }} after peak
               </span>
             </div>
 
@@ -903,6 +949,7 @@ const ALL_WELLS_96 = (() => {
   return rows.flatMap(r => [1,2,3,4,5,6,7,8,9,10,11,12].map(c => `${r}${c}`))
 })()
 
+// OD_THRESHOLDS kept for backward compat references; display version is OD_THRESHOLDS_DISPLAY (computed).
 const OD_THRESHOLDS = [
   { phase: 0, label: 'Clear',   range: '0 – 0.15',   max: 0.15 },
   { phase: 1, label: 'Phase 1', range: '0.15 – 0.3',  max: 0.30 },
@@ -911,11 +958,26 @@ const OD_THRESHOLDS = [
   { phase: 4, label: 'Phase 4', range: '> 0.9',        max: Infinity },
 ]
 
-const prInputRef = ref(null)
+const prInputRef  = ref(null)
 const prODMap     = ref(null)
 const prMapSource = ref('untested')
 const prStartWell = ref('A1')
-const prLinkedPlateId = ref(null)
+const prLinkedPlateId  = ref(null)
+const prReaderType     = ref('reader2')
+const prShowSettings   = ref(false)
+const prDissolutionEnabled   = ref(false)
+const prDissolutionThreshold = ref(0.10)
+
+// Configurable OD-to-phase boundaries (upper limit of each phase).
+const prPhaseBoundaries = reactive({ phase0max: 0.15, phase1max: 0.30, phase2max: 0.60, phase3max: 0.90 })
+
+const OD_THRESHOLDS_DISPLAY = computed(() => [
+  { phase: 0, label: 'Clear',   range: `0 – ${prPhaseBoundaries.phase0max}` },
+  { phase: 1, label: 'Phase 1', range: `${prPhaseBoundaries.phase0max} – ${prPhaseBoundaries.phase1max}` },
+  { phase: 2, label: 'Phase 2', range: `${prPhaseBoundaries.phase1max} – ${prPhaseBoundaries.phase2max}` },
+  { phase: 3, label: 'Phase 3', range: `${prPhaseBoundaries.phase2max} – ${prPhaseBoundaries.phase3max}` },
+  { phase: 4, label: 'Phase 4', range: `> ${prPhaseBoundaries.phase3max}` },
+])
 
 // All plates available for linking (workspace + cloud, deduplicated).
 const prAvailablePlates = computed(() => {
@@ -955,37 +1017,65 @@ const prSampleIdToExp = computed(() => {
   return map
 })
 
-function odToPhase(od) {
-  for (const t of OD_THRESHOLDS) { if (od < t.max) return t.phase }
+// Classify an OD reading using the current reactive boundaries + dissolution check.
+// maxOD = peak OD (first 5 min); minAfterPeak = minimum OD recorded after the peak time.
+function odToPhase(maxOD, minAfterPeak = Infinity) {
+  // Dissolution: if OD later dropped below the threshold, classify as Clear regardless of peak.
+  if (prDissolutionEnabled.value && minAfterPeak <= prDissolutionThreshold.value) return 0
+  const b = prPhaseBoundaries
+  if (maxOD < b.phase0max) return 0
+  if (maxOD < b.phase1max) return 1
+  if (maxOD < b.phase2max) return 2
+  if (maxOD < b.phase3max) return 3
   return 4
 }
 
-function parsePlatereaderCsv(text) {
+function parsePlatereaderReader2(text) {
+  // Format: semicolon-delimited, col 0 = HH:MM:SS time, col 1 = temperature, cols 2+ = A1..H12
   const lines = text.split(/\r?\n/).filter(l => l.trim())
   if (lines.length < 2) return null
   const delim = lines[0].includes(';') ? ';' : ','
-  // Strip non-ASCII (handles UTF-8 BOM and encoding artefacts like Â°)
   const rawHeaders = lines[0].split(delim).map(h => h.replace(/[^\x20-\x7E]/g, '').trim())
   const wellColIdx = {}
   rawHeaders.forEach((h, i) => { if (/^[A-H]\d{1,2}$/.test(h)) wellColIdx[h] = i })
   if (!Object.keys(wellColIdx).length) return null
 
-  const wellData = {}
+  // Parse full time series — need both first-5-min window (maxOD) and full course (dissolution).
+  const series = {}   // wellId → [{time, od}]
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(delim)
     const parts = (cols[0] || '').trim().split(':')
     const timeMin = parts.length >= 2
       ? parseInt(parts[0] || 0) * 60 + parseInt(parts[1] || 0) + (parseInt(parts[2] || 0) / 60)
       : NaN
-    if (isNaN(timeMin) || timeMin > 5.0) continue
+    if (isNaN(timeMin)) continue
     for (const [wId, cIdx] of Object.entries(wellColIdx)) {
       const od = parseFloat(cols[cIdx])
-      if (!isNaN(od)) { if (!wellData[wId]) wellData[wId] = []; wellData[wId].push(od) }
+      if (!isNaN(od)) { if (!series[wId]) series[wId] = []; series[wId].push({ time: timeMin, od }) }
     }
   }
-  const maxOD = {}
-  for (const [wId, vals] of Object.entries(wellData)) { if (vals.length) maxOD[wId] = Math.max(...vals) }
-  return Object.keys(maxOD).length ? maxOD : null
+
+  const result = {}
+  for (const [wId, pts] of Object.entries(series)) {
+    if (!pts.length) continue
+    pts.sort((a, b) => a.time - b.time)
+    // maxOD from the first 5 minutes.
+    const first5 = pts.filter(p => p.time <= 5.0)
+    const maxOD = first5.length ? Math.max(...first5.map(p => p.od)) : Math.max(...pts.map(p => p.od))
+    // minAfterPeak from the full time course (any point after the time of peak OD).
+    const peakTime = pts.find(p => p.od === maxOD)?.time ?? 0
+    const afterPeak = pts.filter(p => p.time > peakTime)
+    const minAfterPeak = afterPeak.length ? Math.min(...afterPeak.map(p => p.od)) : Infinity
+    result[wId] = { maxOD, minAfterPeak }
+  }
+  return Object.keys(result).length ? result : null
+}
+
+function parsePlatereaderCsv(text) {
+  if (prReaderType.value === 'reader2') return parsePlatereaderReader2(text)
+  // reader1 parser will be added when the template is provided.
+  alert('Platereader 1 format is not yet configured.')
+  return null
 }
 
 const onPlatereaderCsvSelected = async (event) => {
@@ -999,18 +1089,20 @@ const onPlatereaderCsvSelected = async (event) => {
 const prPreviewItems = computed(() => {
   if (!prODMap.value) return []
 
+  const getOD = wellId => prODMap.value[wellId]   // returns {maxOD, minAfterPeak} or undefined
+
   // ── Plate-based mapping: concentrations come from wellplate HTML, OD from CSV ──
   if (prLinkedPlate.value) {
-    const wellData  = prWellData.value
-    const sidToExp  = prSampleIdToExp.value
+    const wellData = prWellData.value
+    const sidToExp = prSampleIdToExp.value
     return Object.entries(prODMap.value)
-      .map(([wellId, od]) => {
+      .map(([wellId, odData]) => {
         const wd = wellData[wellId]
-        if (!wd) return null                         // well has no parsed sampleId/conc
-        const exp = sidToExp[String(wd.sampleId)]   // may be undefined if not yet logged
-        // In "untested" mode skip wells whose existing experiment is already classified.
+        if (!wd) return null
+        const exp = sidToExp[String(wd.sampleId)]
         if (prMapSource.value === 'untested' && exp && exp.phase !== -1) return null
-        return { wellId, wd, exp: exp || null, od, newPhase: odToPhase(od) }
+        const newPhase = odToPhase(odData.maxOD, odData.minAfterPeak)
+        return { wellId, wd, exp: exp || null, odData, newPhase }
       })
       .filter(Boolean)
       .sort((a, b) => ALL_WELLS_96.indexOf(a.wellId) - ALL_WELLS_96.indexOf(b.wellId))
@@ -1029,8 +1121,9 @@ const prPreviewItems = computed(() => {
     const idx = startOffset + i
     if (idx >= 96) return null
     const wellId = ALL_WELLS_96[idx]
-    const od = prODMap.value[wellId]
-    return od !== undefined ? { wellId, exp, od, newPhase: odToPhase(od) } : null
+    const odData = getOD(wellId)
+    if (!odData) return null
+    return { wellId, exp, odData, newPhase: odToPhase(odData.maxOD, odData.minAfterPeak) }
   }).filter(Boolean)
 })
 
@@ -1050,11 +1143,12 @@ const prWellTooltip = (row, col) => {
   if (!item) return `${row}${col} — no data`
   const name = item.newPhase === 0 ? 'Clear' : `Phase ${item.newPhase}`
   const sid = item.wd?.sampleId ?? item.exp?.sampleId ?? '?'
-  const conc = item.wd
-    ? `A: ${item.wd.anion} · B: ${item.wd.cation} · C: ${item.wd.salt} mM`
-    : ''
+  const conc = item.wd ? `A: ${item.wd.anion} · B: ${item.wd.cation} · C: ${item.wd.salt} mM` : ''
   const status = item.exp ? (item.exp.phase === -1 ? 'untested' : `phase ${item.exp.phase}`) : 'new'
-  return `${row}${col} · Sample ${sid} (${status})\n${conc}\nOD = ${item.od.toFixed(4)}\n→ ${name}`
+  const od = item.odData
+  const dissolvedNote = (prDissolutionEnabled.value && od && od.minAfterPeak <= prDissolutionThreshold.value)
+    ? `\n⬇ Dissolved (min after peak: ${od.minAfterPeak.toFixed(4)})`  : ''
+  return `${row}${col} · Sample ${sid} (${status})\n${conc}\nMax OD = ${od?.maxOD?.toFixed(4) ?? '?'}${dissolvedNote}\n→ ${name}`
 }
 
 const prStatsText = computed(() => {
@@ -1078,7 +1172,7 @@ const importPlatereaderResults = async () => {
   let updated = 0, created = 0
 
   const toInsert = []
-  for (const { exp, wd, newPhase } of items) {
+  for (const { exp, wd, odData, newPhase } of items) {
     if (exp?.id) {
       // Experiment already in ledger — just update its phase.
       const { error } = await db.from('phase_data').update({ phase: newPhase }).eq('id', exp.id)

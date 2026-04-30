@@ -403,7 +403,7 @@ const exportAndrewPlus = (plate) => {
     }
 
     const baseProtocol = {
-        name: plate.name || "Exported Protocol", description: "Exported from BoekhovenLab Calculator",
+        name: plate.name || "Exported Protocol", description: "Exported from CTI Lab Assistant",
         params: { pipettingPolicy: "rbr", filterTips: false, safeTipOverfly: false }, errors: 0,
         steps: steps, labwares: labwares, reagents: reagents, samples: [], pipettingPolicy: "rbr", isDynamic: false, version: "1.2.0"
     };

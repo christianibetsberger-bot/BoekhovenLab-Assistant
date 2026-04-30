@@ -143,9 +143,9 @@ async function applyIcon(color) {
       // Rewrite manifest blob so the install-time icon matches the user's color.
       // Static PNGs are included as fallback so the dock always has a real PNG.
       const manifest = JSON.stringify({
-        name: 'BoekhovenLab Assistant',
+        name: 'Lab Assistant by CTI',
         short_name: 'Lab Assistant',
-        description: 'Integrated research toolkit for the Boekhoven Lab',
+        description: 'Integrated research toolkit by CTI',
         display: 'standalone',
         background_color: color,
         theme_color: color,

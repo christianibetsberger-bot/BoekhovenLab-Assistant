@@ -1,7 +1,7 @@
 {
-  "name": "BoekhovenLab Assistant",
+  "name": "Lab Assistant by CTI",
   "short_name": "Lab Assistant",
-  "description": "Integrated research toolkit for the Boekhoven Lab",
+  "description": "Integrated research toolkit by CTI",
   "display": "standalone",
   "background_color": "#0E396E",
   "theme_color": "#0E396E",

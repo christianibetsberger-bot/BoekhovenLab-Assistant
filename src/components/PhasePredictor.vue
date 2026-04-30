@@ -160,6 +160,75 @@
             <button class="small danger-btn" @click="clearLedger"><i class="fas fa-trash-alt"></i> Reset Memory</button>
           </div>
         </div>
+
+        <!-- ── Platereader Import ── -->
+        <div class="internal-section">
+          <h3><i class="fas fa-microscope" style="font-size:0.85rem; opacity:0.65;"></i> Platereader Import</h3>
+
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+            <button class="small" @click="prInputRef.click()">
+              <i class="fas fa-upload"></i> Load Platereader CSV
+            </button>
+            <input type="file" ref="prInputRef" accept=".csv,.CSV,.txt" style="display:none" @change="onPlatereaderCsvSelected" />
+            <span v-if="prODMap" style="font-size:0.75rem; color:var(--success-color,#10b981);">
+              <i class="fas fa-check-circle"></i> {{ Object.keys(prODMap).length }} wells · max OD in first 5 min
+            </span>
+            <button v-if="prODMap" class="small danger-btn" @click="prODMap = null" style="padding:2px 8px;">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+
+          <template v-if="prODMap">
+            <!-- Mapping controls -->
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; font-size:0.8rem;">
+              <label>Map to:</label>
+              <select v-model="prMapSource" style="font-size:0.8rem; padding:3px 6px;">
+                <option value="untested">Untested experiments (phase = –1)</option>
+                <option value="all">All experiments (overwrite phase)</option>
+              </select>
+              <label>Starting well:</label>
+              <input type="text" v-model="prStartWell" maxlength="3" style="width:46px; font-size:0.8rem; padding:3px 6px; text-transform:uppercase;" placeholder="A1" />
+            </div>
+
+            <!-- OD → Phase legend -->
+            <div style="display:flex; gap:6px; flex-wrap:wrap; font-size:0.7rem; margin-bottom:8px; padding:5px 8px; background:var(--summary-bg,#f1f5f9); border-radius:4px;">
+              <span v-for="t in OD_THRESHOLDS" :key="t.phase" style="display:flex; align-items:center; gap:3px;">
+                <span :style="{ display:'inline-block', width:'10px', height:'10px', borderRadius:'2px', background: getPhaseColor(t.phase, 0.35), border:`1px solid ${getPhaseColor(t.phase,1)}` }"></span>
+                {{ t.label }}: {{ t.range }}
+              </span>
+            </div>
+
+            <!-- 96-well preview grid -->
+            <div style="margin-bottom:8px; user-select:none;">
+              <div style="display:flex; margin-bottom:1px; padding-left:16px;">
+                <div v-for="c in 12" :key="c" style="flex:1; text-align:center; font-size:0.58rem; opacity:0.55; font-weight:600;">{{ c }}</div>
+              </div>
+              <div v-for="(row, rIdx) in plateRows" :key="row" style="display:flex; align-items:center; margin-bottom:1px;">
+                <div style="width:16px; font-size:0.6rem; font-weight:600; opacity:0.55; text-align:right; padding-right:3px;">{{ row }}</div>
+                <div style="display:flex; flex:1; gap:1px;">
+                  <div v-for="c in 12" :key="c"
+                    :style="prWellStyle(row, c)"
+                    :title="prWellTooltip(row, c)"
+                    style="flex:1; aspect-ratio:1; border-radius:50%; border-width:1px; border-style:solid; cursor:default; min-width:0;">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Stats + import button -->
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+              <span style="font-size:0.75rem; opacity:0.8;">{{ prStatsText }}</span>
+              <button class="small success-btn" @click="importPlatereaderResults" :disabled="!prPreviewItems.length">
+                <i class="fas fa-check"></i> Apply ({{ prPreviewItems.length }} wells)
+              </button>
+            </div>
+          </template>
+
+          <p v-else style="font-size:0.75rem; opacity:0.6; margin:4px 0 0;">
+            Import a plate-reader CSV (semicolon- or comma-delimited, wells A1–H12, time as HH:MM:SS).
+            The highest OD reading in the first 5 minutes per well is used for phase classification.
+          </p>
+        </div>
       </div>
 
       <div class="col-right">
@@ -805,6 +874,129 @@ const importAllSuggestions = async () => {
 }
 
 const csvInputRef = ref(null)
+
+// ─── Platereader Import ────────────────────────────────────────────────────
+const ALL_WELLS_96 = (() => {
+  const rows = ['A','B','C','D','E','F','G','H']
+  return rows.flatMap(r => [1,2,3,4,5,6,7,8,9,10,11,12].map(c => `${r}${c}`))
+})()
+
+const OD_THRESHOLDS = [
+  { phase: 0, label: 'Clear',   range: '0 – 0.15',   max: 0.15 },
+  { phase: 1, label: 'Phase 1', range: '0.15 – 0.3',  max: 0.30 },
+  { phase: 2, label: 'Phase 2', range: '0.3 – 0.6',   max: 0.60 },
+  { phase: 3, label: 'Phase 3', range: '0.6 – 0.9',   max: 0.90 },
+  { phase: 4, label: 'Phase 4', range: '> 0.9',        max: Infinity },
+]
+
+const prInputRef = ref(null)
+const prODMap    = ref(null)
+const prMapSource = ref('untested')
+const prStartWell = ref('A1')
+
+function odToPhase(od) {
+  for (const t of OD_THRESHOLDS) { if (od < t.max) return t.phase }
+  return 4
+}
+
+function parsePlatereaderCsv(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim())
+  if (lines.length < 2) return null
+  const delim = lines[0].includes(';') ? ';' : ','
+  // Strip non-ASCII (handles UTF-8 BOM and encoding artefacts like Â°)
+  const rawHeaders = lines[0].split(delim).map(h => h.replace(/[^\x20-\x7E]/g, '').trim())
+  const wellColIdx = {}
+  rawHeaders.forEach((h, i) => { if (/^[A-H]\d{1,2}$/.test(h)) wellColIdx[h] = i })
+  if (!Object.keys(wellColIdx).length) return null
+
+  const wellData = {}
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(delim)
+    const parts = (cols[0] || '').trim().split(':')
+    const timeMin = parts.length >= 2
+      ? parseInt(parts[0] || 0) * 60 + parseInt(parts[1] || 0) + (parseInt(parts[2] || 0) / 60)
+      : NaN
+    if (isNaN(timeMin) || timeMin > 5.0) continue
+    for (const [wId, cIdx] of Object.entries(wellColIdx)) {
+      const od = parseFloat(cols[cIdx])
+      if (!isNaN(od)) { if (!wellData[wId]) wellData[wId] = []; wellData[wId].push(od) }
+    }
+  }
+  const maxOD = {}
+  for (const [wId, vals] of Object.entries(wellData)) { if (vals.length) maxOD[wId] = Math.max(...vals) }
+  return Object.keys(maxOD).length ? maxOD : null
+}
+
+const onPlatereaderCsvSelected = async (event) => {
+  const file = event.target.files[0]; event.target.value = ''
+  if (!file) return
+  const result = parsePlatereaderCsv(await file.text())
+  if (!result) { alert('Could not parse platereader CSV. Expected semicolon- or comma-delimited file with well columns (A1–H12) and time in HH:MM:SS format.'); return }
+  prODMap.value = result
+}
+
+const prPreviewItems = computed(() => {
+  if (!prODMap.value) return []
+  const sw = (prStartWell.value || 'A1').toUpperCase().trim()
+  const m = sw.match(/^([A-H])(\d{1,2})$/)
+  if (!m) return []
+  const startOffset = (m[1].charCodeAt(0) - 65) * 12 + (parseInt(m[2]) - 1)
+  const src = prMapSource.value === 'untested'
+    ? experiments.value.filter(e => e.phase === -1)
+    : [...experiments.value]
+  src.sort((a, b) => Number(a.sampleId) - Number(b.sampleId))
+  return src.map((exp, i) => {
+    const idx = startOffset + i
+    if (idx >= 96) return null
+    const wellId = ALL_WELLS_96[idx]
+    const od = prODMap.value[wellId]
+    return od !== undefined ? { wellId, exp, od, newPhase: odToPhase(od) } : null
+  }).filter(Boolean)
+})
+
+const prWellLookup = computed(() => {
+  const map = {}; for (const item of prPreviewItems.value) map[item.wellId] = item; return map
+})
+
+const prWellStyle = (row, col) => {
+  const item = prWellLookup.value[`${row}${col}`]
+  return item
+    ? { background: getPhaseColor(item.newPhase, 0.4), borderColor: getPhaseColor(item.newPhase, 1) }
+    : { background: 'transparent', borderColor: 'var(--border-color,#e2e8f0)' }
+}
+
+const prWellTooltip = (row, col) => {
+  const item = prWellLookup.value[`${row}${col}`]
+  if (!item) return `${row}${col} — no data`
+  const name = item.newPhase === 0 ? 'Clear' : `Phase ${item.newPhase}`
+  return `${row}${col} · Sample ${item.exp.sampleId}\nOD = ${item.od.toFixed(4)}\n→ ${name}`
+}
+
+const prStatsText = computed(() => {
+  const items = prPreviewItems.value
+  if (!items.length) return 'No matching experiments at this plate position.'
+  const counts = {}
+  for (const { newPhase } of items) {
+    const n = newPhase === 0 ? 'Clear' : `Phase ${newPhase}`
+    counts[n] = (counts[n] || 0) + 1
+  }
+  return Object.entries(counts).map(([n, c]) => `${c}× ${n}`).join(' · ')
+})
+
+const importPlatereaderResults = async () => {
+  const items = prPreviewItems.value
+  if (!items.length) return
+  let ok = 0
+  for (const { exp, newPhase } of items) {
+    if (!exp.id) continue
+    const { error } = await db.from('phase_data').update({ phase: newPhase }).eq('id', exp.id)
+    if (!error) ok++
+  }
+  await fetchExperiments(); renderPlot()
+  prODMap.value = null
+  alert(`Platereader import complete: ${ok} experiments classified.`)
+}
+// ──────────────────────────────────────────────────────────────────────────
 
 const onCsvFileSelected = async (event) => {
   const file = event.target.files[0];

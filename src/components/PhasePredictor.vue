@@ -203,12 +203,11 @@
                 <input type="text" v-model="prStartWell" maxlength="3" style="width:46px; font-size:0.8rem; padding:3px 6px; text-transform:uppercase;" placeholder="A1" />
               </template>
               <template v-else>
-                <label>Show:</label>
+                <label>Import:</label>
                 <select v-model="prMapSource" style="font-size:0.8rem; padding:3px 6px;">
-                  <option value="untested">Untested wells only</option>
-                  <option value="all">All matched wells</option>
+                  <option value="untested">New + untested wells (skip already-classified)</option>
+                  <option value="all">All matched wells (overwrite existing phase)</option>
                 </select>
-                <span style="opacity:0.6; font-size:0.75rem;">Well positions taken directly from the linked plate.</span>
               </template>
             </div>
 
@@ -247,8 +246,9 @@
           </template>
 
           <p v-if="!prODMap" style="font-size:0.75rem; opacity:0.6; margin:4px 0 0;">
-            Select the wellplate that was used for the experiment, then load the plate-reader CSV.
-            Each well in the CSV is matched directly to the sample that was pipetted into that well.
+            Select the wellplate that was used, then load the plate-reader CSV.
+            Concentrations are read directly from each well cell; OD determines the phase.
+            Works even if the AI suggestions were never logged to the active learning.
           </p>
         </div>
       </div>
@@ -928,19 +928,26 @@ const prLinkedPlate = computed(() =>
   prAvailablePlates.value.find(p => p.id === prLinkedPlateId.value) || null
 )
 
-// Parse each well's HTML to find the sampleId embedded as [NNNN] by exportSuggestionsToPlate.
-const prWellToSampleId = computed(() => {
+// Parse each well's HTML for sampleId AND concentrations written by exportSuggestionsToPlate.
+// Format per well: "AI Target [9001]" … "5.50 µL (5.5 mM)" × 3 compounds
+const prWellData = computed(() => {
   if (!prLinkedPlate.value) return {}
   const map = {}
   for (const [wellId, html] of Object.entries(prLinkedPlate.value.wells || {})) {
     if (!html) continue
-    const m = html.match(/\[(\d+)\]/)
-    if (m) map[wellId] = parseInt(m[1])
+    const sidMatch = html.match(/\[(\d+)\]/)
+    if (!sidMatch) continue
+    const sampleId = parseInt(sidMatch[1])
+    // Match "X.XX µL (Y.YY mM)" — the target concentration after each inv-ref span.
+    const concMatches = [...html.matchAll(/[\d.]+\s*µL\s*\(([\d.]+)\s*mM\)/g)]
+    if (concMatches.length < 3) continue
+    const [anion, cation, salt] = concMatches.slice(0, 3).map(m => parseFloat(m[1]))
+    map[wellId] = { sampleId, anion, cation, salt }
   }
   return map
 })
 
-const prMappedWellCount = computed(() => Object.keys(prWellToSampleId.value).length)
+const prMappedWellCount = computed(() => Object.keys(prWellData.value).length)
 
 const prSampleIdToExp = computed(() => {
   const map = {}
@@ -992,18 +999,18 @@ const onPlatereaderCsvSelected = async (event) => {
 const prPreviewItems = computed(() => {
   if (!prODMap.value) return []
 
-  // ── Plate-based mapping (preferred): well position in CSV = well in the linked plate ──
+  // ── Plate-based mapping: concentrations come from wellplate HTML, OD from CSV ──
   if (prLinkedPlate.value) {
-    const wellToSid = prWellToSampleId.value
+    const wellData  = prWellData.value
     const sidToExp  = prSampleIdToExp.value
     return Object.entries(prODMap.value)
       .map(([wellId, od]) => {
-        const sampleId = wellToSid[wellId]
-        if (!sampleId) return null
-        const exp = sidToExp[String(sampleId)]
-        if (!exp) return null
-        if (prMapSource.value === 'untested' && exp.phase !== -1) return null
-        return { wellId, exp, od, newPhase: odToPhase(od) }
+        const wd = wellData[wellId]
+        if (!wd) return null                         // well has no parsed sampleId/conc
+        const exp = sidToExp[String(wd.sampleId)]   // may be undefined if not yet logged
+        // In "untested" mode skip wells whose existing experiment is already classified.
+        if (prMapSource.value === 'untested' && exp && exp.phase !== -1) return null
+        return { wellId, wd, exp: exp || null, od, newPhase: odToPhase(od) }
       })
       .filter(Boolean)
       .sort((a, b) => ALL_WELLS_96.indexOf(a.wellId) - ALL_WELLS_96.indexOf(b.wellId))
@@ -1042,32 +1049,62 @@ const prWellTooltip = (row, col) => {
   const item = prWellLookup.value[`${row}${col}`]
   if (!item) return `${row}${col} — no data`
   const name = item.newPhase === 0 ? 'Clear' : `Phase ${item.newPhase}`
-  return `${row}${col} · Sample ${item.exp.sampleId}\nOD = ${item.od.toFixed(4)}\n→ ${name}`
+  const sid = item.wd?.sampleId ?? item.exp?.sampleId ?? '?'
+  const conc = item.wd
+    ? `A: ${item.wd.anion} · B: ${item.wd.cation} · C: ${item.wd.salt} mM`
+    : ''
+  const status = item.exp ? (item.exp.phase === -1 ? 'untested' : `phase ${item.exp.phase}`) : 'new'
+  return `${row}${col} · Sample ${sid} (${status})\n${conc}\nOD = ${item.od.toFixed(4)}\n→ ${name}`
 }
 
 const prStatsText = computed(() => {
   const items = prPreviewItems.value
-  if (!items.length) return 'No matching experiments at this plate position.'
-  const counts = {}
+  if (!items.length) return 'No wells matched. Check the plate has AI Target cells.'
+  const newCount = items.filter(i => !i.exp).length
+  const updateCount = items.length - newCount
+  const phaseCounts = {}
   for (const { newPhase } of items) {
     const n = newPhase === 0 ? 'Clear' : `Phase ${newPhase}`
-    counts[n] = (counts[n] || 0) + 1
+    phaseCounts[n] = (phaseCounts[n] || 0) + 1
   }
-  return Object.entries(counts).map(([n, c]) => `${c}× ${n}`).join(' · ')
+  const phaseStr = Object.entries(phaseCounts).map(([n, c]) => `${c}× ${n}`).join(' · ')
+  const actionStr = [newCount && `${newCount} new`, updateCount && `${updateCount} update`].filter(Boolean).join(', ')
+  return `${phaseStr}  ·  ${actionStr}`
 })
 
 const importPlatereaderResults = async () => {
   const items = prPreviewItems.value
   if (!items.length) return
-  let ok = 0
-  for (const { exp, newPhase } of items) {
-    if (!exp.id) continue
-    const { error } = await db.from('phase_data').update({ phase: newPhase }).eq('id', exp.id)
-    if (!error) ok++
+  let updated = 0, created = 0
+
+  const toInsert = []
+  for (const { exp, wd, newPhase } of items) {
+    if (exp?.id) {
+      // Experiment already in ledger — just update its phase.
+      const { error } = await db.from('phase_data').update({ phase: newPhase }).eq('id', exp.id)
+      if (!error) updated++
+    } else if (wd) {
+      // Experiment was never logged — create it now from wellplate concentrations.
+      toInsert.push({
+        sampleId: wd.sampleId,
+        anion: wd.anion,
+        cation: wd.cation,
+        salt: wd.salt,
+        phase: newPhase,
+        owner_id: store.user?.id,
+      })
+    }
   }
+
+  if (toInsert.length) {
+    const { error } = await db.from('phase_data').insert(toInsert)
+    if (!error) created = toInsert.length
+  }
+
   await fetchExperiments(); renderPlot()
   prODMap.value = null
-  alert(`Platereader import complete: ${ok} experiments classified.`)
+  const msg = [updated && `${updated} updated`, created && `${created} created`].filter(Boolean).join(', ')
+  alert(`Platereader import complete: ${msg}.`)
 }
 // ──────────────────────────────────────────────────────────────────────────
 

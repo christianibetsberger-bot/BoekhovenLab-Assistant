@@ -200,6 +200,7 @@
                   <th>Mg²⁺</th>
                   <th>Env</th>
                   <th>Pts</th>
+                  <th>Rep</th>
                   <th>Max %</th>
                   <th>Fit</th>
                   <th></th>
@@ -215,10 +216,15 @@
                   <td>{{ formatNum(g.conditions.mg2) }}</td>
                   <td class="env-cell" :title="g.conditions.env">{{ g.conditions.env || '—' }}</td>
                   <td>{{ g.timeCourse.length }}</td>
+                  <td>
+                    <span v-if="g.replicates?.length > 1" style="font-weight:600; color:var(--primary);">{{ g.replicates.length }}</span>
+                    <span v-else style="opacity:0.35;">—</span>
+                  </td>
                   <td><strong>{{ formatNum(g.maxConversion) }}</strong></td>
                   <td>
                     <span v-if="g.fit && g.fit.ku != null" :title="fitTooltip(g.fit)">
                       <i class="fas fa-check" style="color:var(--success);"></i>
+                      <span v-if="g.fit.replicateCount > 1" style="font-size:0.7rem; opacity:0.7; margin-left:2px;">n={{ g.fit.replicateCount }}</span>
                     </span>
                     <span v-else style="opacity:0.4;">—</span>
                   </td>
@@ -229,7 +235,7 @@
                   </td>
                 </tr>
                 <tr v-if="!dataset.experiments.length">
-                  <td colspan="11" style="text-align:center; opacity:0.5; padding:20px;">
+                  <td colspan="12" style="text-align:center; opacity:0.5; padding:20px;">
                     No experiments yet. Download the template, fill it, and import.
                   </td>
                 </tr>
@@ -435,14 +441,19 @@ function sci(n, p = 3) {
 
 function fitTooltip(fit) {
   if (!fit) return ''
-  const parts = [
-    `model: ${fit.model || '—'}`,
-    `ku = ${sci(fit.ku)}`,
-    `k1 = ${sci(fit.k1)}`,
-    `k2 = ${sci(fit.k2)}`,
-    `kr = ${sci(fit.kr)}`,
-    `k_bg = ${sci(fit.k_bg)}`,
-  ]
+  const parts = [`model: ${fit.model || '—'}`]
+  const showParam = (p, label) => {
+    const val = fit[p]
+    const std = fit[`${p}_std`]
+    if (val == null) return
+    parts.push(std != null && std > 0 ? `${label} = ${sci(val)} ± ${sci(std)}` : `${label} = ${sci(val)}`)
+  }
+  showParam('ku', 'ku')
+  showParam('k1', 'k1')
+  showParam('k2', 'k2')
+  showParam('kr', 'kr')
+  showParam('k_bg', 'k_bg')
+  if (fit.replicateCount > 1) parts.push(`replicates: ${fit.replicateCount}`)
   if (fit.limit_uM != null) parts.push(`limit = ${fit.limit_uM} µM`)
   if (fit.seed_uM != null && fit.seed_uM > 0) parts.push(`seed = ${sci(fit.seed_uM)} µM`)
   return parts.join('\n')
@@ -471,19 +482,24 @@ function removeGroup(i) {
 
 // ════════════════ CSV ════════════════
 
-const TEMPLATE_HEADER = ['DNA-Sequence', 'Time', 'Conversion', 'T4-Ligase', 'ATP', 'Temperature', 'Environment', 'Mg2+']
+const TEMPLATE_HEADER = ['DNA-Sequence', 'Time', 'Conversion', 'T4-Ligase', 'ATP', 'Temperature', 'Environment', 'Mg2+', 'Replicate']
 
 function downloadTemplate() {
   const rows = [
     TEMPLATE_HEADER.join(','),
-    'GATCAGCTGATCAG,0,0,1,1,30,none,5',
-    'GATCAGCTGATCAG,30,15,1,1,30,none,5',
-    'GATCAGCTGATCAG,60,42,1,1,30,none,5',
-    'GATCAGCTGATCAG,90,68,1,1,30,none,5',
-    'GATCAGCTGATCAG,120,82,1,1,30,none,5',
-    'TTACCGTACCGTAC,0,0,2,2,37,synthetic_cells,10',
-    'TTACCGTACCGTAC,30,8,2,2,37,synthetic_cells,10',
-    'TTACCGTACCGTAC,60,22,2,2,37,synthetic_cells,10',
+    'GATCAGCTGATCAG,0,0,1,1,30,none,5,1',
+    'GATCAGCTGATCAG,30,15,1,1,30,none,5,1',
+    'GATCAGCTGATCAG,60,42,1,1,30,none,5,1',
+    'GATCAGCTGATCAG,90,68,1,1,30,none,5,1',
+    'GATCAGCTGATCAG,120,82,1,1,30,none,5,1',
+    'GATCAGCTGATCAG,0,0,1,1,30,none,5,2',
+    'GATCAGCTGATCAG,30,18,1,1,30,none,5,2',
+    'GATCAGCTGATCAG,60,39,1,1,30,none,5,2',
+    'GATCAGCTGATCAG,90,71,1,1,30,none,5,2',
+    'GATCAGCTGATCAG,120,79,1,1,30,none,5,2',
+    'TTACCGTACCGTAC,0,0,2,2,37,synthetic_cells,10,1',
+    'TTACCGTACCGTAC,30,8,2,2,37,synthetic_cells,10,1',
+    'TTACCGTACCGTAC,60,22,2,2,37,synthetic_cells,10,1',
   ]
   const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
@@ -532,6 +548,11 @@ const HEADER_ALIASES = {
   mg2: 'mg2',
   mgconcentration: 'mg2',
   magnesium: 'mg2',
+  replicate: 'replicate',
+  replicateid: 'replicate',
+  rep: 'replicate',
+  repid: 'replicate',
+  replicatenumber: 'replicate',
 }
 
 function onCsvFileSelected(e) {
@@ -565,6 +586,7 @@ function parseCsv(text) {
     return
   }
 
+  const hasReplCol = headerKeys.includes('replicate')
   const idx = name => headerKeys.indexOf(name)
   const rows = []
   let badRows = 0
@@ -581,6 +603,7 @@ function parseCsv(text) {
       sequence: seq,
       time,
       conversion: conv,
+      replicateId: hasReplCol ? String(cols[idx('replicate')] || '1').trim() : null,
       conditions: {
         ligase: parseFloat(cols[idx('ligase')]) || 0,
         atp: parseFloat(cols[idx('atp')]) || 0,
@@ -593,7 +616,23 @@ function parseCsv(text) {
 
   if (!rows.length) { parseError.value = 'No valid rows found.'; return }
 
+  // Auto-detect replicates when no Replicate column: same (group, time) repeated = replicate.
+  if (!hasReplCol) {
+    const seenGroupTime = new Map()
+    for (const r of rows) {
+      const tk = `${groupKey(r.sequence, r.conditions)}|||${r.time}`
+      const n = (seenGroupTime.get(tk) || 0) + 1
+      seenGroupTime.set(tk, n)
+      r.replicateId = String(n)
+    }
+    const anyMultiple = rows.some(r => r.replicateId !== '1')
+    if (!anyMultiple) rows.forEach(r => { r.replicateId = '1' })
+  }
+
+  // Build per-group map, then per-replicate sub-map.
   const groupsByKey = new Map()
+  const repsByKey = new Map()   // baseKey → Map<replicateId, [{time, conversion}]>
+
   for (const r of rows) {
     const key = groupKey(r.sequence, r.conditions)
     if (!groupsByKey.has(key)) {
@@ -605,21 +644,37 @@ function parseCsv(text) {
         maxConversion: 0,
         fit: null,
       })
+      repsByKey.set(key, new Map())
     }
-    const g = groupsByKey.get(key)
-    g.timeCourse.push({ time: r.time, conversion: r.conversion })
+    groupsByKey.get(key).timeCourse.push({ time: r.time, conversion: r.conversion })
+    const repsMap = repsByKey.get(key)
+    if (!repsMap.has(r.replicateId)) repsMap.set(r.replicateId, [])
+    repsMap.get(r.replicateId).push({ time: r.time, conversion: r.conversion })
   }
 
   // Merge into existing dataset
   for (const [key, g] of groupsByKey) {
     g.timeCourse.sort((a, b) => a.time - b.time)
     g.maxConversion = Math.max(...g.timeCourse.map(p => p.conversion))
+
+    const repsMap = repsByKey.get(key)
+    if (repsMap.size > 1) {
+      g.replicates = [...repsMap.entries()]
+        .map(([repId, tc]) => ({
+          replicateId: repId,
+          timeCourse: tc.slice().sort((a, b) => a.time - b.time),
+        }))
+        .sort((a, b) => a.replicateId.localeCompare(b.replicateId, undefined, { numeric: true }))
+    }
+
     const existingIdx = dataset.experiments.findIndex(e => e.groupId === key)
     if (existingIdx >= 0) dataset.experiments[existingIdx] = g
     else dataset.experiments.push(g)
   }
 
+  const nRepGroups = [...groupsByKey.values()].filter(g => g.replicates?.length > 1).length
   parseStats.value = `Imported ${rows.length} rows into ${groupsByKey.size} group(s).`
+  if (nRepGroups > 0) parseStats.value += ` ${nRepGroups} group(s) detected with multiple replicates.`
   if (badRows > 0) parseStats.value += ` Skipped ${badRows} invalid row(s).`
 }
 
@@ -726,7 +781,10 @@ function renderCurves() {
     const gC = Math.round(120 + 120 * intensity)
     const b = Math.round(40 + 60 * (1 - intensity))
     const color = `rgb(${r},${gC},${b})`
-    const label = `${truncateSeq(g.sequence)} (T${formatNum(g.conditions.temperature)})`
+    const nRep = g.replicates?.length > 1 ? g.replicates.length : 0
+    const label = nRep > 0
+      ? `${truncateSeq(g.sequence)} (T${formatNum(g.conditions.temperature)}, n=${nRep})`
+      : `${truncateSeq(g.sequence)} (T${formatNum(g.conditions.temperature)})`
 
     // Raw timepoints (markers only when a fit curve exists, otherwise lines+markers).
     const hasFitCurve = g.fit && Array.isArray(g.fit.simT) && g.fit.simT.length > 0
@@ -805,6 +863,19 @@ function renderAll() {
   })
 }
 
+// ════════════════ Helpers ════════════════
+
+function interpLinear(t, y, tNew) {
+  return tNew.map(tq => {
+    if (tq <= t[0]) return y[0]
+    if (tq >= t[t.length - 1]) return y[y.length - 1]
+    let lo = 0, hi = t.length - 1
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (t[mid] <= tq) lo = mid; else hi = mid }
+    const frac = (tq - t[lo]) / (t[hi] - t[lo])
+    return y[lo] + frac * (y[hi] - y[lo])
+  })
+}
+
 // ════════════════ Backend calls ════════════════
 
 async function callBackend(url, body) {
@@ -828,18 +899,81 @@ async function callBackend(url, body) {
 
 async function fitKinetics() {
   isFitting.value = true
+
+  // Expand groups with replicates into separate backend entries.
+  const REP_SEP = '|||rep'
+  const flatExps = []
+  for (const g of dataset.experiments) {
+    if (g.replicates?.length > 1) {
+      for (const rep of g.replicates) {
+        flatExps.push({
+          groupId: `${g.groupId}${REP_SEP}${rep.replicateId}`,
+          sequence: g.sequence,
+          conditions: g.conditions,
+          timeCourse: rep.timeCourse,
+        })
+      }
+    } else {
+      flatExps.push(g)
+    }
+  }
+
   const result = await callBackend(ENDPOINTS.fit, {
-    experiments: dataset.experiments,
+    experiments: flatExps,
     limit_uM: dataset.kinetics.limit_uM,
     A0: dataset.kinetics.A0,
     B0: dataset.kinetics.B0,
   })
   isFitting.value = false
   if (!result) return
+
   const fitsById = Object.fromEntries((result.fits || []).map(f => [f.groupId, f]))
+
   for (const g of dataset.experiments) {
-    const f = fitsById[g.groupId]
-    if (f) g.fit = f
+    if (g.replicates?.length > 1) {
+      // Collect individual replicate fits.
+      const repFits = g.replicates
+        .map(rep => ({ replicateId: rep.replicateId, ...fitsById[`${g.groupId}${REP_SEP}${rep.replicateId}`] }))
+        .filter(f => f.ku != null)
+      if (!repFits.length) continue
+
+      // Average kinetic parameters.
+      const PARAMS = ['ku', 'k1', 'k2', 'kr', 'k_bg']
+      const means = {}
+      const paramStds = {}
+      for (const p of PARAMS) {
+        const vals = repFits.map(f => f[p]).filter(v => v != null && !isNaN(v))
+        if (!vals.length) { means[p] = null; continue }
+        means[p] = vals.reduce((a, b) => a + b, 0) / vals.length
+        const variance = vals.reduce((s, v) => s + (v - means[p]) ** 2, 0) / Math.max(1, vals.length)
+        paramStds[`${p}_std`] = Math.sqrt(variance)
+      }
+
+      // Average simulated curves: interpolate each replicate onto a common time grid.
+      const validFits = repFits.filter(f => f.simT?.length > 0)
+      let simT = null, simY = null
+      if (validFits.length > 0) {
+        const tMax = Math.max(...validFits.map(f => Math.max(...f.simT)))
+        simT = Array.from({ length: 100 }, (_, i) => (i / 99) * tMax)
+        const allY = validFits.map(f => interpLinear(f.simT, f.simY, simT))
+        simY = simT.map((_, i) => allY.reduce((s, y) => s + y[i], 0) / allY.length)
+      }
+
+      g.fit = {
+        ...means,
+        ...paramStds,
+        model: repFits[0]?.model,
+        limit_uM: repFits[0]?.limit_uM,
+        seed_uM: repFits[0]?.seed_uM,
+        replicateCount: repFits.length,
+        replicateFits: repFits,
+        simT,
+        simY,
+      }
+    } else {
+      const f = fitsById[g.groupId]
+      if (f) g.fit = f
+    }
   }
 }
 

@@ -440,7 +440,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import { db } from '../services/supabase'
 import { esc } from '../utils/htmlSafe'
 import { useLabStore } from '../stores/labStore'

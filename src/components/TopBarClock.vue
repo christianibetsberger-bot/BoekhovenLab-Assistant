@@ -6,7 +6,10 @@
       <span class="tbc-dot"></span>
       <span class="tbc-timer">{{ liveClock }}</span>
       <span class="tbc-sep">·</span>
-      <span class="tbc-task" :title="activeEntry.task">{{ shortTask(activeEntry.task) }}</span>
+      <select :value="activeEntry.task" @change="e => switchTask(e.target.value)"
+        class="tbc-select" :disabled="switching" title="Switch task without stopping the clock">
+        <option v-for="t in taskList" :key="t" :value="t">{{ t }}</option>
+      </select>
       <span v-if="todayCompletedH > 0" class="tbc-today">({{ fmtH(todayCompletedH + liveH) }} today)</span>
       <button class="tbc-btn tbc-stop" @click="checkOut" title="Check Out">
         <i class="fas fa-stop"></i>
@@ -139,6 +142,26 @@ async function checkOut() {
   activeEntry.value = null
 }
 
+const switching = ref(false)
+async function switchTask(newTask) {
+  if (!store.user || !activeEntry.value || activeEntry.value.task === newTask) return
+  switching.value = true
+  const t = new Date().toISOString()
+  // Close current, accumulate its hours into today's total
+  await db.from('time_entries').update({ checked_out: t }).eq('id', activeEntry.value.id)
+  todayCompletedH.value += (new Date(t) - new Date(activeEntry.value.checked_in)) / 3600000
+  // Open new with same project
+  const { data } = await db.from('time_entries').insert({
+    owner_id:   store.user.id,
+    checked_in: t,
+    task:       newTask,
+    project:    activeEntry.value.project || '',
+    note:       '',
+  }).select().single()
+  activeEntry.value = data || null
+  switching.value = false
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 onMounted(() => {
@@ -157,12 +180,12 @@ onBeforeUnmount(() => clearInterval(ticker))
 .tbc {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: 5px;
+  padding: 3px 8px;
   border-radius: 999px;
   border: 1px solid var(--border, #e2e8f0);
   background: var(--panel-bg, #f8fafc);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   transition: background .25s, border-color .25s;
 }
 

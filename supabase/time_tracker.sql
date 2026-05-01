@@ -36,9 +36,11 @@ create table if not exists time_settings (
     'Conference','Superuser Duties','Group Task','Other'
   ]
 );
--- Add vacation column if upgrading from v1
+-- Migration: add columns added in v2
 alter table time_settings add column if not exists
   vacation_days_per_year integer not null default 30;
+alter table time_settings add column if not exists
+  custom_projects text[] not null default '{}';
 
 alter table time_settings enable row level security;
 drop policy if exists "time_settings_owner" on time_settings;

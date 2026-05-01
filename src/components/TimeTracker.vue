@@ -44,10 +44,12 @@
 
             <div v-if="activeEntry" class="tt-active-info">
               <i class="fas fa-circle-dot" style="color:var(--success);"></i>
-              <span>
-                <strong>{{ activeEntry.task }}</strong>
-                <span v-if="activeEntry.project"> · {{ activeEntry.project }}</span>
-                &nbsp;since {{ formatTime(activeEntry.checked_in) }}
+              <span style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                <select :value="activeEntry.task" @change="e => switchTask(e.target.value)" class="tt-active-select" :disabled="isSaving">
+                  <option v-for="t in settings.custom_tasks" :key="t" :value="t">{{ t }}</option>
+                </select>
+                <span v-if="activeEntry.project" style="opacity:.85;">· {{ activeEntry.project }}</span>
+                <span style="opacity:.65; font-size:.72rem;">since {{ formatTime(activeEntry.checked_in) }}</span>
               </span>
             </div>
 
@@ -183,8 +185,8 @@
               <div class="tt-stat-label">Logged<span v-if="thisWeekendHours > 0" class="tt-we-note"> ({{ formatHours(thisWeekendHours) }} WE)</span></div>
             </div>
             <div class="tt-stat">
-              <div class="tt-stat-value">{{ settings.weekly_hours }}h</div>
-              <div class="tt-stat-label">Required</div>
+              <div class="tt-stat-value">{{ formatHours(effectiveWeeklyHours) }}</div>
+              <div class="tt-stat-label">Required<span v-if="thisWeekAbsenceDays > 0" class="tt-we-note"> (-{{ thisWeekAbsenceDays }}d)</span></div>
             </div>
             <div class="tt-stat" :class="overtime >= 0 ? 'positive' : 'negative'">
               <div class="tt-stat-value">{{ overtime >= 0 ? '+' : '' }}{{ formatHours(overtime) }}</div>
@@ -385,13 +387,24 @@
               <input type="text" v-model="settings.timezone" placeholder="Europe/Berlin" @change="saveSettings" />
             </div>
           </div>
-          <div class="input-group">
-            <label>Task categories (one per line)</label>
-            <textarea
-              :value="settings.custom_tasks.join('\n')"
-              @change="e => { settings.custom_tasks = e.target.value.split('\n').map(s => s.trim()).filter(Boolean); saveSettings() }"
-              rows="7" style="font-size:0.8rem; font-family:monospace;"
-            ></textarea>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <div class="input-group">
+              <label>Task categories (one per line)</label>
+              <textarea
+                :value="settings.custom_tasks.join('\n')"
+                @change="e => { settings.custom_tasks = e.target.value.split('\n').map(s => s.trim()).filter(Boolean); saveSettings() }"
+                rows="7" style="font-size:0.78rem; font-family:monospace;"
+              ></textarea>
+            </div>
+            <div class="input-group">
+              <label>Projects (one per line)</label>
+              <textarea
+                :value="settings.custom_projects.join('\n')"
+                @change="e => { settings.custom_projects = e.target.value.split('\n').map(s => s.trim()).filter(Boolean); saveSettings() }"
+                rows="7" style="font-size:0.78rem; font-family:monospace;"
+                placeholder="Auto-populated when you log new project names"
+              ></textarea>
+            </div>
           </div>
         </section>
       </div>
@@ -422,6 +435,7 @@ const settings = reactive({
     'Teaching','Coding','Literature','Break',
     'Conference','Superuser Duties','Group Task','Other',
   ],
+  custom_projects: [],
 })
 
 // Check-in form
@@ -508,9 +522,13 @@ const currentDuration = computed(() =>
   activeEntry.value ? now.value - new Date(activeEntry.value.checked_in) : 0
 )
 
-const projectSuggestions = computed(() =>
-  [...new Set(entries.value.map(e => e.project).filter(Boolean))].sort()
-)
+const projectSuggestions = computed(() => {
+  const set = new Set([
+    ...settings.custom_projects,
+    ...entries.value.map(e => e.project).filter(Boolean),
+  ])
+  return [...set].sort()
+})
 
 const thisWeekStart = computed(() => getMonday(now.value))
 
@@ -534,11 +552,26 @@ const todayHours = computed(() => {
     .reduce((s, e) => s + entryMinutes(e), 0) / 60).toFixed(1)
 })
 
-// Overtime = weekday deficit/surplus + all weekend hours
-const overtime    = computed(() => (thisWeekdayHours.value - settings.weekly_hours) + thisWeekendHours.value)
-// Progress bar tracks only weekday hours against the target
+// Vacation/sick days within the current week reduce the required hours
+// proportionally (1 day = weekly_hours / 5).
+const thisWeekAbsenceDays = computed(() =>
+  absences.value
+    .filter(a => {
+      const [y, m, d] = a.date.split('-').map(Number)
+      const dt = new Date(y, m - 1, d)
+      return dt >= thisWeekStart.value && dt.getDay() !== 0 && dt.getDay() !== 6
+    })
+    .reduce((s, a) => s + (a.half_day ? 0.5 : 1), 0)
+)
+const effectiveWeeklyHours = computed(() =>
+  Math.max(0, settings.weekly_hours - (settings.weekly_hours / 5) * thisWeekAbsenceDays.value)
+)
+
+// Overtime = weekday deficit/surplus (vs effective target) + all weekend hours
+const overtime    = computed(() => (thisWeekdayHours.value - effectiveWeeklyHours.value) + thisWeekendHours.value)
+// Progress bar tracks only weekday hours against the effective target
 const weekPercent = computed(() =>
-  settings.weekly_hours > 0 ? (thisWeekdayHours.value / settings.weekly_hours) * 100 : 0
+  effectiveWeeklyHours.value > 0 ? (thisWeekdayHours.value / effectiveWeeklyHours.value) * 100 : 0
 )
 
 const isWeekendToday = computed(() => { const d = now.value.getDay(); return d === 0 || d === 6 })
@@ -635,6 +668,7 @@ async function loadSettings() {
     settings.vacation_days_per_year = data.vacation_days_per_year ?? 30
     settings.timezone               = data.timezone               ?? 'Europe/Berlin'
     settings.custom_tasks           = data.custom_tasks           ?? settings.custom_tasks
+    settings.custom_projects        = data.custom_projects        ?? []
   }
 }
 
@@ -646,7 +680,35 @@ async function saveSettings() {
     vacation_days_per_year: settings.vacation_days_per_year,
     timezone:               settings.timezone,
     custom_tasks:           settings.custom_tasks,
+    custom_projects:        settings.custom_projects,
   }, { onConflict: 'owner_id' })
+}
+
+// Auto-add new project name to the user's persistent project list.
+async function ensureProjectSaved(name) {
+  const trimmed = (name || '').trim()
+  if (!trimmed || settings.custom_projects.includes(trimmed)) return
+  settings.custom_projects = [...settings.custom_projects, trimmed].sort()
+  await saveSettings()
+}
+
+// Seamless task change while checked in: close current entry and open a new one
+// at the same instant, preserving project and clearing note.
+async function switchTask(newTask) {
+  if (!store.user || !activeEntry.value || activeEntry.value.task === newTask) return
+  isSaving.value = true
+  const t = new Date().toISOString()
+  await db.from('time_entries').update({ checked_out: t }).eq('id', activeEntry.value.id)
+  await db.from('time_entries').insert({
+    owner_id:   store.user.id,
+    checked_in: t,
+    task:       newTask,
+    project:    activeEntry.value.project,
+    note:       '',
+  })
+  await loadEntries()
+  isSaving.value = false
+  renderCharts()
 }
 
 async function toggleCheckIn() {
@@ -656,6 +718,7 @@ async function toggleCheckIn() {
     await db.from('time_entries').update({ checked_out: new Date().toISOString() })
       .eq('id', activeEntry.value.id)
   } else {
+    await ensureProjectSaved(pendingProject.value)
     await db.from('time_entries').insert({
       owner_id:   store.user.id,
       checked_in: new Date().toISOString(),
@@ -676,6 +739,7 @@ async function submitNachbuchen() {
   const co = new Date(`${nbDate.value}T${nbTo.value}`)
   if (co <= ci) { alert('End time must be after start time.'); return }
   isSaving.value = true
+  await ensureProjectSaved(nbProject.value)
   await db.from('time_entries').insert({
     owner_id:    store.user.id,
     checked_in:  ci.toISOString(),
@@ -735,6 +799,7 @@ async function saveEdit(id) {
     checked_out: editOut.value ? new Date(editOut.value).toISOString() : null,
     task: editTask.value, project: editProject.value.trim(), note: editNote.value.trim(),
   }
+  await ensureProjectSaved(editProject.value)
   await db.from('time_entries').update(patch).eq('id', id)
   const idx = entries.value.findIndex(e => e.id === id)
   if (idx >= 0) Object.assign(entries.value[idx], patch)
@@ -1045,6 +1110,13 @@ function renderDailyChart() {
     const k = new Date(e.checked_in).toISOString().split('T')[0]
     if (dayMap.has(k)) dayMap.set(k, (dayMap.get(k) || 0) + entryMinutes(e) / 60)
   }
+  // Add live duration of an active session to today's bar
+  if (activeEntry.value) {
+    const k = new Date(activeEntry.value.checked_in).toISOString().split('T')[0]
+    if (dayMap.has(k)) {
+      dayMap.set(k, (dayMap.get(k) || 0) + (now.value - new Date(activeEntry.value.checked_in)) / 3600000)
+    }
+  }
   const xDays  = [...dayMap.keys()]
   const yHours = [...dayMap.values()].map(h => +h.toFixed(2))
   const reqLine = settings.weekly_hours / 5
@@ -1115,7 +1187,11 @@ function renderTrendChart() {
 
 watch(() => store.isDarkMode, renderCharts)
 watch(chartPeriod, renderCharts)
-watch(entries, () => nextTick(renderCharts), { deep: false })
+watch(entries, () => nextTick(renderCharts), { deep: true })
+watch(absences, () => nextTick(renderCharts), { deep: true })
+watch(() => settings.weekly_hours, renderCharts)
+// Live: re-render the daily chart on every clock tick during an active session
+watch(currentDuration, () => { if (activeEntry.value) renderDailyChart() })
 
 onMounted(async () => {
   nbDate.value  = todayStr.value
@@ -1124,7 +1200,7 @@ onMounted(async () => {
   await loadEntries()
   await loadAbsences()
   renderCharts()
-  clockTimer = setInterval(() => { now.value = new Date() }, 30000)
+  clockTimer = setInterval(() => { now.value = new Date() }, 10000)
 })
 
 onBeforeUnmount(() => {
@@ -1154,19 +1230,25 @@ onBeforeUnmount(() => {
 }
 @keyframes tt-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-.tt-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tt-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 @media (max-width:1100px) { .tt-layout { grid-template-columns: 1fr; } }
-.tt-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tt-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 
 .tt-section {
   background: var(--panel-bg); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 8px 10px;
+  border-radius: var(--radius); padding: 6px 8px;
 }
 .tt-section-nb { border-color: var(--primary); border-style: dashed; }
 .tt-section h3 {
-  font-size: 0.82rem; color: var(--primary); margin: 0 0 7px;
-  display: flex; align-items: center; gap: 6px;
-  border-bottom: 1px solid var(--border); padding-bottom: 5px;
+  font-size: 0.78rem; color: var(--primary); margin: 0 0 5px;
+  display: flex; align-items: center; gap: 5px;
+  border-bottom: 1px solid var(--border); padding-bottom: 3px;
+}
+
+.tt-active-select {
+  padding: 2px 6px; font-size: .8rem; font-weight: 600;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--input-bg);
 }
 
 .tt-form { display: flex; flex-direction: column; gap: 6px; }
@@ -1245,8 +1327,9 @@ onBeforeUnmount(() => {
 .tt-edit-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-end; padding: 8px 0; }
 .tt-edit-form .input-group { min-width: 120px; }
 
-.tt-chart    { width: 100%; height: 185px; }
-.tt-chart-sm { width: 100%; height: 155px; }
+.tt-chart    { width: 100%; height: 165px; }
+.tt-chart-sm { width: 100%; height: 140px; }
+.tt-table-wrap { max-height: 220px !important; }
 
 .icon-muted { opacity: .65; }
 </style>

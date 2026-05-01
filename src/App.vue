@@ -17,6 +17,7 @@ import PhasePredictor from './components/PhasePredictor.vue'
 import LidaKinetics from './components/LidaKinetics.vue'
 import WellPlateEditor from './components/WellPlateEditor.vue'
 import ArchiveManager from './components/ArchiveManager.vue'
+import TimeTracker from './components/TimeTracker.vue'
 
 import lidaIcon from './assets/lida-icon.svg?raw'
 
@@ -37,6 +38,7 @@ const MODULE_META = {
   phasePredictor:   { label: 'Phase Map',   icon: 'fa-brain',             component: markRaw(PhasePredictor) },
   lidaKinetics:     { label: 'LIDA Kinetics', icon: 'fa-dna',  svgIcon: lidaIcon, component: markRaw(LidaKinetics) },
   wellPlateEditor:  { label: 'Well Plate',  icon: 'fa-border-all',        component: markRaw(WellPlateEditor) },
+  timeTracker:      { label: 'Time Tracker', icon: 'fa-clock',             component: markRaw(TimeTracker) },
 }
 
 const layout = ref({ topOrder: [], leftOrder: [], rightOrder: [], minimized: {} })

@@ -271,7 +271,7 @@ export const useLabStore = defineStore('lab', {
     getDefaultModuleLayout() {
       return {
         topOrder:        ['labJournal'],
-        leftOrder:       ['globalSettings', 'standardStock', 'sequenceCalc', 'archiveManager', 'inventoryManager'],
+        leftOrder:       ['globalSettings', 'standardStock', 'sequenceCalc', 'archiveManager', 'inventoryManager', 'timeTracker'],
         rightOrder:      ['reactionPlan', 'matrixPlanner', 'screeningPlanner', 'phasePredictor', 'lidaKinetics', 'wellPlateEditor'],
         minimized:       {},
         sidebarPosition: 'left',   // 'left' | 'right' | 'bottom'

@@ -407,7 +407,7 @@
         <!-- Breakdown charts -->
         <section class="tt-section">
           <h3><i class="fas fa-chart-pie icon-muted"></i> Breakdown ({{ chartPeriodLabel }})</h3>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <div class="tt-breakdown-grid">
             <div>
               <div style="font-size:0.75rem; opacity:0.7; margin-bottom:4px; text-align:center;">By Task</div>
               <div ref="taskChartEl" class="tt-chart-sm"></div>
@@ -473,6 +473,7 @@ import Plotly from 'plotly.js-dist-min'
 import * as XLSX from 'xlsx'
 import { db } from '../services/supabase'
 import { useLabStore } from '../stores/labStore'
+import { ttBumpCounter, bumpTT } from '../composables/timeTrackerBus'
 
 const store = useLabStore()
 
@@ -833,6 +834,7 @@ async function switchTask(newTask) {
   await loadEntries()
   isSaving.value = false
   renderCharts()
+  bumpTT()
 }
 
 async function toggleCheckIn() {
@@ -855,6 +857,7 @@ async function toggleCheckIn() {
   await loadEntries()
   isSaving.value = false
   renderCharts()
+  bumpTT()
 }
 
 async function submitNachbuchen() {
@@ -878,6 +881,7 @@ async function submitNachbuchen() {
   nbNote.value = ''; nbProject.value = ''
   showNachbuchen.value = false
   renderCharts()
+  bumpTT()
 }
 
 async function addAbsence() {
@@ -893,12 +897,14 @@ async function addAbsence() {
   if (data) absences.value.unshift(data)
   absNote.value = ''; absHalf.value = false
   isSaving.value = false
+  bumpTT()
 }
 
 async function deleteAbsence(id) {
   if (!confirm('Delete this absence entry?')) return
   await db.from('time_absences').delete().eq('id', id)
   absences.value = absences.value.filter(a => a.id !== id)
+  bumpTT()
 }
 
 async function deleteEntry(id) {
@@ -906,6 +912,7 @@ async function deleteEntry(id) {
   await db.from('time_entries').delete().eq('id', id)
   entries.value = entries.value.filter(e => e.id !== id)
   renderCharts()
+  bumpTT()
 }
 
 function startEdit(entry) {
@@ -929,6 +936,7 @@ async function saveEdit(id) {
   if (idx >= 0) Object.assign(entries.value[idx], patch)
   editingId.value = null
   renderCharts()
+  bumpTT()
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────
@@ -1222,6 +1230,10 @@ function renderCharts() {
     renderDailyChart()
     renderBreakdownCharts()
     renderTrendChart()
+    // Force Plotly to recompute against the (possibly aspect-ratio-driven) container size
+    ;[dailyChartEl, taskChartEl, projectChartEl, trendChartEl].forEach(el => {
+      if (el.value) try { Plotly.Plots.resize(el.value) } catch(_) {}
+    })
   })
 }
 
@@ -1364,6 +1376,13 @@ watch(() => settings.weekly_hours, renderCharts)
 // Live: re-render all charts on every clock tick during an active session
 watch(currentDuration, () => { if (activeEntry.value) renderCharts() })
 
+// React to mutations from the TopBarClock (header check-in/out/switch)
+watch(ttBumpCounter, async () => {
+  await loadEntries()
+  await loadAbsences()
+  renderCharts()
+})
+
 onMounted(async () => {
   nbDate.value  = todayStr.value
   absDate.value = todayStr.value
@@ -1498,8 +1517,10 @@ onBeforeUnmount(() => {
 .tt-edit-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-end; padding: 8px 0; }
 .tt-edit-form .input-group { min-width: 120px; }
 
-.tt-chart    { width: 100%; height: 165px; }
-.tt-chart-sm { width: 100%; height: 140px; }
+/* All charts share roughly the same aspect ratio for a tidy, quadratic look. */
+.tt-chart    { width: 100%; aspect-ratio: 4 / 3; min-height: 240px; }
+.tt-chart-sm { width: 100%; aspect-ratio: 1 / 1; min-height: 220px; }
+.tt-breakdown-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tt-table-wrap { max-height: 220px !important; }
 
 .icon-muted { opacity: .65; }

@@ -47,9 +47,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { db } from '../services/supabase'
 import { useLabStore } from '../stores/labStore'
+import { ttBumpCounter, bumpTT } from '../composables/timeTrackerBus'
 
 const store = useLabStore()
 
@@ -147,6 +148,7 @@ async function checkIn() {
     note:       '',
   }).select().single()
   if (data) activeEntry.value = data
+  bumpTT()
 }
 
 async function checkOut() {
@@ -156,6 +158,7 @@ async function checkOut() {
   const h = (new Date(co) - new Date(activeEntry.value.checked_in)) / 3600000
   todayCompletedH.value += h
   activeEntry.value = null
+  bumpTT()
 }
 
 const addingNewTask = ref(false)
@@ -216,6 +219,7 @@ async function switchTask(newTask) {
   }).select().single()
   activeEntry.value = data || null
   switching.value = false
+  bumpTT()
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -228,6 +232,9 @@ onMounted(() => {
     if (Date.now() % 60000 < 1100) load()   // rough 60 s refresh
   }, 1000)
 })
+
+// React to mutations from the TimeTracker module
+watch(ttBumpCounter, () => load())
 
 onBeforeUnmount(() => clearInterval(ticker))
 </script>

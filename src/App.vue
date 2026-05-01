@@ -18,6 +18,7 @@ import LidaKinetics from './components/LidaKinetics.vue'
 import WellPlateEditor from './components/WellPlateEditor.vue'
 import ArchiveManager from './components/ArchiveManager.vue'
 import TimeTracker from './components/TimeTracker.vue'
+import TopBarClock from './components/TopBarClock.vue'
 
 import lidaIcon from './assets/lida-icon.svg?raw'
 
@@ -256,6 +257,7 @@ onUnmounted(() => document.removeEventListener('click', _closeRedock))
       <div class="app-main">
 
         <div class="top-bar">
+          <TopBarClock />
           <span class="user-info"><i class="fas fa-user-circle"></i> {{ store.user.email }}</span>
           <button class="small danger" @click="signOut"><i class="fas fa-sign-out-alt"></i> Log Out</button>
         </div>
@@ -599,8 +601,9 @@ body { padding: 0 !important; margin: 0 !important; }
 }
 
 .top-bar {
-  display: flex; align-items: center; justify-content: flex-end; gap: 12px;
+  display: flex; align-items: center; gap: 12px;
 }
+.top-bar .user-info { margin-left: auto; }
 .user-info { font-size: 0.9rem; opacity: 0.8; display: flex; align-items: center; gap: 6px; }
 
 /* ══ Workspace — flexbox so v-show:display:none removes a column from layout ══ */

@@ -25,9 +25,17 @@
             <div class="tt-form-row">
               <div class="input-group" style="flex:1;">
                 <label>Task</label>
-                <select v-model="pendingTask">
-                  <option v-for="t in settings.custom_tasks" :key="t" :value="t">{{ t }}</option>
-                </select>
+                <div v-if="newTaskFor !== 'pending'" style="display:flex; gap:4px;">
+                  <select :value="pendingTask" @change="e => onTaskChange('pending', e.target.value)" style="flex:1;">
+                    <option v-for="t in settings.custom_tasks" :key="t" :value="t">{{ t }}</option>
+                    <option value="__new__">+ Add new task…</option>
+                  </select>
+                </div>
+                <div v-else style="display:flex; gap:4px;">
+                  <input type="text" v-model="newTaskName" placeholder="New task name" @keyup.enter="confirmNewTask('pending')" autofocus style="flex:1;" />
+                  <button class="small success" @click="confirmNewTask('pending')"><i class="fas fa-check"></i></button>
+                  <button class="small" @click="cancelNewTask"><i class="fas fa-times"></i></button>
+                </div>
               </div>
               <div class="input-group" style="flex:1;">
                 <label>Project</label>
@@ -53,9 +61,17 @@
             <div v-if="activeEntry" class="tt-active-info">
               <i class="fas fa-circle-dot" style="color:var(--success);"></i>
               <span style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                <select :value="activeEntry.task" @change="e => switchTask(e.target.value)" class="tt-active-select" :disabled="isSaving">
-                  <option v-for="t in settings.custom_tasks" :key="t" :value="t">{{ t }}</option>
-                </select>
+                <template v-if="newTaskFor !== 'active'">
+                  <select :value="activeEntry.task" @change="e => onTaskChange('active', e.target.value)" class="tt-active-select" :disabled="isSaving">
+                    <option v-for="t in settings.custom_tasks" :key="t" :value="t">{{ t }}</option>
+                    <option value="__new__">+ Add new task…</option>
+                  </select>
+                </template>
+                <template v-else>
+                  <input type="text" v-model="newTaskName" placeholder="New task name" @keyup.enter="confirmNewTask('active')" autofocus style="font-size:.8rem; padding:2px 6px;" />
+                  <button class="small success" @click="confirmNewTask('active')"><i class="fas fa-check"></i></button>
+                  <button class="small" @click="cancelNewTask"><i class="fas fa-times"></i></button>
+                </template>
                 <span v-if="activeEntry.project" style="opacity:.85;">· {{ activeEntry.project }}</span>
                 <span style="opacity:.65; font-size:.72rem;">since {{ formatTime(activeEntry.checked_in) }}</span>
               </span>
@@ -99,9 +115,17 @@
             <div class="tt-form-row">
               <div class="input-group" style="flex:1;">
                 <label>Task</label>
-                <select v-model="nbTask">
-                  <option v-for="t in settings.custom_tasks" :key="t" :value="t">{{ t }}</option>
-                </select>
+                <div v-if="newTaskFor !== 'nb'" style="display:flex; gap:4px;">
+                  <select :value="nbTask" @change="e => onTaskChange('nb', e.target.value)" style="flex:1;">
+                    <option v-for="t in settings.custom_tasks" :key="t" :value="t">{{ t }}</option>
+                    <option value="__new__">+ Add new task…</option>
+                  </select>
+                </div>
+                <div v-else style="display:flex; gap:4px;">
+                  <input type="text" v-model="newTaskName" placeholder="New task name" @keyup.enter="confirmNewTask('nb')" autofocus style="flex:1;" />
+                  <button class="small success" @click="confirmNewTask('nb')"><i class="fas fa-check"></i></button>
+                  <button class="small" @click="cancelNewTask"><i class="fas fa-times"></i></button>
+                </div>
               </div>
               <div class="input-group" style="flex:1;">
                 <label>Project</label>
@@ -288,9 +312,17 @@
                         </div>
                         <div class="input-group" style="margin:0;">
                           <label>Task</label>
-                          <select v-model="editTask" style="font-size:0.8rem;">
-                            <option v-for="t in settings.custom_tasks" :key="t" :value="t">{{ t }}</option>
-                          </select>
+                          <div v-if="newTaskFor !== 'edit'" style="display:flex; gap:3px;">
+                            <select :value="editTask" @change="e => onTaskChange('edit', e.target.value)" style="font-size:0.8rem; flex:1;">
+                              <option v-for="t in settings.custom_tasks" :key="t" :value="t">{{ t }}</option>
+                              <option value="__new__">+ Add new…</option>
+                            </select>
+                          </div>
+                          <div v-else style="display:flex; gap:3px;">
+                            <input type="text" v-model="newTaskName" placeholder="New task" @keyup.enter="confirmNewTask('edit')" autofocus style="font-size:0.8rem; flex:1;" />
+                            <button class="small success" @click="confirmNewTask('edit')"><i class="fas fa-check"></i></button>
+                            <button class="small" @click="cancelNewTask"><i class="fas fa-times"></i></button>
+                          </div>
                         </div>
                         <div class="input-group" style="margin:0;">
                           <label>Project</label>
@@ -523,6 +555,43 @@ async function confirmNewProject(field) {
 function cancelNewProject() {
   newProjectFor.value  = null
   newProjectName.value = ''
+}
+
+// Inline new-task picker state (mirrors project picker)
+const newTaskFor  = ref(null)   // 'pending' | 'nb' | 'edit' | 'active' | null
+const newTaskName = ref('')
+
+function setTaskField(field, val) {
+  if (field === 'pending')      pendingTask.value = val
+  else if (field === 'nb')      nbTask.value      = val
+  else if (field === 'edit')    editTask.value    = val
+  else if (field === 'active')  switchTask(val)
+}
+async function ensureTaskSaved(name) {
+  const trimmed = (name || '').trim()
+  if (!trimmed || settings.custom_tasks.includes(trimmed)) return
+  settings.custom_tasks = [...settings.custom_tasks, trimmed]
+  await saveSettings()
+}
+function onTaskChange(field, val) {
+  if (val === '__new__') {
+    newTaskFor.value  = field
+    newTaskName.value = ''
+  } else {
+    setTaskField(field, val)
+  }
+}
+async function confirmNewTask(field) {
+  const name = newTaskName.value.trim()
+  if (!name) { cancelNewTask(); return }
+  await ensureTaskSaved(name)
+  setTaskField(field, name)
+  newTaskFor.value = null
+  newTaskName.value = ''
+}
+function cancelNewTask() {
+  newTaskFor.value  = null
+  newTaskName.value = ''
 }
 
 // Live clock

@@ -6,25 +6,41 @@
       <span class="tbc-dot"></span>
       <span class="tbc-timer">{{ liveClock }}</span>
       <span class="tbc-sep">·</span>
-      <select :value="activeEntry.task" @change="e => switchTask(e.target.value)"
-        class="tbc-select" :disabled="switching" title="Switch task without stopping the clock">
-        <option v-for="t in taskList" :key="t" :value="t">{{ t }}</option>
-      </select>
+      <template v-if="!addingNewTask">
+        <select :value="activeEntry.task" @change="e => onTaskSelect(e.target.value, true)"
+          class="tbc-select" :disabled="switching" title="Switch task without stopping the clock">
+          <option v-for="t in taskList" :key="t" :value="t">{{ t }}</option>
+          <option value="__new__">+ Add new task…</option>
+        </select>
+      </template>
+      <template v-else>
+        <input v-model="newTaskName" placeholder="New task" class="tbc-select" @keyup.enter="confirmNewTask(true)" autofocus />
+        <button class="tbc-btn tbc-start" @click="confirmNewTask(true)"><i class="fas fa-check"></i></button>
+        <button class="tbc-btn" @click="cancelNewTask" style="background:#94a3b8;color:#fff;"><i class="fas fa-times"></i></button>
+      </template>
       <span v-if="todayCompletedH > 0" class="tbc-today">({{ fmtH(todayCompletedH + liveH) }} today)</span>
-      <button class="tbc-btn tbc-stop" @click="checkOut" title="Check Out">
+      <button v-if="!addingNewTask" class="tbc-btn tbc-stop" @click="checkOut" title="Check Out">
         <i class="fas fa-stop"></i>
       </button>
     </template>
 
     <!-- ── CHECKED OUT ── -->
     <template v-else>
-      <select v-model="pendingTask" class="tbc-select" title="Select task">
-        <option v-for="t in taskList" :key="t" :value="t">{{ t }}</option>
-      </select>
-      <button class="tbc-btn tbc-start" @click="checkIn" title="Check In">
+      <template v-if="!addingNewTask">
+        <select :value="pendingTask" @change="e => onTaskSelect(e.target.value, false)" class="tbc-select" title="Select task">
+          <option v-for="t in taskList" :key="t" :value="t">{{ t }}</option>
+          <option value="__new__">+ Add new task…</option>
+        </select>
+      </template>
+      <template v-else>
+        <input v-model="newTaskName" placeholder="New task" class="tbc-select" @keyup.enter="confirmNewTask(false)" autofocus />
+        <button class="tbc-btn tbc-start" @click="confirmNewTask(false)"><i class="fas fa-check"></i></button>
+        <button class="tbc-btn" @click="cancelNewTask" style="background:#94a3b8;color:#fff;"><i class="fas fa-times"></i></button>
+      </template>
+      <button v-if="!addingNewTask" class="tbc-btn tbc-start" @click="checkIn" title="Check In">
         <i class="fas fa-play"></i><span class="tbc-label"> Check In</span>
       </button>
-      <span v-if="todayCompletedH > 0" class="tbc-today">{{ fmtH(todayCompletedH) }} today</span>
+      <span v-if="!addingNewTask && todayCompletedH > 0" class="tbc-today">{{ fmtH(todayCompletedH) }} today</span>
     </template>
 
   </div>
@@ -140,6 +156,46 @@ async function checkOut() {
   const h = (new Date(co) - new Date(activeEntry.value.checked_in)) / 3600000
   todayCompletedH.value += h
   activeEntry.value = null
+}
+
+const addingNewTask = ref(false)
+const newTaskName   = ref('')
+
+// Persist a new task to time_settings.custom_tasks for this user
+async function persistNewTask(name) {
+  if (!store.user) return false
+  if (taskList.value.includes(name)) return true
+  taskList.value = [...taskList.value, name]
+  // Fetch existing row to merge other fields
+  const { data } = await db.from('time_settings').select('*').eq('owner_id', store.user.id).maybeSingle()
+  const merged = { ...(data || {}), owner_id: store.user.id, custom_tasks: taskList.value }
+  await db.from('time_settings').upsert(merged, { onConflict: 'owner_id' })
+  return true
+}
+
+function onTaskSelect(val, isActive) {
+  if (val === '__new__') {
+    addingNewTask.value = true
+    newTaskName.value = ''
+    return
+  }
+  if (isActive) switchTask(val)
+  else pendingTask.value = val
+}
+
+async function confirmNewTask(isActive) {
+  const name = newTaskName.value.trim()
+  if (!name) { cancelNewTask(); return }
+  await persistNewTask(name)
+  if (isActive) await switchTask(name)
+  else pendingTask.value = name
+  addingNewTask.value = false
+  newTaskName.value = ''
+}
+
+function cancelNewTask() {
+  addingNewTask.value = false
+  newTaskName.value = ''
 }
 
 const switching = ref(false)

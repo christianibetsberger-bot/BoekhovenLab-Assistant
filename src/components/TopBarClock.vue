@@ -38,6 +38,7 @@ const activeEntry      = ref(null)
 const todayCompletedH  = ref(0)
 const dailyTargetH     = ref(8)
 const taskList         = ref(['Lab Work','Meeting','Data Analysis','Writing','Admin','Teaching','Coding','Literature','Break','Conference','Superuser Duties','Group Task','Other'])
+const isWeekend        = computed(() => { const d = now.value.getDay(); return d === 0 || d === 6 })
 const pendingTask      = ref('Lab Work')
 const loaded           = ref(false)
 const now              = ref(new Date())
@@ -61,6 +62,8 @@ const liveClock = computed(() => {
 
 const clockClass = computed(() => {
   const totalH = todayCompletedH.value + liveH.value
+  // Any work on a weekend is immediate overtime → red
+  if (isWeekend.value && totalH > 0) return 'tbc-over'
   if (totalH >= dailyTargetH.value) return 'tbc-over'
   if (totalH >= dailyTargetH.value * 0.9) return 'tbc-warn'
   if (activeEntry.value) return 'tbc-active'

@@ -180,7 +180,7 @@
           <div class="tt-week-grid">
             <div class="tt-stat">
               <div class="tt-stat-value">{{ formatHours(thisWeekHours) }}</div>
-              <div class="tt-stat-label">Logged</div>
+              <div class="tt-stat-label">Logged<span v-if="thisWeekendHours > 0" class="tt-we-note"> ({{ formatHours(thisWeekendHours) }} WE)</span></div>
             </div>
             <div class="tt-stat">
               <div class="tt-stat-value">{{ settings.weekly_hours }}h</div>
@@ -190,9 +190,9 @@
               <div class="tt-stat-value">{{ overtime >= 0 ? '+' : '' }}{{ formatHours(overtime) }}</div>
               <div class="tt-stat-label">{{ overtime >= 0 ? 'Overtime' : 'Deficit' }}</div>
             </div>
-            <div class="tt-stat">
+            <div class="tt-stat" :class="isWeekendToday ? 'positive' : ''">
               <div class="tt-stat-value">{{ todayHours }}</div>
-              <div class="tt-stat-label">Today (h)</div>
+              <div class="tt-stat-label">Today{{ isWeekendToday ? ' 🔴OT' : ' (h)' }}</div>
             </div>
           </div>
           <div class="tt-progress-bar">
@@ -514,11 +514,18 @@ const projectSuggestions = computed(() =>
 
 const thisWeekStart = computed(() => getMonday(now.value))
 
-const thisWeekHours = computed(() =>
+// Weekend hours count as immediate overtime — split weekday vs weekend.
+const thisWeekdayHours = computed(() =>
   entries.value
-    .filter(e => new Date(e.checked_in) >= thisWeekStart.value)
+    .filter(e => { const d = new Date(e.checked_in); return d >= thisWeekStart.value && d.getDay() !== 0 && d.getDay() !== 6 })
     .reduce((s, e) => s + entryMinutes(e), 0) / 60
 )
+const thisWeekendHours = computed(() =>
+  entries.value
+    .filter(e => { const d = new Date(e.checked_in); return d >= thisWeekStart.value && (d.getDay() === 0 || d.getDay() === 6) })
+    .reduce((s, e) => s + entryMinutes(e), 0) / 60
+)
+const thisWeekHours = computed(() => thisWeekdayHours.value + thisWeekendHours.value)
 
 const todayHours = computed(() => {
   const today = new Date(); today.setHours(0, 0, 0, 0)
@@ -527,10 +534,14 @@ const todayHours = computed(() => {
     .reduce((s, e) => s + entryMinutes(e), 0) / 60).toFixed(1)
 })
 
-const overtime    = computed(() => thisWeekHours.value - settings.weekly_hours)
+// Overtime = weekday deficit/surplus + all weekend hours
+const overtime    = computed(() => (thisWeekdayHours.value - settings.weekly_hours) + thisWeekendHours.value)
+// Progress bar tracks only weekday hours against the target
 const weekPercent = computed(() =>
-  settings.weekly_hours > 0 ? (thisWeekHours.value / settings.weekly_hours) * 100 : 0
+  settings.weekly_hours > 0 ? (thisWeekdayHours.value / settings.weekly_hours) * 100 : 0
 )
+
+const isWeekendToday = computed(() => { const d = now.value.getDay(); return d === 0 || d === 6 })
 
 const chartPeriodLabel = computed(() =>
   chartPeriod.value === 'week' ? 'this week' : `last ${chartPeriod.value} days`
@@ -1143,24 +1154,24 @@ onBeforeUnmount(() => {
 }
 @keyframes tt-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-.tt-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+.tt-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 @media (max-width:1100px) { .tt-layout { grid-template-columns: 1fr; } }
-.tt-col { display: flex; flex-direction: column; gap: 15px; min-width: 0; }
+.tt-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 
 .tt-section {
   background: var(--panel-bg); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 12px;
+  border-radius: var(--radius); padding: 8px 10px;
 }
 .tt-section-nb { border-color: var(--primary); border-style: dashed; }
 .tt-section h3 {
-  font-size: 0.9rem; color: var(--primary); margin: 0 0 10px;
-  display: flex; align-items: center; gap: 8px;
-  border-bottom: 1px solid var(--border); padding-bottom: 6px;
+  font-size: 0.82rem; color: var(--primary); margin: 0 0 7px;
+  display: flex; align-items: center; gap: 6px;
+  border-bottom: 1px solid var(--border); padding-bottom: 5px;
 }
 
-.tt-form { display: flex; flex-direction: column; gap: 8px; }
-.tt-form-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.tt-form-row .input-group { flex: 1; min-width: 80px; }
+.tt-form { display: flex; flex-direction: column; gap: 6px; }
+.tt-form-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.tt-form-row .input-group { flex: 1; min-width: 70px; }
 
 .tt-active-info {
   display: flex; align-items: center; gap: 8px; padding: 6px 10px;
@@ -1182,14 +1193,15 @@ onBeforeUnmount(() => {
 .tt-checkin-btn.checkout { background: #ef4444; color: #fff; }
 
 .tt-week-grid, .tt-year-grid {
-  display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 10px;
+  display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; margin-bottom: 7px;
 }
 .tt-stat {
-  text-align: center; padding: 8px 4px; border-radius: var(--radius);
+  text-align: center; padding: 5px 3px; border-radius: var(--radius);
   background: var(--input-bg); border: 1px solid var(--border);
 }
-.tt-stat-value { font-size: 1.1rem; font-weight: 700; }
-.tt-stat-label { font-size: .68rem; opacity: .65; text-transform: uppercase; letter-spacing: .4px; margin-top: 2px; }
+.tt-stat-value { font-size: 0.95rem; font-weight: 700; }
+.tt-stat-label { font-size: .62rem; opacity: .65; text-transform: uppercase; letter-spacing: .3px; margin-top: 1px; }
+.tt-we-note { font-weight: 400; color: #ef4444; font-size: .6rem; }
 .tt-stat.positive .tt-stat-value { color: var(--success); }
 .tt-stat.negative .tt-stat-value { color: #ef4444; }
 
@@ -1199,7 +1211,7 @@ onBeforeUnmount(() => {
 }
 .tt-progress-fill { height: 100%; border-radius: 4px; transition: width .4s; }
 
-.tt-table-wrap { max-height: 360px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.tt-table-wrap { max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
 .tt-table { width: 100%; border-collapse: collapse; font-size: .75rem; }
 .tt-table th {
   position: sticky; top: 0; background: var(--input-bg); z-index: 1;
@@ -1233,8 +1245,8 @@ onBeforeUnmount(() => {
 .tt-edit-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-end; padding: 8px 0; }
 .tt-edit-form .input-group { min-width: 120px; }
 
-.tt-chart    { width: 100%; height: 220px; }
-.tt-chart-sm { width: 100%; height: 180px; }
+.tt-chart    { width: 100%; height: 185px; }
+.tt-chart-sm { width: 100%; height: 155px; }
 
 .icon-muted { opacity: .65; }
 </style>

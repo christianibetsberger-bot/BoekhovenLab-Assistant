@@ -12,7 +12,7 @@ create table if not exists time_entries (
   task        text not null default 'Lab Work',
   project     text not null default '',
   note        text not null default '',
-  created_at  timestamptz default now()
+  created_at  timestamptz default now() -- used to detect Nachbuchungen
 );
 
 create index if not exists time_entries_owner_idx on time_entries(owner_id);
@@ -24,16 +24,43 @@ create policy "time_entries_owner" on time_entries
   for all using (auth.uid() = owner_id)
   with check (auth.uid() = owner_id);
 
--- 2. Per-user settings (weekly target hours, timezone, custom task list)
+-- 2. Per-user settings
 create table if not exists time_settings (
-  owner_id     uuid primary key references auth.users(id) on delete cascade,
-  weekly_hours numeric not null default 40,
-  timezone     text    not null default 'Europe/Berlin',
-  custom_tasks text[]  not null default array['Lab Work','Meeting','Data Analysis','Writing','Admin','Other']
+  owner_id              uuid primary key references auth.users(id) on delete cascade,
+  weekly_hours          numeric  not null default 40,
+  vacation_days_per_year integer not null default 30,
+  timezone              text     not null default 'Europe/Berlin',
+  custom_tasks          text[]   not null default array[
+    'Lab Work','Meeting','Data Analysis','Writing','Admin',
+    'Teaching','Coding','Literature','Break',
+    'Conference','Superuser Duties','Group Task','Other'
+  ]
 );
+-- Add vacation column if upgrading from v1
+alter table time_settings add column if not exists
+  vacation_days_per_year integer not null default 30;
 
 alter table time_settings enable row level security;
 drop policy if exists "time_settings_owner" on time_settings;
 create policy "time_settings_owner" on time_settings
+  for all using (auth.uid() = owner_id)
+  with check (auth.uid() = owner_id);
+
+-- 3. Sick days and vacation days
+create table if not exists time_absences (
+  id         uuid primary key default gen_random_uuid(),
+  owner_id   uuid references auth.users(id) on delete cascade not null,
+  date       date not null,
+  type       text not null check (type in ('sick', 'vacation')),
+  half_day   boolean not null default false,
+  note       text not null default '',
+  created_at timestamptz default now()
+);
+
+create index if not exists time_absences_owner_idx on time_absences(owner_id);
+
+alter table time_absences enable row level security;
+drop policy if exists "time_absences_owner" on time_absences;
+create policy "time_absences_owner" on time_absences
   for all using (auth.uid() = owner_id)
   with check (auth.uid() = owner_id);

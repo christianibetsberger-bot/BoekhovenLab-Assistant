@@ -31,10 +31,18 @@
               </div>
               <div class="input-group" style="flex:1;">
                 <label>Project</label>
-                <input type="text" v-model="pendingProject" placeholder="Project name…" list="tt-projects" />
-                <datalist id="tt-projects">
-                  <option v-for="p in projectSuggestions" :key="p" :value="p" />
-                </datalist>
+                <div v-if="newProjectFor !== 'pending'" style="display:flex; gap:4px;">
+                  <select :value="pendingProject" @change="e => onProjectChange('pending', e.target.value)" style="flex:1;">
+                    <option value="">— No project —</option>
+                    <option v-for="p in settings.custom_projects" :key="p" :value="p">{{ p }}</option>
+                    <option value="__new__">+ Add new project…</option>
+                  </select>
+                </div>
+                <div v-else style="display:flex; gap:4px;">
+                  <input type="text" v-model="newProjectName" placeholder="New project name" @keyup.enter="confirmNewProject('pending')" autofocus style="flex:1;" />
+                  <button class="small success" @click="confirmNewProject('pending')" title="Add"><i class="fas fa-check"></i></button>
+                  <button class="small" @click="cancelNewProject" title="Cancel"><i class="fas fa-times"></i></button>
+                </div>
               </div>
             </div>
             <div class="input-group">
@@ -97,7 +105,18 @@
               </div>
               <div class="input-group" style="flex:1;">
                 <label>Project</label>
-                <input type="text" v-model="nbProject" list="tt-projects" />
+                <div v-if="newProjectFor !== 'nb'" style="display:flex; gap:4px;">
+                  <select :value="nbProject" @change="e => onProjectChange('nb', e.target.value)" style="flex:1;">
+                    <option value="">— No project —</option>
+                    <option v-for="p in settings.custom_projects" :key="p" :value="p">{{ p }}</option>
+                    <option value="__new__">+ Add new project…</option>
+                  </select>
+                </div>
+                <div v-else style="display:flex; gap:4px;">
+                  <input type="text" v-model="newProjectName" placeholder="New project name" @keyup.enter="confirmNewProject('nb')" autofocus style="flex:1;" />
+                  <button class="small success" @click="confirmNewProject('nb')"><i class="fas fa-check"></i></button>
+                  <button class="small" @click="cancelNewProject"><i class="fas fa-times"></i></button>
+                </div>
               </div>
             </div>
             <div class="input-group">
@@ -275,7 +294,10 @@
                         </div>
                         <div class="input-group" style="margin:0;">
                           <label>Project</label>
-                          <input type="text" v-model="editProject" style="font-size:0.8rem;" />
+                          <select v-model="editProject" style="font-size:0.8rem;">
+                            <option value="">— No project —</option>
+                            <option v-for="p in settings.custom_projects" :key="p" :value="p">{{ p }}</option>
+                          </select>
                         </div>
                         <div class="input-group" style="margin:0; flex:2;">
                           <label>Note</label>
@@ -344,6 +366,7 @@
               <option value="week">This week</option>
               <option value="14">Last 14 days</option>
               <option value="30">Last 30 days</option>
+              <option value="year">This year (monthly)</option>
             </select>
           </div>
           <div ref="dailyChartEl" class="tt-chart"></div>
@@ -472,6 +495,36 @@ const filterFrom  = ref('')
 const filterTo    = ref('')
 const chartPeriod = ref('week')
 
+// Inline new-project picker state
+const newProjectFor  = ref(null)   // 'pending' | 'nb' | null
+const newProjectName = ref('')
+
+function setProjectField(field, val) {
+  if (field === 'pending') pendingProject.value = val
+  else if (field === 'nb') nbProject.value = val
+}
+function onProjectChange(field, val) {
+  if (val === '__new__') {
+    newProjectFor.value  = field
+    newProjectName.value = ''
+    setProjectField(field, '')
+  } else {
+    setProjectField(field, val)
+  }
+}
+async function confirmNewProject(field) {
+  const name = newProjectName.value.trim()
+  if (!name) { cancelNewProject(); return }
+  await ensureProjectSaved(name)
+  setProjectField(field, name)
+  newProjectFor.value = null
+  newProjectName.value = ''
+}
+function cancelNewProject() {
+  newProjectFor.value  = null
+  newProjectName.value = ''
+}
+
 // Live clock
 const now = ref(new Date())
 let clockTimer = null
@@ -576,9 +629,11 @@ const weekPercent = computed(() =>
 
 const isWeekendToday = computed(() => { const d = now.value.getDay(); return d === 0 || d === 6 })
 
-const chartPeriodLabel = computed(() =>
-  chartPeriod.value === 'week' ? 'this week' : `last ${chartPeriod.value} days`
-)
+const chartPeriodLabel = computed(() => {
+  if (chartPeriod.value === 'week') return 'this week'
+  if (chartPeriod.value === 'year') return 'this year'
+  return `last ${chartPeriod.value} days`
+})
 
 const filteredEntries = computed(() => {
   let list = [...entries.value].sort((a, b) => new Date(b.checked_in) - new Date(a.checked_in))
@@ -1082,10 +1137,14 @@ function plotLayout() {
   }
 }
 
+function getPeriodCutoff() {
+  if (chartPeriod.value === 'week')  return new Date(thisWeekStart.value)
+  if (chartPeriod.value === 'year') { const d = new Date(); d.setMonth(0,1); d.setHours(0,0,0,0); return d }
+  const d = new Date(); d.setDate(d.getDate() - parseInt(chartPeriod.value)); d.setHours(0,0,0,0)
+  return d
+}
 function getPeriodEntries() {
-  const cutoff = new Date()
-  if (chartPeriod.value === 'week') cutoff.setTime(thisWeekStart.value.getTime())
-  else { cutoff.setDate(cutoff.getDate() - parseInt(chartPeriod.value)); cutoff.setHours(0,0,0,0) }
+  const cutoff = getPeriodCutoff()
   return entries.value.filter(e => e.checked_out && new Date(e.checked_in) >= cutoff)
 }
 
@@ -1100,6 +1159,35 @@ function renderCharts() {
 function renderDailyChart() {
   if (!dailyChartEl.value) return
   const pEntries = getPeriodEntries()
+
+  // ── Year mode: aggregate hours per month ────────────────────────────────────
+  if (chartPeriod.value === 'year') {
+    const yr = new Date().getFullYear()
+    const monthHours = Array(12).fill(0)
+    for (const e of pEntries) {
+      const d = new Date(e.checked_in)
+      if (d.getFullYear() === yr) monthHours[d.getMonth()] += entryMinutes(e) / 60
+    }
+    if (activeEntry.value) {
+      const d = new Date(activeEntry.value.checked_in)
+      if (d.getFullYear() === yr) {
+        monthHours[d.getMonth()] += (now.value - d) / 3600000
+      }
+    }
+    const monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    const monthlyTarget = settings.weekly_hours * 4.33   // ~weeks per month
+    const layout = plotLayout()
+    layout.yaxis.title = { text: 'h', font: { size: 10 } }
+    layout.shapes = [{ type:'line', x0:monthLabels[0], x1:monthLabels[11], y0:monthlyTarget, y1:monthlyTarget,
+      line:{ color:'rgba(239,68,68,.6)', width:1.5, dash:'dot' } }]
+    Plotly.react(dailyChartEl.value, [{
+      type:'bar', x: monthLabels, y: monthHours.map(h => +h.toFixed(1)),
+      marker:{ color: monthHours.map(h => h >= monthlyTarget ? 'rgba(16,185,129,.7)' : h > 0 ? 'rgba(99,102,241,.55)' : '#e5e7eb') },
+      hovertemplate:'%{x}: %{y:.1f}h<extra></extra>',
+    }], layout, { responsive:true, displayModeBar:false })
+    return
+  }
+
   const days     = chartPeriod.value === 'week' ? 7 : parseInt(chartPeriod.value)
   const dayMap   = new Map()
   for (let i = days - 1; i >= 0; i--) {
@@ -1140,6 +1228,16 @@ function renderBreakdownCharts() {
     taskMap[e.task] = (taskMap[e.task] || 0) + h
     if (e.project) projMap[e.project] = (projMap[e.project] || 0) + h
   }
+  // Include the live active session so breakdown reflects current task in real time
+  if (activeEntry.value) {
+    const ai = new Date(activeEntry.value.checked_in)
+    if (ai >= getPeriodCutoff()) {
+      const liveH = (now.value - ai) / 3600000
+      taskMap[activeEntry.value.task] = (taskMap[activeEntry.value.task] || 0) + liveH
+      if (activeEntry.value.project)
+        projMap[activeEntry.value.project] = (projMap[activeEntry.value.project] || 0) + liveH
+    }
+  }
   const pieLayout = { ...plotLayout(), margin:{ l:5,r:5,t:5,b:5 }, showlegend:true,
     legend:{ orientation:'h', y:-0.2, font:{ size:9 } } }
   Plotly.react(taskChartEl.value, [{
@@ -1162,9 +1260,13 @@ function renderTrendChart() {
   for (let w = 7; w >= 0; w--) {
     const wStart = new Date(monday); wStart.setDate(wStart.getDate() - w * 7)
     const wEnd   = new Date(wStart); wEnd.setDate(wEnd.getDate() + 7)
-    const h = entries.value
+    let h = entries.value
       .filter(e => e.checked_out && new Date(e.checked_in) >= wStart && new Date(e.checked_in) < wEnd)
       .reduce((s, e) => s + entryMinutes(e), 0) / 60
+    if (activeEntry.value) {
+      const ai = new Date(activeEntry.value.checked_in)
+      if (ai >= wStart && ai < wEnd) h += (now.value - ai) / 3600000
+    }
     const d = wStart
     labels.push(`${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`)
     hours.push(+h.toFixed(2))
@@ -1190,8 +1292,8 @@ watch(chartPeriod, renderCharts)
 watch(entries, () => nextTick(renderCharts), { deep: true })
 watch(absences, () => nextTick(renderCharts), { deep: true })
 watch(() => settings.weekly_hours, renderCharts)
-// Live: re-render the daily chart on every clock tick during an active session
-watch(currentDuration, () => { if (activeEntry.value) renderDailyChart() })
+// Live: re-render all charts on every clock tick during an active session
+watch(currentDuration, () => { if (activeEntry.value) renderCharts() })
 
 onMounted(async () => {
   nbDate.value  = todayStr.value

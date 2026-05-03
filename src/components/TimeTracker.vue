@@ -72,7 +72,11 @@
                   <button class="small success" @click="confirmNewTask('active')"><i class="fas fa-check"></i></button>
                   <button class="small" @click="cancelNewTask"><i class="fas fa-times"></i></button>
                 </template>
-                <span v-if="activeEntry.project" style="opacity:.85;">· {{ activeEntry.project }}</span>
+                <span style="opacity:.5;">·</span>
+                <select :value="activeEntry.project || ''" @change="e => switchActiveProject(e.target.value)" class="tt-active-select" :disabled="isSaving" title="Switch project">
+                  <option value="">— No project —</option>
+                  <option v-for="p in settings.custom_projects" :key="p" :value="p">{{ p }}</option>
+                </select>
                 <span style="opacity:.65; font-size:.72rem;">since {{ formatTime(activeEntry.checked_in) }}</span>
               </span>
             </div>
@@ -390,10 +394,10 @@
           </div>
         </section>
 
-        <!-- Daily hours chart -->
+        <!-- All charts in a compact 2×2 grid -->
         <section class="tt-section">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-            <h3 style="margin:0;"><i class="fas fa-chart-bar icon-muted"></i> Daily Hours</h3>
+            <h3 style="margin:0;"><i class="fas fa-chart-bar icon-muted"></i> Charts ({{ chartPeriodLabel }})</h3>
             <select v-model="chartPeriod" style="font-size:0.78rem; padding:3px 8px; width:auto;">
               <option value="week">This week</option>
               <option value="14">Last 14 days</option>
@@ -401,28 +405,24 @@
               <option value="year">This year (monthly)</option>
             </select>
           </div>
-          <div ref="dailyChartEl" class="tt-chart"></div>
-        </section>
-
-        <!-- Breakdown charts -->
-        <section class="tt-section">
-          <h3><i class="fas fa-chart-pie icon-muted"></i> Breakdown ({{ chartPeriodLabel }})</h3>
-          <div class="tt-breakdown-grid">
-            <div>
-              <div style="font-size:0.75rem; opacity:0.7; margin-bottom:4px; text-align:center;">By Task</div>
-              <div ref="taskChartEl" class="tt-chart-sm"></div>
+          <div class="tt-charts-grid">
+            <div class="tt-chart-card">
+              <div class="tt-chart-title">Daily Hours</div>
+              <div ref="dailyChartEl" class="tt-chart"></div>
             </div>
-            <div>
-              <div style="font-size:0.75rem; opacity:0.7; margin-bottom:4px; text-align:center;">By Project</div>
-              <div ref="projectChartEl" class="tt-chart-sm"></div>
+            <div class="tt-chart-card">
+              <div class="tt-chart-title">Weekly Trend (last 8 weeks)</div>
+              <div ref="trendChartEl" class="tt-chart"></div>
+            </div>
+            <div class="tt-chart-card">
+              <div class="tt-chart-title">By Task</div>
+              <div ref="taskChartEl" class="tt-chart"></div>
+            </div>
+            <div class="tt-chart-card">
+              <div class="tt-chart-title">By Project</div>
+              <div ref="projectChartEl" class="tt-chart"></div>
             </div>
           </div>
-        </section>
-
-        <!-- Weekly trend -->
-        <section class="tt-section">
-          <h3><i class="fas fa-chart-line icon-muted"></i> Weekly Trend (last 8 weeks)</h3>
-          <div ref="trendChartEl" class="tt-chart"></div>
         </section>
 
         <!-- Settings -->
@@ -846,6 +846,26 @@ async function switchTask(newTask) {
   bumpTT()
 }
 
+// Same pattern for switching project mid-session
+async function switchActiveProject(newProject) {
+  if (!store.user || !activeEntry.value) return
+  if ((activeEntry.value.project || '') === (newProject || '')) return
+  isSaving.value = true
+  const t = new Date().toISOString()
+  await db.from('time_entries').update({ checked_out: t }).eq('id', activeEntry.value.id)
+  await db.from('time_entries').insert({
+    owner_id:   store.user.id,
+    checked_in: t,
+    task:       activeEntry.value.task,
+    project:    newProject || '',
+    note:       '',
+  })
+  await loadEntries()
+  isSaving.value = false
+  renderCharts()
+  bumpTT()
+}
+
 async function toggleCheckIn() {
   if (!store.user) return
   isSaving.value = true
@@ -1215,10 +1235,11 @@ function plotLayout() {
   return {
     paper_bgcolor: dark ? '#111827' : '#ffffff',
     plot_bgcolor:  dark ? '#111827' : '#ffffff',
-    font:          { color: dark ? '#f3f4f6' : '#1f2937', size: 11 },
-    margin:        { l: 40, r: 10, b: 40, t: 10 },
-    xaxis:         { gridcolor: dark ? '#374151' : '#e5e7eb' },
-    yaxis:         { gridcolor: dark ? '#374151' : '#e5e7eb' },
+    font:          { color: dark ? '#f3f4f6' : '#1f2937', size: 10 },
+    margin:        { l: 32, r: 8, b: 30, t: 6 },
+    // No gridlines — keep only a subtle zero baseline so values are readable.
+    xaxis:         { showgrid: false, zeroline: false, ticks: 'outside', tickfont: { size: 9 } },
+    yaxis:         { showgrid: false, zeroline: true, zerolinecolor: dark ? '#374151' : '#e5e7eb', ticks: 'outside', tickfont: { size: 9 } },
     showlegend:    false,
   }
 }
@@ -1328,19 +1349,43 @@ function renderBreakdownCharts() {
         projMap[activeEntry.value.project] = (projMap[activeEntry.value.project] || 0) + liveH
     }
   }
-  const pieLayout = { ...plotLayout(), margin:{ l:5,r:5,t:5,b:5 }, showlegend:true,
-    legend:{ orientation:'h', y:-0.2, font:{ size:9 } } }
+  // Vibrant qualitative palette, easy to distinguish at small sizes
+  const PIE_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#14b8a6','#a855f7','#eab308']
+  const pieLayout = {
+    ...plotLayout(),
+    margin: { l: 4, r: 4, t: 4, b: 4 },
+    showlegend: false,
+  }
   Plotly.react(taskChartEl.value, [{
-    type:'pie', labels:Object.keys(taskMap), values:Object.values(taskMap).map(h => +h.toFixed(2)),
-    hovertemplate:'%{label}: %{value:.1f}h<extra></extra>', textinfo:'percent', hole:0.4,
-  }], pieLayout, { responsive:true, displayModeBar:false })
+    type: 'pie',
+    labels: Object.keys(taskMap),
+    values: Object.values(taskMap).map(h => +h.toFixed(2)),
+    marker: { colors: PIE_COLORS, line: { color: store.isDarkMode ? '#111827' : '#ffffff', width: 2 } },
+    hovertemplate: '%{label}: %{value:.1f}h (%{percent})<extra></extra>',
+    textinfo: 'label+percent',
+    textposition: 'inside',
+    insidetextorientation: 'horizontal',
+    textfont: { size: 11, color: '#fff' },
+    hole: 0.35,
+    sort: true,
+    automargin: true,
+  }], pieLayout, { responsive: true, displayModeBar: false })
+
   const pLabels = Object.keys(projMap)
   Plotly.react(projectChartEl.value, [{
-    type:'pie',
+    type: 'pie',
     labels: pLabels.length ? pLabels : ['(no project)'],
-    values: pLabels.length ? Object.values(projMap).map(h=>+h.toFixed(2)) : [0.01],
-    hovertemplate:'%{label}: %{value:.1f}h<extra></extra>', textinfo:'percent', hole:0.4,
-  }], pieLayout, { responsive:true, displayModeBar:false })
+    values: pLabels.length ? Object.values(projMap).map(h => +h.toFixed(2)) : [1],
+    marker: { colors: PIE_COLORS, line: { color: store.isDarkMode ? '#111827' : '#ffffff', width: 2 } },
+    hovertemplate: '%{label}: %{value:.1f}h (%{percent})<extra></extra>',
+    textinfo: 'label+percent',
+    textposition: 'inside',
+    insidetextorientation: 'horizontal',
+    textfont: { size: 11, color: '#fff' },
+    hole: 0.35,
+    sort: true,
+    automargin: true,
+  }], pieLayout, { responsive: true, displayModeBar: false })
 }
 
 function renderTrendChart() {
@@ -1527,12 +1572,12 @@ onBeforeUnmount(() => {
 .tt-edit-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-end; padding: 8px 0; }
 .tt-edit-form .input-group { min-width: 120px; }
 
-/* All charts are 1:1 squares, capped at a friendly size so they fit nicely
-   into the module without dominating the layout. */
-.tt-chart    { width: 100%; max-width: 280px; aspect-ratio: 1 / 1; margin: 0 auto; }
-.tt-chart-sm { width: 100%; max-width: 200px; aspect-ratio: 1 / 1; margin: 0 auto; }
-.tt-breakdown-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.tt-table-wrap { max-height: 220px !important; }
+/* All four charts share the same square cell — packed into a 2×2 grid. */
+.tt-charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tt-chart-card  { display: flex; flex-direction: column; min-width: 0; }
+.tt-chart-title { font-size: .72rem; opacity: .7; text-align: center; margin-bottom: 2px; }
+.tt-chart       { width: 100%; aspect-ratio: 1 / 1; }
+.tt-table-wrap  { max-height: 220px !important; }
 
 .icon-muted { opacity: .65; }
 </style>

@@ -1,14 +1,17 @@
 <template>
-  <div class="tbc" :class="clockClass" v-if="loaded">
+  <div class="tbc" :class="clockClass" v-if="loaded" @click="markActive">
 
     <!-- ── CHECKED IN ── -->
     <template v-if="activeEntry">
       <span class="tbc-dot"></span>
       <span class="tbc-timer">{{ liveClock }}</span>
       <span class="tbc-sep">·</span>
-      <template v-if="!addingNewTask">
+
+      <!-- Task -->
+      <span v-if="privacyMode" class="tbc-private-label">Task</span>
+      <template v-else-if="!addingNewTask">
         <select :value="activeEntry.task" @change="e => onTaskSelect(e.target.value, true)"
-          class="tbc-select" :disabled="switching" title="Switch task without stopping the clock">
+          class="tbc-select" :disabled="switching" title="Switch task">
           <option v-for="t in taskList" :key="t" :value="t">{{ t }}</option>
           <option value="__new__">+ Add new task…</option>
         </select>
@@ -18,12 +21,29 @@
         <button class="tbc-btn tbc-start" @click="confirmNewTask(true)"><i class="fas fa-check"></i></button>
         <button class="tbc-btn" @click="cancelNewTask" style="background:#94a3b8;color:#fff;"><i class="fas fa-times"></i></button>
       </template>
+
+      <!-- Project -->
+      <span v-if="privacyMode" class="tbc-private-label">Project</span>
+      <template v-else-if="!addingNewProject">
+        <select :value="activeEntry.project || ''" @change="e => onProjectSelect(e.target.value, true)"
+          class="tbc-select" :disabled="switching" title="Switch project">
+          <option value="">— No project —</option>
+          <option v-for="p in projectList" :key="p" :value="p">{{ p }}</option>
+          <option value="__new__">+ Add new project…</option>
+        </select>
+      </template>
+      <template v-else>
+        <input v-model="newProjectName" placeholder="New project" class="tbc-select" @keyup.enter="confirmNewProject(true)" autofocus />
+        <button class="tbc-btn tbc-start" @click="confirmNewProject(true)"><i class="fas fa-check"></i></button>
+        <button class="tbc-btn" @click="cancelNewProject" style="background:#94a3b8;color:#fff;"><i class="fas fa-times"></i></button>
+      </template>
+
       <span v-if="!privacyMode && todayCompletedH > 0" class="tbc-today">({{ fmtH(todayCompletedH + liveH) }} today)</span>
-      <button v-if="!addingNewTask" class="tbc-btn tbc-stop" @click="checkOut" title="Check Out">
+      <button v-if="!addingNewTask && !addingNewProject" class="tbc-btn tbc-stop" @click="checkOut" title="Check Out">
         <i class="fas fa-stop"></i>
       </button>
-      <button v-if="!addingNewTask" class="tbc-btn tbc-privacy" @click="togglePrivacy"
-        :title="privacyMode ? 'Privacy on — click to show timer' : 'Hide timer (privacy mode)'">
+      <button v-if="!addingNewTask && !addingNewProject" class="tbc-btn tbc-privacy" @click="togglePrivacy"
+        :title="privacyMode ? 'Privacy on — click to show' : 'Hide details (privacy mode)'">
         <i class="fas" :class="privacyMode ? 'fa-eye-slash' : 'fa-eye'"></i>
       </button>
     </template>
@@ -31,7 +51,10 @@
     <!-- ── CHECKED OUT ── -->
     <template v-else>
       <span v-if="privacyMode" class="tbc-timer" style="opacity:.45;">00:00:00</span>
-      <template v-if="!addingNewTask">
+
+      <!-- Task -->
+      <span v-if="privacyMode" class="tbc-private-label">Task</span>
+      <template v-else-if="!addingNewTask">
         <select :value="pendingTask" @change="e => onTaskSelect(e.target.value, false)" class="tbc-select" title="Select task">
           <option v-for="t in taskList" :key="t" :value="t">{{ t }}</option>
           <option value="__new__">+ Add new task…</option>
@@ -42,14 +65,30 @@
         <button class="tbc-btn tbc-start" @click="confirmNewTask(false)"><i class="fas fa-check"></i></button>
         <button class="tbc-btn" @click="cancelNewTask" style="background:#94a3b8;color:#fff;"><i class="fas fa-times"></i></button>
       </template>
-      <button v-if="!addingNewTask" class="tbc-btn tbc-start" @click="checkIn" title="Check In">
+
+      <!-- Project -->
+      <span v-if="privacyMode" class="tbc-private-label">Project</span>
+      <template v-else-if="!addingNewProject">
+        <select :value="pendingProject" @change="e => onProjectSelect(e.target.value, false)" class="tbc-select" title="Select project">
+          <option value="">— No project —</option>
+          <option v-for="p in projectList" :key="p" :value="p">{{ p }}</option>
+          <option value="__new__">+ Add new project…</option>
+        </select>
+      </template>
+      <template v-else>
+        <input v-model="newProjectName" placeholder="New project" class="tbc-select" @keyup.enter="confirmNewProject(false)" autofocus />
+        <button class="tbc-btn tbc-start" @click="confirmNewProject(false)"><i class="fas fa-check"></i></button>
+        <button class="tbc-btn" @click="cancelNewProject" style="background:#94a3b8;color:#fff;"><i class="fas fa-times"></i></button>
+      </template>
+
+      <button v-if="!addingNewTask && !addingNewProject" class="tbc-btn tbc-start" @click="checkIn" title="Check In">
         <i class="fas fa-play"></i><span class="tbc-label"> Check In</span>
       </button>
-      <button v-if="!addingNewTask" class="tbc-btn tbc-privacy" @click="togglePrivacy"
-        :title="privacyMode ? 'Privacy on — click to show timer' : 'Hide timer (privacy mode)'">
+      <button v-if="!addingNewTask && !addingNewProject" class="tbc-btn tbc-privacy" @click="togglePrivacy"
+        :title="privacyMode ? 'Privacy on — click to show' : 'Hide details (privacy mode)'">
         <i class="fas" :class="privacyMode ? 'fa-eye-slash' : 'fa-eye'"></i>
       </button>
-      <span v-if="!privacyMode && !addingNewTask && todayCompletedH > 0" class="tbc-today">{{ fmtH(todayCompletedH) }} today</span>
+      <span v-if="!privacyMode && !addingNewTask && !addingNewProject && todayCompletedH > 0" class="tbc-today">{{ fmtH(todayCompletedH) }} today</span>
     </template>
 
   </div>
@@ -59,7 +98,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { db } from '../services/supabase'
 import { useLabStore } from '../stores/labStore'
-import { ttBumpCounter, bumpTT } from '../composables/timeTrackerBus'
+import { ttBumpCounter, bumpTT, ttModuleActive } from '../composables/timeTrackerBus'
 
 const store = useLabStore()
 
@@ -68,11 +107,14 @@ const todayCompletedH  = ref(0)
 const dailyTargetH     = ref(8)
 const privacyMode      = ref(false)
 const taskList         = ref(['Lab Work','Meeting','Data Analysis','Writing','Admin','Teaching','Coding','Literature','Break','Conference','Superuser Duties','Group Task','Other'])
-const isWeekend        = computed(() => { const d = now.value.getDay(); return d === 0 || d === 6 })
+const projectList      = ref([])
 const pendingTask      = ref('Lab Work')
+const pendingProject   = ref('')
 const loaded           = ref(false)
 const now              = ref(new Date())
 let ticker = null
+
+const isWeekend = computed(() => { const d = now.value.getDay(); return d === 0 || d === 6 })
 
 // ── Live derived ──────────────────────────────────────────────────────────────
 
@@ -92,10 +134,8 @@ const liveClock = computed(() => {
 })
 
 const clockClass = computed(() => {
-  // Privacy on → never expose state-derived colour cues
   if (privacyMode.value) return 'tbc-private'
   const totalH = todayCompletedH.value + liveH.value
-  // Any work on a weekend is immediate overtime → red
   if (isWeekend.value && totalH > 0) return 'tbc-over'
   if (totalH >= dailyTargetH.value) return 'tbc-over'
   if (totalH >= dailyTargetH.value * 0.9) return 'tbc-warn'
@@ -106,28 +146,50 @@ const clockClass = computed(() => {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const pad = n => String(n).padStart(2, '0')
-
 function fmtH(h) {
   const hh = Math.floor(h), mm = Math.round((h - hh) * 60)
   return mm > 0 ? `${hh}h ${mm}m` : `${hh}h`
 }
 
-function shortTask(t) {
-  if (!t) return ''
-  return t.length > 14 ? t.slice(0, 13) + '…' : t
+// ── Idle privacy ──────────────────────────────────────────────────────────────
+// If the user doesn't interact with the header for IDLE_MS, automatically
+// enable privacy mode. Privacy is only disabled by:
+//   (a) clicking the privacy toggle, or
+//   (b) opening the TimeTracker module (signalled via ttModuleActive)
+
+const IDLE_MS = 2 * 60 * 1000
+let idleTimer = null
+
+function markActive() {
+  if (idleTimer) clearTimeout(idleTimer)
+  idleTimer = setTimeout(async () => {
+    if (!privacyMode.value) await setPrivacy(true)
+  }, IDLE_MS)
+}
+
+async function setPrivacy(on) {
+  if (privacyMode.value === on) return
+  privacyMode.value = on
+  if (!store.user) return
+  const { data } = await db.from('time_settings').select('*').eq('owner_id', store.user.id).maybeSingle()
+  const merged = { ...(data || {}), owner_id: store.user.id, privacy_mode: on }
+  await db.from('time_settings').upsert(merged, { onConflict: 'owner_id' })
+  bumpTT()
+}
+
+async function togglePrivacy() {
+  markActive()
+  await setPrivacy(!privacyMode.value)
 }
 
 // ── Data ──────────────────────────────────────────────────────────────────────
 
 async function load() {
   if (!store.user) return
-
-  // Load active entry
   const { data: active } = await db.from('time_entries')
     .select('*').eq('owner_id', store.user.id).is('checked_out', null).limit(1)
   activeEntry.value = active?.[0] || null
 
-  // Load today's completed entries
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0)
   const { data: todayRows } = await db.from('time_entries')
     .select('checked_in,checked_out')
@@ -137,28 +199,29 @@ async function load() {
   todayCompletedH.value = (todayRows || [])
     .reduce((s, e) => s + (new Date(e.checked_out) - new Date(e.checked_in)) / 3600000, 0)
 
-  // Load settings
   const { data: cfg } = await db.from('time_settings')
-    .select('weekly_hours,custom_tasks,privacy_mode').eq('owner_id', store.user.id).single()
+    .select('weekly_hours,custom_tasks,custom_projects,privacy_mode')
+    .eq('owner_id', store.user.id).single()
   if (cfg) {
     dailyTargetH.value = (cfg.weekly_hours ?? 40) / 5
     privacyMode.value  = !!cfg.privacy_mode
     if (cfg.custom_tasks?.length) {
       taskList.value  = cfg.custom_tasks
-      pendingTask.value = cfg.custom_tasks[0]
+      if (!cfg.custom_tasks.includes(pendingTask.value)) pendingTask.value = cfg.custom_tasks[0]
     }
+    projectList.value = cfg.custom_projects || []
   }
-
   loaded.value = true
 }
 
 async function checkIn() {
+  markActive()
   if (!store.user) return
   const { data } = await db.from('time_entries').insert({
     owner_id:   store.user.id,
     checked_in: new Date().toISOString(),
     task:       pendingTask.value,
-    project:    '',
+    project:    pendingProject.value || '',
     note:       '',
   }).select().single()
   if (data) activeEntry.value = data
@@ -166,34 +229,24 @@ async function checkIn() {
 }
 
 async function checkOut() {
+  markActive()
   if (!store.user || !activeEntry.value) return
   const co = new Date().toISOString()
   await db.from('time_entries').update({ checked_out: co }).eq('id', activeEntry.value.id)
-  const h = (new Date(co) - new Date(activeEntry.value.checked_in)) / 3600000
-  todayCompletedH.value += h
+  todayCompletedH.value += (new Date(co) - new Date(activeEntry.value.checked_in)) / 3600000
   activeEntry.value = null
   bumpTT()
 }
 
+// ── Task picker ───────────────────────────────────────────────────────────────
+
 const addingNewTask = ref(false)
 const newTaskName   = ref('')
 
-// Toggle privacy mode and persist to time_settings (header → bus → module checkbox)
-async function togglePrivacy() {
-  if (!store.user) return
-  privacyMode.value = !privacyMode.value
-  const { data } = await db.from('time_settings').select('*').eq('owner_id', store.user.id).maybeSingle()
-  const merged = { ...(data || {}), owner_id: store.user.id, privacy_mode: privacyMode.value }
-  await db.from('time_settings').upsert(merged, { onConflict: 'owner_id' })
-  bumpTT()
-}
-
-// Persist a new task to time_settings.custom_tasks for this user
 async function persistNewTask(name) {
   if (!store.user) return false
   if (taskList.value.includes(name)) return true
   taskList.value = [...taskList.value, name]
-  // Fetch existing row to merge other fields
   const { data } = await db.from('time_settings').select('*').eq('owner_id', store.user.id).maybeSingle()
   const merged = { ...(data || {}), owner_id: store.user.id, custom_tasks: taskList.value }
   await db.from('time_settings').upsert(merged, { onConflict: 'owner_id' })
@@ -201,6 +254,7 @@ async function persistNewTask(name) {
 }
 
 function onTaskSelect(val, isActive) {
+  markActive()
   if (val === '__new__') {
     addingNewTask.value = true
     newTaskName.value = ''
@@ -211,6 +265,7 @@ function onTaskSelect(val, isActive) {
 }
 
 async function confirmNewTask(isActive) {
+  markActive()
   const name = newTaskName.value.trim()
   if (!name) { cancelNewTask(); return }
   await persistNewTask(name)
@@ -221,19 +276,63 @@ async function confirmNewTask(isActive) {
 }
 
 function cancelNewTask() {
+  markActive()
   addingNewTask.value = false
   newTaskName.value = ''
 }
+
+// ── Project picker ────────────────────────────────────────────────────────────
+
+const addingNewProject = ref(false)
+const newProjectName   = ref('')
+
+async function persistNewProject(name) {
+  if (!store.user) return false
+  if (projectList.value.includes(name)) return true
+  projectList.value = [...projectList.value, name].sort()
+  const { data } = await db.from('time_settings').select('*').eq('owner_id', store.user.id).maybeSingle()
+  const merged = { ...(data || {}), owner_id: store.user.id, custom_projects: projectList.value }
+  await db.from('time_settings').upsert(merged, { onConflict: 'owner_id' })
+  return true
+}
+
+function onProjectSelect(val, isActive) {
+  markActive()
+  if (val === '__new__') {
+    addingNewProject.value = true
+    newProjectName.value = ''
+    return
+  }
+  if (isActive) switchProject(val)
+  else pendingProject.value = val
+}
+
+async function confirmNewProject(isActive) {
+  markActive()
+  const name = newProjectName.value.trim()
+  if (!name) { cancelNewProject(); return }
+  await persistNewProject(name)
+  if (isActive) await switchProject(name)
+  else pendingProject.value = name
+  addingNewProject.value = false
+  newProjectName.value = ''
+}
+
+function cancelNewProject() {
+  markActive()
+  addingNewProject.value = false
+  newProjectName.value = ''
+}
+
+// ── Task / project switching while active ─────────────────────────────────────
 
 const switching = ref(false)
 async function switchTask(newTask) {
   if (!store.user || !activeEntry.value || activeEntry.value.task === newTask) return
   switching.value = true
   const t = new Date().toISOString()
-  // Close current, accumulate its hours into today's total
   await db.from('time_entries').update({ checked_out: t }).eq('id', activeEntry.value.id)
   todayCompletedH.value += (new Date(t) - new Date(activeEntry.value.checked_in)) / 3600000
-  // Open new with same project
   const { data } = await db.from('time_entries').insert({
     owner_id:   store.user.id,
     checked_in: t,
@@ -246,21 +345,48 @@ async function switchTask(newTask) {
   bumpTT()
 }
 
+async function switchProject(newProject) {
+  if (!store.user || !activeEntry.value || (activeEntry.value.project || '') === (newProject || '')) return
+  switching.value = true
+  const t = new Date().toISOString()
+  await db.from('time_entries').update({ checked_out: t }).eq('id', activeEntry.value.id)
+  todayCompletedH.value += (new Date(t) - new Date(activeEntry.value.checked_in)) / 3600000
+  const { data } = await db.from('time_entries').insert({
+    owner_id:   store.user.id,
+    checked_in: t,
+    task:       activeEntry.value.task,
+    project:    newProject || '',
+    note:       '',
+  }).select().single()
+  activeEntry.value = data || null
+  switching.value = false
+  bumpTT()
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 onMounted(() => {
   load()
-  // Tick every second for the live HH:MM:SS clock; re-load data every 60 s
   ticker = setInterval(() => {
     now.value = new Date()
-    if (Date.now() % 60000 < 1100) load()   // rough 60 s refresh
+    if (Date.now() % 60000 < 1100) load()
   }, 1000)
+  markActive()   // start the 2-min idle timer
 })
 
 // React to mutations from the TimeTracker module
 watch(ttBumpCounter, () => load())
 
-onBeforeUnmount(() => clearInterval(ticker))
+// Module opened → drop privacy and reset idle timer
+watch(ttModuleActive, async () => {
+  if (privacyMode.value) await setPrivacy(false)
+  markActive()
+})
+
+onBeforeUnmount(() => {
+  clearInterval(ticker)
+  if (idleTimer) clearTimeout(idleTimer)
+})
 </script>
 
 <style scoped>
@@ -287,14 +413,24 @@ onBeforeUnmount(() => clearInterval(ticker))
 }
 .tbc.tbc-private .tbc-timer { opacity: 0.5; color: var(--text, #64748b); letter-spacing: 1px; }
 .tbc.tbc-private .tbc-dot { background: #94a3b8; animation: none; }
-/* Grey out the check-in / check-out button while privacy is on (still clickable). */
 .tbc.tbc-private .tbc-start,
 .tbc.tbc-private .tbc-stop {
   filter: grayscale(0.85);
   opacity: 0.55;
 }
 
-/* Privacy toggle pill — small icon button. Filled when privacy ON. */
+/* Static replacement label shown in place of the task / project select while privacy is on. */
+.tbc-private-label {
+  padding: 2px 8px;
+  font-size: 0.78rem;
+  border-radius: 4px;
+  background: var(--input-bg);
+  border: 1px solid var(--border, #e2e8f0);
+  color: var(--text, #64748b);
+  opacity: 0.65;
+  font-style: italic;
+}
+
 .tbc-privacy {
   background: transparent;
   border: 1px solid var(--border, #e2e8f0) !important;
@@ -306,9 +442,10 @@ onBeforeUnmount(() => clearInterval(ticker))
   background: #64748b;
   color: #fff;
   border-color: #64748b !important;
-  filter: none;   /* keep the privacy button clearly visible & active */
+  filter: none;
   opacity: 1;
 }
+
 .tbc.tbc-warn {
   background: color-mix(in srgb, #f59e0b 15%, var(--panel-bg));
   border-color: #f59e0b;
@@ -336,7 +473,6 @@ onBeforeUnmount(() => clearInterval(ticker))
   white-space: nowrap;
 }
 .tbc-sep  { opacity: .4; }
-.tbc-task { opacity: .85; white-space: nowrap; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
 .tbc-today { opacity: .6; font-size: .75rem; white-space: nowrap; }
 
 .tbc-select {

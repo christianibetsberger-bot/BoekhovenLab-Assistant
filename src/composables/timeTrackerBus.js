@@ -5,3 +5,8 @@ import { ref } from 'vue'
 
 export const ttBumpCounter = ref(0)
 export function bumpTT() { ttBumpCounter.value = Date.now() }
+
+// Bumped whenever the TimeTracker module is opened/visible. The TopBarClock
+// watches this counter and disables auto-privacy + resets its idle timer.
+export const ttModuleActive = ref(0)
+export function signalModuleActive() { ttModuleActive.value = Date.now() }

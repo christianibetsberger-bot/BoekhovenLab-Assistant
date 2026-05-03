@@ -478,7 +478,7 @@ import Plotly from 'plotly.js-dist-min'
 import * as XLSX from 'xlsx'
 import { db } from '../services/supabase'
 import { useLabStore } from '../stores/labStore'
-import { ttBumpCounter, bumpTT } from '../composables/timeTrackerBus'
+import { ttBumpCounter, bumpTT, signalModuleActive } from '../composables/timeTrackerBus'
 
 const store = useLabStore()
 
@@ -1395,6 +1395,7 @@ watch(ttBumpCounter, async () => {
 onMounted(async () => {
   nbDate.value  = todayStr.value
   absDate.value = todayStr.value
+  signalModuleActive()      // tells the header to drop privacy mode
   await loadSettings()
   await loadEntries()
   await loadAbsences()
@@ -1526,10 +1527,11 @@ onBeforeUnmount(() => {
 .tt-edit-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-end; padding: 8px 0; }
 .tt-edit-form .input-group { min-width: 120px; }
 
-/* All charts share roughly the same aspect ratio for a tidy, quadratic look. */
-.tt-chart    { width: 100%; aspect-ratio: 4 / 3; min-height: 240px; }
-.tt-chart-sm { width: 100%; aspect-ratio: 1 / 1; min-height: 220px; }
-.tt-breakdown-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+/* All charts are 1:1 squares, capped at a friendly size so they fit nicely
+   into the module without dominating the layout. */
+.tt-chart    { width: 100%; max-width: 280px; aspect-ratio: 1 / 1; margin: 0 auto; }
+.tt-chart-sm { width: 100%; max-width: 200px; aspect-ratio: 1 / 1; margin: 0 auto; }
+.tt-breakdown-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .tt-table-wrap { max-height: 220px !important; }
 
 .icon-muted { opacity: .65; }

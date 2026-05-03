@@ -22,6 +22,10 @@
       <button v-if="!addingNewTask" class="tbc-btn tbc-stop" @click="checkOut" title="Check Out">
         <i class="fas fa-stop"></i>
       </button>
+      <button v-if="!addingNewTask" class="tbc-btn tbc-privacy" @click="togglePrivacy"
+        :title="privacyMode ? 'Privacy on — click to show timer' : 'Hide timer (privacy mode)'">
+        <i class="fas" :class="privacyMode ? 'fa-eye-slash' : 'fa-eye'"></i>
+      </button>
     </template>
 
     <!-- ── CHECKED OUT ── -->
@@ -40,6 +44,10 @@
       </template>
       <button v-if="!addingNewTask" class="tbc-btn tbc-start" @click="checkIn" title="Check In">
         <i class="fas fa-play"></i><span class="tbc-label"> Check In</span>
+      </button>
+      <button v-if="!addingNewTask" class="tbc-btn tbc-privacy" @click="togglePrivacy"
+        :title="privacyMode ? 'Privacy on — click to show timer' : 'Hide timer (privacy mode)'">
+        <i class="fas" :class="privacyMode ? 'fa-eye-slash' : 'fa-eye'"></i>
       </button>
       <span v-if="!privacyMode && !addingNewTask && todayCompletedH > 0" class="tbc-today">{{ fmtH(todayCompletedH) }} today</span>
     </template>
@@ -170,6 +178,16 @@ async function checkOut() {
 const addingNewTask = ref(false)
 const newTaskName   = ref('')
 
+// Toggle privacy mode and persist to time_settings (header → bus → module checkbox)
+async function togglePrivacy() {
+  if (!store.user) return
+  privacyMode.value = !privacyMode.value
+  const { data } = await db.from('time_settings').select('*').eq('owner_id', store.user.id).maybeSingle()
+  const merged = { ...(data || {}), owner_id: store.user.id, privacy_mode: privacyMode.value }
+  await db.from('time_settings').upsert(merged, { onConflict: 'owner_id' })
+  bumpTT()
+}
+
 // Persist a new task to time_settings.custom_tasks for this user
 async function persistNewTask(name) {
   if (!store.user) return false
@@ -265,10 +283,32 @@ onBeforeUnmount(() => clearInterval(ticker))
 .tbc.tbc-private {
   background: var(--panel-bg, #f8fafc);
   border-color: var(--border, #e2e8f0);
-  opacity: 0.7;
+  opacity: 0.85;
 }
 .tbc.tbc-private .tbc-timer { opacity: 0.5; color: var(--text, #64748b); letter-spacing: 1px; }
 .tbc.tbc-private .tbc-dot { background: #94a3b8; animation: none; }
+/* Grey out the check-in / check-out button while privacy is on (still clickable). */
+.tbc.tbc-private .tbc-start,
+.tbc.tbc-private .tbc-stop {
+  filter: grayscale(0.85);
+  opacity: 0.55;
+}
+
+/* Privacy toggle pill — small icon button. Filled when privacy ON. */
+.tbc-privacy {
+  background: transparent;
+  border: 1px solid var(--border, #e2e8f0) !important;
+  color: var(--text, #64748b);
+  padding: 3px 8px;
+}
+.tbc-privacy:hover { background: var(--input-bg, #f1f5f9); }
+.tbc.tbc-private .tbc-privacy {
+  background: #64748b;
+  color: #fff;
+  border-color: #64748b !important;
+  filter: none;   /* keep the privacy button clearly visible & active */
+  opacity: 1;
+}
 .tbc.tbc-warn {
   background: color-mix(in srgb, #f59e0b 15%, var(--panel-bg));
   border-color: #f59e0b;

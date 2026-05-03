@@ -442,6 +442,11 @@
               <input type="text" v-model="settings.timezone" placeholder="Europe/Berlin" @change="saveSettings" />
             </div>
           </div>
+          <label class="checkbox-label" style="display:flex; align-items:center; gap:6px; margin-bottom:10px; font-size:0.78rem;">
+            <input type="checkbox" v-model="settings.privacy_mode" @change="saveSettings" />
+            <i class="fas fa-eye-slash" style="opacity:.6;"></i>
+            Privacy mode — hide live timer in the header (shows greyed-out 00:00:00)
+          </label>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
             <div class="input-group">
               <label>Task categories (one per line)</label>
@@ -486,6 +491,7 @@ const settings = reactive({
   weekly_hours:           40,
   vacation_days_per_year: 30,
   timezone:               'Europe/Berlin',
+  privacy_mode:           false,
   custom_tasks: [
     'Lab Work','Meeting','Data Analysis','Writing','Admin',
     'Teaching','Coding','Literature','Break',
@@ -792,6 +798,7 @@ async function loadSettings() {
     settings.weekly_hours           = data.weekly_hours           ?? 40
     settings.vacation_days_per_year = data.vacation_days_per_year ?? 30
     settings.timezone               = data.timezone               ?? 'Europe/Berlin'
+    settings.privacy_mode           = data.privacy_mode           ?? false
     settings.custom_tasks           = data.custom_tasks           ?? settings.custom_tasks
     settings.custom_projects        = data.custom_projects        ?? []
   }
@@ -804,9 +811,11 @@ async function saveSettings() {
     weekly_hours:           settings.weekly_hours,
     vacation_days_per_year: settings.vacation_days_per_year,
     timezone:               settings.timezone,
+    privacy_mode:           settings.privacy_mode,
     custom_tasks:           settings.custom_tasks,
     custom_projects:        settings.custom_projects,
   }, { onConflict: 'owner_id' })
+  bumpTT()  // privacy toggle should immediately update the header
 }
 
 // Auto-add new project name to the user's persistent project list.

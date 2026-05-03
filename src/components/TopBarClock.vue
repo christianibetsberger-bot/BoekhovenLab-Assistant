@@ -18,7 +18,7 @@
         <button class="tbc-btn tbc-start" @click="confirmNewTask(true)"><i class="fas fa-check"></i></button>
         <button class="tbc-btn" @click="cancelNewTask" style="background:#94a3b8;color:#fff;"><i class="fas fa-times"></i></button>
       </template>
-      <span v-if="todayCompletedH > 0" class="tbc-today">({{ fmtH(todayCompletedH + liveH) }} today)</span>
+      <span v-if="!privacyMode && todayCompletedH > 0" class="tbc-today">({{ fmtH(todayCompletedH + liveH) }} today)</span>
       <button v-if="!addingNewTask" class="tbc-btn tbc-stop" @click="checkOut" title="Check Out">
         <i class="fas fa-stop"></i>
       </button>
@@ -26,6 +26,7 @@
 
     <!-- ── CHECKED OUT ── -->
     <template v-else>
+      <span v-if="privacyMode" class="tbc-timer" style="opacity:.45;">00:00:00</span>
       <template v-if="!addingNewTask">
         <select :value="pendingTask" @change="e => onTaskSelect(e.target.value, false)" class="tbc-select" title="Select task">
           <option v-for="t in taskList" :key="t" :value="t">{{ t }}</option>
@@ -40,7 +41,7 @@
       <button v-if="!addingNewTask" class="tbc-btn tbc-start" @click="checkIn" title="Check In">
         <i class="fas fa-play"></i><span class="tbc-label"> Check In</span>
       </button>
-      <span v-if="!addingNewTask && todayCompletedH > 0" class="tbc-today">{{ fmtH(todayCompletedH) }} today</span>
+      <span v-if="!privacyMode && !addingNewTask && todayCompletedH > 0" class="tbc-today">{{ fmtH(todayCompletedH) }} today</span>
     </template>
 
   </div>
@@ -57,6 +58,7 @@ const store = useLabStore()
 const activeEntry      = ref(null)
 const todayCompletedH  = ref(0)
 const dailyTargetH     = ref(8)
+const privacyMode      = ref(false)
 const taskList         = ref(['Lab Work','Meeting','Data Analysis','Writing','Admin','Teaching','Coding','Literature','Break','Conference','Superuser Duties','Group Task','Other'])
 const isWeekend        = computed(() => { const d = now.value.getDay(); return d === 0 || d === 6 })
 const pendingTask      = ref('Lab Work')
@@ -72,6 +74,7 @@ const liveMs = computed(() =>
 const liveH = computed(() => liveMs.value / 3600000)
 
 const liveClock = computed(() => {
+  if (privacyMode.value) return '00:00:00'
   const ms = liveMs.value
   if (ms <= 0) return '00:00:00'
   const h  = Math.floor(ms / 3600000)
@@ -81,6 +84,8 @@ const liveClock = computed(() => {
 })
 
 const clockClass = computed(() => {
+  // Privacy on → never expose state-derived colour cues
+  if (privacyMode.value) return 'tbc-private'
   const totalH = todayCompletedH.value + liveH.value
   // Any work on a weekend is immediate overtime → red
   if (isWeekend.value && totalH > 0) return 'tbc-over'
@@ -126,9 +131,10 @@ async function load() {
 
   // Load settings
   const { data: cfg } = await db.from('time_settings')
-    .select('weekly_hours,custom_tasks').eq('owner_id', store.user.id).single()
+    .select('weekly_hours,custom_tasks,privacy_mode').eq('owner_id', store.user.id).single()
   if (cfg) {
     dailyTargetH.value = (cfg.weekly_hours ?? 40) / 5
+    privacyMode.value  = !!cfg.privacy_mode
     if (cfg.custom_tasks?.length) {
       taskList.value  = cfg.custom_tasks
       pendingTask.value = cfg.custom_tasks[0]
@@ -256,6 +262,13 @@ onBeforeUnmount(() => clearInterval(ticker))
   background: color-mix(in srgb, #10b981 10%, var(--panel-bg));
   border-color: #10b981;
 }
+.tbc.tbc-private {
+  background: var(--panel-bg, #f8fafc);
+  border-color: var(--border, #e2e8f0);
+  opacity: 0.7;
+}
+.tbc.tbc-private .tbc-timer { opacity: 0.5; color: var(--text, #64748b); letter-spacing: 1px; }
+.tbc.tbc-private .tbc-dot { background: #94a3b8; animation: none; }
 .tbc.tbc-warn {
   background: color-mix(in srgb, #f59e0b 15%, var(--panel-bg));
   border-color: #f59e0b;

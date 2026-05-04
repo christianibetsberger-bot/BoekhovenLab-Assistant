@@ -393,7 +393,7 @@
             </div>
             <div class="tt-stat">
               <div class="tt-stat-value">{{ totalVacationThisYear }}</div>
-              <div class="tt-stat-label">Vacation total<span v-if="vacationCarriedOver > 0" class="tt-we-note"> (+{{ vacationCarriedOver }}✈)</span></div>
+              <div class="tt-stat-label">Vacation total<span v-if="effectiveCarryOver > 0" class="tt-we-note"> (+{{ effectiveCarryOver }}✈)</span></div>
             </div>
             <div class="tt-stat" :class="sickDaysThisYear > 10 ? 'negative' : ''">
               <div class="tt-stat-value">{{ sickDaysThisYear }}</div>
@@ -406,7 +406,7 @@
           </div>
           <div style="font-size:0.72rem; opacity:0.6; margin-top:4px; text-align:right;">
             {{ vacationUsedThisYear }} / {{ totalVacationThisYear }} vacation days used
-            <template v-if="vacationCarriedOver > 0"> · {{ settings.vacation_days_per_year }}/y + {{ vacationCarriedOver }} carried over</template>
+            <template v-if="effectiveCarryOver > 0"> · {{ settings.vacation_days_per_year }}/y + {{ effectiveCarryOver }} carried over</template>
           </div>
         </section>
 
@@ -458,11 +458,16 @@
               <input type="text" v-model="settings.timezone" placeholder="Europe/Berlin" @change="saveSettings" />
             </div>
           </div>
-          <div style="font-size:0.74rem; opacity:0.7; margin-bottom:10px; padding:5px 8px; background:var(--input-bg); border-radius:6px; border-left:3px solid var(--warning,#f59e0b);">
-            <i class="fas fa-circle-info"></i>
-            <strong>{{ vacationCarriedOver > 0 ? vacationCarriedOver + ' days' : 'No days' }}</strong>
-            carried over from prior years (auto-computed from your absence log).
-            Total available this year: <strong>{{ totalVacationThisYear }}</strong> days.
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:8px;">
+            <div class="input-group" style="margin:0;">
+              <label>Vacation carry-over (days from last year)</label>
+              <input type="number" min="0" max="365" v-model.number="settings.vacation_carryover" @change="saveSettings"
+                :placeholder="'Auto: ' + vacationCarriedOver" />
+            </div>
+            <div style="font-size:0.73rem; opacity:0.7; padding:6px 8px; background:var(--input-bg); border-radius:6px; border-left:3px solid var(--warning,#f59e0b); display:flex; flex-direction:column; justify-content:center; gap:2px;">
+              <div><i class="fas fa-circle-info"></i> Auto-computed: <strong>{{ vacationCarriedOver }}</strong> days</div>
+              <div>Set to 0 to use auto · Total this year: <strong>{{ totalVacationThisYear }}</strong> days</div>
+            </div>
           </div>
           <label class="checkbox-label" style="display:flex; align-items:center; gap:6px; margin-bottom:10px; font-size:0.78rem;">
             <input type="checkbox" v-model="settings.privacy_mode" @change="saveSettings" />
@@ -500,7 +505,7 @@ import Plotly from 'plotly.js-dist-min'
 import * as XLSX from 'xlsx'
 import { db } from '../services/supabase'
 import { useLabStore } from '../stores/labStore'
-import { ttBumpCounter, bumpTT, signalModuleActive } from '../composables/timeTrackerBus'
+import { ttBumpCounter, bumpTT, signalModuleActive, ttProjectList } from '../composables/timeTrackerBus'
 
 const store = useLabStore()
 
@@ -512,6 +517,7 @@ const absences = ref([])
 const settings = reactive({
   weekly_hours:           40,
   vacation_days_per_year: 30,
+  vacation_carryover:     0,
   timezone:               'Europe/Berlin',
   privacy_mode:           false,
   custom_tasks: [
@@ -876,8 +882,13 @@ const vacationCarriedOver = computed(() => {
   return carryOver
 })
 
+// Use manual carry-over if user set one, otherwise fall back to auto-computed.
+const effectiveCarryOver = computed(() =>
+  settings.vacation_carryover > 0 ? settings.vacation_carryover : vacationCarriedOver.value
+)
+
 const totalVacationThisYear = computed(() =>
-  settings.vacation_days_per_year + vacationCarriedOver.value
+  settings.vacation_days_per_year + effectiveCarryOver.value
 )
 
 const vacationRemaining = computed(() =>
@@ -926,15 +937,18 @@ async function loadAbsences() {
 async function loadSettings() {
   if (!store.user) return
   const { data } = await db.from('time_settings').select('*')
-    .eq('owner_id', store.user.id).single()
+    .eq('owner_id', store.user.id).maybeSingle()
   if (data) {
     settings.weekly_hours           = data.weekly_hours           ?? 40
     settings.vacation_days_per_year = data.vacation_days_per_year ?? 30
+    settings.vacation_carryover     = data.vacation_carryover     ?? 0
     settings.timezone               = data.timezone               ?? 'Europe/Berlin'
     settings.privacy_mode           = data.privacy_mode           ?? false
     settings.custom_tasks           = data.custom_tasks           ?? settings.custom_tasks
     settings.custom_projects        = data.custom_projects        ?? []
   }
+  // Broadcast to header regardless of whether a row existed
+  ttProjectList.value = settings.custom_projects
 }
 
 async function saveSettings() {
@@ -943,12 +957,14 @@ async function saveSettings() {
     owner_id:               store.user.id,
     weekly_hours:           settings.weekly_hours,
     vacation_days_per_year: settings.vacation_days_per_year,
+    vacation_carryover:     settings.vacation_carryover,
     timezone:               settings.timezone,
     privacy_mode:           settings.privacy_mode,
     custom_tasks:           settings.custom_tasks,
     custom_projects:        settings.custom_projects,
   }, { onConflict: 'owner_id' })
-  bumpTT()  // privacy toggle should immediately update the header
+  ttProjectList.value = settings.custom_projects  // broadcast before bump
+  bumpTT()
 }
 
 // Auto-add new project name to the user's persistent project list.
@@ -956,6 +972,7 @@ async function ensureProjectSaved(name) {
   const trimmed = (name || '').trim()
   if (!trimmed || settings.custom_projects.includes(trimmed)) return
   settings.custom_projects = [...settings.custom_projects, trimmed].sort()
+  ttProjectList.value = settings.custom_projects  // broadcast immediately
   await saveSettings()
 }
 

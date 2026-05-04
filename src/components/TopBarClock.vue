@@ -98,7 +98,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { db } from '../services/supabase'
 import { useLabStore } from '../stores/labStore'
-import { ttBumpCounter, bumpTT, ttModuleActive } from '../composables/timeTrackerBus'
+import { ttBumpCounter, bumpTT, ttModuleActive, ttProjectList } from '../composables/timeTrackerBus'
 
 const store = useLabStore()
 
@@ -210,6 +210,7 @@ async function load() {
       if (!cfg.custom_tasks.includes(pendingTask.value)) pendingTask.value = cfg.custom_tasks[0]
     }
     projectList.value = cfg.custom_projects || []
+    if (projectList.value.length) ttProjectList.value = projectList.value
   }
   loaded.value = true
 }
@@ -291,10 +292,11 @@ async function persistNewProject(name) {
   if (!store.user) return false
   if (projectList.value.includes(name)) return true
   projectList.value = [...projectList.value, name].sort()
+  ttProjectList.value = projectList.value  // broadcast immediately
   const { data } = await db.from('time_settings').select('*').eq('owner_id', store.user.id).maybeSingle()
   const merged = { ...(data || {}), owner_id: store.user.id, custom_projects: projectList.value }
   await db.from('time_settings').upsert(merged, { onConflict: 'owner_id' })
-  bumpTT()    // keep the TimeTracker module's settings.custom_projects in sync
+  bumpTT()
   return true
 }
 
@@ -387,6 +389,9 @@ watch(ttModuleActive, async () => {
 
 // Auth may resolve after mount — ensure we load as soon as user is available
 watch(() => store.user, u => { if (u) load() })
+
+// Mirror the TimeTracker's broadcast — always in sync, no extra DB read needed
+watch(ttProjectList, list => { projectList.value = list })
 
 onBeforeUnmount(() => {
   clearInterval(ticker)

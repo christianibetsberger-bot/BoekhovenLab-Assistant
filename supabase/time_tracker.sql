@@ -43,6 +43,8 @@ alter table time_settings add column if not exists
   custom_projects text[] not null default '{}';
 alter table time_settings add column if not exists
   privacy_mode boolean not null default false;
+alter table time_settings add column if not exists
+  vacation_carryover integer not null default 0;
 
 alter table time_settings enable row level security;
 drop policy if exists "time_settings_owner" on time_settings;

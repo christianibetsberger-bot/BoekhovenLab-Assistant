@@ -10,3 +10,7 @@ export function bumpTT() { ttBumpCounter.value = Date.now() }
 // watches this counter and disables auto-privacy + resets its idle timer.
 export const ttModuleActive = ref(0)
 export function signalModuleActive() { ttModuleActive.value = Date.now() }
+
+// Shared project list: TimeTracker writes here after every load/save so the
+// TopBarClock dropdown never depends on a separate DB read succeeding.
+export const ttProjectList = ref([])

@@ -1026,13 +1026,11 @@ async function suggestNext() {
 
 async function predictSequence() {
   isPredicting.value = true
-  const top = dataset.experiments.reduce((a, b) => a.maxConversion > b.maxConversion ? a : b, dataset.experiments[0])
   const result = await callBackend(ENDPOINTS.sequencePredict, {
     experiments: dataset.experiments,
-    fixedConditions: top?.conditions || null,
     topK: 5,
     ensembleSize: dataset.config.ensembleSize ?? 20,
-    poolSize: dataset.config.poolSize ?? 5000,
+    poolSize: 2000,
   })
   isPredicting.value = false
   if (result) seqCandidates.value = result.candidates || []

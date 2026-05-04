@@ -681,20 +681,24 @@ const todayHours = computed(() => {
     .reduce((s, e) => s + entryMinutes(e), 0) / 60).toFixed(1)
 })
 
-// Vacation/sick days within the current week reduce the required hours
-// proportionally (1 day = weekly_hours / 5).
-const thisWeekAbsenceDays = computed(() =>
-  absences.value
+// Count weekday absence days inside [weekStart, weekStart+7); half_day = 0.5
+function absenceDaysInWeek(weekStart) {
+  const wEnd = new Date(weekStart); wEnd.setDate(wEnd.getDate() + 7)
+  return absences.value
     .filter(a => {
       const [y, m, d] = a.date.split('-').map(Number)
       const dt = new Date(y, m - 1, d)
-      return dt >= thisWeekStart.value && dt.getDay() !== 0 && dt.getDay() !== 6
+      return dt >= weekStart && dt < wEnd && dt.getDay() !== 0 && dt.getDay() !== 6
     })
     .reduce((s, a) => s + (a.half_day ? 0.5 : 1), 0)
-)
-const effectiveWeeklyHours = computed(() =>
-  Math.max(0, settings.weekly_hours - (settings.weekly_hours / 5) * thisWeekAbsenceDays.value)
-)
+}
+// Effective weekly target for any given week, taking that week's absences into account
+function effectiveWeekTarget(weekStart) {
+  return Math.max(0, settings.weekly_hours - (settings.weekly_hours / 5) * absenceDaysInWeek(weekStart))
+}
+// Convenience for the current week's UI
+const thisWeekAbsenceDays = computed(() => absenceDaysInWeek(thisWeekStart.value))
+const effectiveWeeklyHours = computed(() => effectiveWeekTarget(thisWeekStart.value))
 
 // Overtime = weekday deficit/surplus (vs effective target) + all weekend hours
 const overtime    = computed(() => (thisWeekdayHours.value - effectiveWeeklyHours.value) + thisWeekendHours.value)
@@ -1319,13 +1323,25 @@ function renderDailyChart() {
   const xDays  = [...dayMap.keys()]
   const yHours = [...dayMap.values()].map(h => +h.toFixed(2))
   const reqLine = settings.weekly_hours / 5
+  // Build absence-aware per-day expected hours: 0 for sick/vacation days,
+  // 0 for weekends, otherwise the daily target.
+  const absenceDateSet = new Map(absences.value.map(a => [a.date, a.half_day ? 0.5 : 1]))
+  const dailyTargets = xDays.map(d => {
+    const dt = new Date(d + 'T00:00:00')
+    if (dt.getDay() === 0 || dt.getDay() === 6) return 0
+    const absFraction = absenceDateSet.get(d) || 0
+    return reqLine * (1 - absFraction)
+  })
   const layout = plotLayout()
   layout.yaxis.title = { text: 'h', font: { size: 10 } }
   layout.shapes = [{ type:'line', x0:xDays[0], x1:xDays[xDays.length-1], y0:reqLine, y1:reqLine,
     line: { color:'rgba(239,68,68,.6)', width:1.5, dash:'dot' } }]
   Plotly.react(dailyChartEl.value, [{
     type:'bar', x:xDays, y:yHours,
-    marker:{ color: yHours.map(h => h >= reqLine ? 'rgba(16,185,129,.7)' : 'rgba(99,102,241,.55)') },
+    // Each day's bar coloured against its own (absence-aware) target
+    marker:{ color: yHours.map((h, i) => h >= dailyTargets[i] && dailyTargets[i] > 0 ? 'rgba(16,185,129,.7)' :
+                                          h > 0 ? 'rgba(99,102,241,.55)' :
+                                          dailyTargets[i] === 0 ? '#e5e7eb' : '#e5e7eb') },
     hovertemplate:'%{x|%a %d.%m}<br>%{y:.1f}h<extra></extra>',
   }], layout, { responsive:true, displayModeBar:false })
 }
@@ -1406,18 +1422,34 @@ function renderTrendChart() {
     labels.push(`${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`)
     hours.push(+h.toFixed(2))
   }
+  // Each week's effective target accounts for any vacation/sick days within it
+  const weekTargets = []
+  for (let w = 7; w >= 0; w--) {
+    const wStart = new Date(monday); wStart.setDate(wStart.getDate() - w * 7)
+    weekTargets.push(effectiveWeekTarget(wStart))
+  }
+  // Average over the displayed weeks — drawn as a single horizontal line
+  const avg = hours.length ? hours.reduce((s, h) => s + h, 0) / hours.length : 0
+
   const layout = plotLayout()
   layout.yaxis.title = { text: 'h', font: { size: 10 } }
-  layout.shapes = [{ type:'line', x0:labels[0], x1:labels[labels.length-1],
-    y0:settings.weekly_hours, y1:settings.weekly_hours,
-    line:{ color:'rgba(239,68,68,.6)', width:1.5, dash:'dot' } }]
+  layout.shapes = [{
+    type: 'line', x0: labels[0], x1: labels[labels.length - 1],
+    y0: avg, y1: avg,
+    line: { color: '#3b82f6', width: 1.8, dash: 'dash' },
+  }]
+  layout.annotations = [{
+    x: labels[labels.length - 1], y: avg, text: `Ø ${avg.toFixed(1)}h`,
+    showarrow: false, xanchor: 'right', yanchor: 'bottom', font: { size: 10, color: '#3b82f6' },
+  }]
   Plotly.react(trendChartEl.value, [
-    { type:'bar', x:labels, y:hours, name:'h',
-      marker:{ color: hours.map(h => h >= settings.weekly_hours ? 'rgba(16,185,129,.65)' : 'rgba(99,102,241,.55)') },
-      hovertemplate:'Week of %{x}: %{y:.1f}h<extra></extra>' },
-    { type:'scatter', mode:'lines+markers', x:labels, y:hours,
-      line:{ color:'var(--primary)', width:2 }, marker:{ size:5 }, hoverinfo:'skip' },
-  ], layout, { responsive:true, displayModeBar:false })
+    {
+      type: 'bar', x: labels, y: hours, name: 'h',
+      // Colour each bar against its own week's effective target
+      marker: { color: hours.map((h, i) => h >= weekTargets[i] ? 'rgba(16,185,129,.7)' : 'rgba(99,102,241,.55)') },
+      hovertemplate: 'Week of %{x}: %{y:.1f}h<extra></extra>',
+    },
+  ], layout, { responsive: true, displayModeBar: false })
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────

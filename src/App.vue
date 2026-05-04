@@ -108,12 +108,27 @@ function onColDrop(e, col) {
   clearDragState(); saveLayout()
 }
 
+// Per-user module visibility overrides — listed users never see these modules
+// (TimeTracker is not relevant for the lab head).
+const PER_USER_HIDDEN = {
+  timeTracker: ['job.boekhoven@tum.de'],
+}
+function isModuleHiddenForUser(id) {
+  const list = PER_USER_HIDDEN[id]
+  if (!list) return false
+  return list.includes(store.user?.email)
+}
+const visibleTimeTracker = computed(() => !isModuleHiddenForUser('timeTracker'))
+
 // All module ids visible in the sidebar (excludes sidebarHidden); top → left → right order
 const allModuleIds = computed(() => {
   const seen = new Set(); const result = []
   const hidden = layout.value.sidebarHidden || {}
   for (const id of [...layout.value.topOrder, ...layout.value.leftOrder, ...layout.value.rightOrder]) {
-    if (!seen.has(id) && !hidden[id]) { seen.add(id); result.push(id) }
+    if (seen.has(id)) continue
+    if (hidden[id])  continue
+    if (isModuleHiddenForUser(id)) continue
+    seen.add(id); result.push(id)
   }
   return result
 })
@@ -257,7 +272,7 @@ onUnmounted(() => document.removeEventListener('click', _closeRedock))
       <div class="app-main">
 
         <div class="top-bar">
-          <TopBarClock />
+          <TopBarClock v-if="visibleTimeTracker" />
           <span class="user-info"><i class="fas fa-user-circle"></i> {{ store.user.email }}</span>
           <button class="small danger" @click="signOut"><i class="fas fa-sign-out-alt"></i> Log Out</button>
         </div>
@@ -271,6 +286,7 @@ onUnmounted(() => document.removeEventListener('click', _closeRedock))
         >
           <template v-for="id in layout.topOrder" :key="id">
             <div
+              v-if="!isModuleHiddenForUser(id)"
               v-show="!isMinimized(id)"
               class="module-wrapper top-module"
               :class="{ 'drag-over': dragOverId === id && dragOverCol === 'top' }"
@@ -304,6 +320,7 @@ onUnmounted(() => document.removeEventListener('click', _closeRedock))
           >
             <template v-for="id in layout.leftOrder" :key="id">
               <div
+                v-if="!isModuleHiddenForUser(id)"
                 v-show="!isMinimized(id)"
                 class="module-wrapper"
                 :class="{ 'drag-over': dragOverId === id && dragOverCol === 'left' }"
@@ -334,6 +351,7 @@ onUnmounted(() => document.removeEventListener('click', _closeRedock))
           >
             <template v-for="id in layout.rightOrder" :key="id">
               <div
+                v-if="!isModuleHiddenForUser(id)"
                 v-show="!isMinimized(id)"
                 class="module-wrapper"
                 :class="{ 'drag-over': dragOverId === id && dragOverCol === 'right' }"

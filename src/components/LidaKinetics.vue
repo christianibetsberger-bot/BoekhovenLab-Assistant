@@ -139,23 +139,34 @@
 
         <!-- AL Config -->
         <section class="lida-section">
-          <h3><i class="fas fa-wand-magic-sparkles icon-muted"></i> Suggestion Strategy</h3>
+          <h3><i class="fas fa-wand-magic-sparkles icon-muted"></i> Suggestion Strategy (METIS / UCB)</h3>
           <div class="grid-2-col">
             <div class="input-group">
               <label>Number of suggestions</label>
               <input type="number" min="1" max="96" v-model.number="dataset.config.nSuggestions" />
             </div>
             <div class="input-group">
-              <label>Strategy</label>
-              <div style="display:flex; gap:10px;">
-                <label class="checkbox-label" style="font-size:0.8rem;">
-                  <input type="radio" v-model="dataset.config.strategy" value="exploit" /> Exploit (max yield)
-                </label>
-                <label class="checkbox-label" style="font-size:0.8rem;">
-                  <input type="radio" v-model="dataset.config.strategy" value="explore" /> Explore (uncertainty)
-                </label>
-              </div>
+              <label>Ensemble size (XGBoost models)</label>
+              <input type="number" min="5" max="50" step="5" v-model.number="dataset.config.ensembleSize" />
             </div>
+          </div>
+          <div class="input-group" style="margin-top:8px;">
+            <label>
+              Exploration κ (UCB coefficient):
+              <strong style="color:var(--primary);">{{ (dataset.config.explorationCoeff ?? 1.41).toFixed(2) }}</strong>
+              <span style="font-size:0.72rem; opacity:0.65; margin-left:6px;">
+                {{ (dataset.config.explorationCoeff ?? 1.41) === 0 ? '— pure exploit' : (dataset.config.explorationCoeff ?? 1.41) >= 3 ? '— pure explore' : '— balanced' }}
+              </span>
+            </label>
+            <input type="range" min="0" max="3" step="0.05" v-model.number="dataset.config.explorationCoeff" />
+            <div style="display:flex; justify-content:space-between; font-size:0.7rem; opacity:0.6; margin-top:2px;">
+              <span>0 · Exploit</span><span>1.41 · UCB1</span><span>3 · Explore</span>
+            </div>
+          </div>
+          <div class="input-group" style="margin-top:8px;">
+            <label>Candidate pool size</label>
+            <input type="number" min="500" max="20000" step="500" v-model.number="dataset.config.poolSize" />
+            <span style="font-size:0.72rem; opacity:0.65;">Random condition combinations sampled before UCB scoring</span>
           </div>
           <div class="input-group" style="margin-top:8px;">
             <label>Yield-threshold percentile for sequence logo (default 80%)</label>
@@ -320,6 +331,7 @@
                 <div class="sug-seq">{{ c.sequence }}</div>
                 <div class="sug-pred">
                   Predicted: <strong>{{ formatNum(c.predicted_conversion) }}%</strong>
+                  <span v-if="c.uncertainty != null" style="opacity:0.7;">± {{ formatNum(c.uncertainty) }}</span>
                 </div>
               </div>
             </div>
@@ -385,7 +397,9 @@ function emptyDataset() {
     config: {
       ranges: { tMin: 20, tMax: 50, ligaseMin: 0, ligaseMax: 10, atpMin: 0, atpMax: 10, mg2Min: 0, mg2Max: 20 },
       nSuggestions: 12,
-      strategy: 'exploit',
+      explorationCoeff: 1.41,
+      ensembleSize: 20,
+      poolSize: 5000,
       yieldThreshold: 80,
     },
     suggestions: [],
@@ -985,7 +999,9 @@ async function suggestNext() {
     experiments: dataset.experiments,
     ranges: dataset.config.ranges,
     nSuggestions: dataset.config.nSuggestions,
-    strategy: dataset.config.strategy,
+    explorationCoeff: dataset.config.explorationCoeff ?? 1.41,
+    ensembleSize: dataset.config.ensembleSize ?? 20,
+    poolSize: dataset.config.poolSize ?? 5000,
   })
   isSuggesting.value = false
   if (result) aiSuggestions.value = result.suggestions || []
@@ -998,6 +1014,8 @@ async function predictSequence() {
     experiments: dataset.experiments,
     fixedConditions: top?.conditions || null,
     topK: 5,
+    ensembleSize: dataset.config.ensembleSize ?? 20,
+    poolSize: dataset.config.poolSize ?? 5000,
   })
   isPredicting.value = false
   if (result) seqCandidates.value = result.candidates || []
@@ -1030,6 +1048,7 @@ async function loadFromLibrary(item) {
     if (loaded[k] == null) loaded[k] = fresh[k]
   }
   loaded.kinetics = { ...fresh.kinetics, ...(loaded.kinetics || {}) }
+  loaded.config = { ...fresh.config, ...(loaded.config || {}) }
   Object.assign(dataset, loaded)
   showLibrary.value = false
   aiSuggestions.value = item.suggestions || []

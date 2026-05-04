@@ -30,6 +30,8 @@ Add (or confirm) these in `requirements.txt`:
 scikit-learn>=1.3
 scipy>=1.11
 numpy>=1.24
+xgboost>=1.7
+pandas>=1.5
 ```
 
 `scipy` and `numpy` are likely already pinned for the existing `/api/phase-boundary` endpoint.
@@ -38,9 +40,34 @@ numpy>=1.24
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/kinetics-fit` | Per-group kinetic model (first-order or sigmoidal, AIC-selected) |
-| POST | `/api/kinetics-suggest` | Active-learning suggestions for next experiments |
-| POST | `/api/kinetics-sequence-predict` | Greedy sequence optimization for high yield |
+| POST | `/api/kinetics-fit` | Per-group kinetic model (first-order or sigmoidal, AIC-selected) — unchanged |
+| POST | `/api/kinetics-suggest` | METIS UCB active-learning suggestions |
+| POST | `/api/kinetics-sequence-predict` | XGBoost ensemble sequence optimization |
+
+### `/api/kinetics-suggest` — request fields
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `experiments` | list | required | array of experiment groups |
+| `ranges` | object | required | `{tMin, tMax, ligaseMin, ligaseMax, atpMin, atpMax, mg2Min, mg2Max}` |
+| `nSuggestions` | int | 12 | how many top candidates to return |
+| `explorationCoeff` | float | 1.41 | κ in UCB = mean + κ·std. 0 = pure exploit, √2 ≈ 1.41 = UCB1, 3 = pure explore |
+| `ensembleSize` | int | 20 | number of XGBoost models in ensemble (top-N from RandomizedSearchCV) |
+| `poolSize` | int | 5000 | random condition combinations to score before returning top-N |
+
+**Response** includes per-suggestion `predicted_conversion`, `uncertainty` (ensemble std), and `ucb` score.
+
+### `/api/kinetics-sequence-predict` — request fields
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `experiments` | list | required | — |
+| `fixedConditions` | object | null | conditions to hold constant while varying sequence |
+| `topK` | int | 5 | sequences to return |
+| `ensembleSize` | int | 20 | — |
+| `poolSize` | int | 5000 | random sequences sampled from ACGT space |
+
+**Response** includes per-candidate `predicted_conversion` and `uncertainty`.
 
 The frontend calls these from `src/components/LidaKinetics.vue` via `src/services/kineticsBackend.js`. If the backend is not yet deployed, the frontend gracefully degrades — CSV import, ledger, sequence-logo math, and Supabase save still work.
 

@@ -201,7 +201,7 @@ async function load() {
 
   const { data: cfg } = await db.from('time_settings')
     .select('weekly_hours,custom_tasks,custom_projects,privacy_mode')
-    .eq('owner_id', store.user.id).single()
+    .eq('owner_id', store.user.id).maybeSingle()
   if (cfg) {
     dailyTargetH.value = (cfg.weekly_hours ?? 40) / 5
     privacyMode.value  = !!cfg.privacy_mode
@@ -384,6 +384,9 @@ watch(ttModuleActive, async () => {
   if (privacyMode.value) await setPrivacy(false)
   markActive()
 })
+
+// Auth may resolve after mount — ensure we load as soon as user is available
+watch(() => store.user, u => { if (u) load() })
 
 onBeforeUnmount(() => {
   clearInterval(ticker)

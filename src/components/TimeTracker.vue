@@ -392,8 +392,8 @@
               <div class="tt-stat-label">Vacation used</div>
             </div>
             <div class="tt-stat">
-              <div class="tt-stat-value">{{ settings.vacation_days_per_year }}</div>
-              <div class="tt-stat-label">Vacation total</div>
+              <div class="tt-stat-value">{{ totalVacationThisYear }}</div>
+              <div class="tt-stat-label">Vacation total<span v-if="vacationCarriedOver > 0" class="tt-we-note"> (+{{ vacationCarriedOver }}✈)</span></div>
             </div>
             <div class="tt-stat" :class="sickDaysThisYear > 10 ? 'negative' : ''">
               <div class="tt-stat-value">{{ sickDaysThisYear }}</div>
@@ -402,10 +402,11 @@
           </div>
           <div class="tt-progress-bar" style="margin-top:8px;">
             <div class="tt-progress-fill"
-              :style="{ width: Math.min(100, (vacationUsedThisYear / settings.vacation_days_per_year) * 100) + '%', background: 'var(--warning, #f59e0b)' }"></div>
+              :style="{ width: Math.min(100, (vacationUsedThisYear / totalVacationThisYear) * 100) + '%', background: 'var(--warning, #f59e0b)' }"></div>
           </div>
           <div style="font-size:0.72rem; opacity:0.6; margin-top:4px; text-align:right;">
-            {{ vacationUsedThisYear }} / {{ settings.vacation_days_per_year }} vacation days used
+            {{ vacationUsedThisYear }} / {{ totalVacationThisYear }} vacation days used
+            <template v-if="vacationCarriedOver > 0"> · {{ settings.vacation_days_per_year }}/y + {{ vacationCarriedOver }} carried over</template>
           </div>
         </section>
 
@@ -443,7 +444,7 @@
         <!-- Settings -->
         <section class="tt-section">
           <h3><i class="fas fa-gear icon-muted"></i> Settings</h3>
-          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:6px;">
             <div class="input-group">
               <label>Weekly hours</label>
               <input type="number" min="1" max="80" v-model.number="settings.weekly_hours" @change="saveSettings" />
@@ -456,6 +457,12 @@
               <label>Timezone</label>
               <input type="text" v-model="settings.timezone" placeholder="Europe/Berlin" @change="saveSettings" />
             </div>
+          </div>
+          <div style="font-size:0.74rem; opacity:0.7; margin-bottom:10px; padding:5px 8px; background:var(--input-bg); border-radius:6px; border-left:3px solid var(--warning,#f59e0b);">
+            <i class="fas fa-circle-info"></i>
+            <strong>{{ vacationCarriedOver > 0 ? vacationCarriedOver + ' days' : 'No days' }}</strong>
+            carried over from prior years (auto-computed from your absence log).
+            Total available this year: <strong>{{ totalVacationThisYear }}</strong> days.
           </div>
           <label class="checkbox-label" style="display:flex; align-items:center; gap:6px; margin-bottom:10px; font-size:0.78rem;">
             <input type="checkbox" v-model="settings.privacy_mode" @change="saveSettings" />
@@ -849,8 +856,32 @@ const vacationUsedThisYear = computed(() =>
     .reduce((s, a) => s + (a.half_day ? 0.5 : 1), 0)
 )
 
+// Chain carry-overs year-over-year: unused days from each past year roll into the next.
+const vacationCarriedOver = computed(() => {
+  const currentYr = currentYear.value
+  const byYear = {}
+  for (const a of absences.value) {
+    if (a.type !== 'vacation') continue
+    const yr = parseInt(a.date.split('-')[0])
+    if (yr >= currentYr) continue
+    byYear[yr] = (byYear[yr] || 0) + (a.half_day ? 0.5 : 1)
+  }
+  const years = Object.keys(byYear).map(Number)
+  if (!years.length) return 0
+  let carryOver = 0
+  for (let yr = Math.min(...years); yr < currentYr; yr++) {
+    const available = settings.vacation_days_per_year + carryOver
+    carryOver = Math.max(0, available - (byYear[yr] || 0))
+  }
+  return carryOver
+})
+
+const totalVacationThisYear = computed(() =>
+  settings.vacation_days_per_year + vacationCarriedOver.value
+)
+
 const vacationRemaining = computed(() =>
-  settings.vacation_days_per_year - vacationUsedThisYear.value
+  totalVacationThisYear.value - vacationUsedThisYear.value
 )
 
 // ── Formatters ────────────────────────────────────────────────────────────────

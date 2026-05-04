@@ -298,8 +298,14 @@
         </section>
 
         <!-- Suggestions -->
-        <section class="lida-section" v-if="aiSuggestions.length">
+        <section class="lida-section">
           <h3><i class="fas fa-lightbulb icon-muted"></i> Suggested Next Experiments</h3>
+          <div v-if="suggestNote" class="lida-warn" style="margin-bottom:8px;">
+            <i class="fas fa-circle-info"></i> {{ suggestNote }}
+          </div>
+          <div v-if="!aiSuggestions.length && !suggestNote" style="opacity:0.5; font-size:0.8rem; padding:8px 0;">
+            Click <strong>Suggest Next</strong> above to run METIS active learning on your experiment data.
+          </div>
           <div class="suggestions-list">
             <div v-for="(s, i) in aiSuggestions" :key="i" class="suggestion-card">
               <div class="sug-rank">#{{ i + 1 }}</div>
@@ -415,6 +421,7 @@ const isSuggesting = ref(false)
 const isPredicting = ref(false)
 
 const aiSuggestions = ref([])
+const suggestNote = ref('')
 const seqCandidates = ref([])
 
 const heatX = ref('temperature')
@@ -471,6 +478,7 @@ function newDataset() {
   if (dataset.experiments.length && !confirm('Discard current dataset?')) return
   Object.assign(dataset, emptyDataset())
   aiSuggestions.value = []
+  suggestNote.value = ''
   seqCandidates.value = []
   backendError.value = ''
   parseError.value = ''
@@ -481,6 +489,7 @@ function clearAll() {
   if (!confirm('Remove all experiment groups from this dataset?')) return
   dataset.experiments = []
   aiSuggestions.value = []
+  suggestNote.value = ''
   seqCandidates.value = []
 }
 
@@ -994,6 +1003,11 @@ async function fitKinetics() {
 }
 
 async function suggestNext() {
+  suggestNote.value = ''
+  if (dataset.experiments.length < 3) {
+    suggestNote.value = `METIS needs at least 3 experiment groups to train on — you have ${dataset.experiments.length}. Import more CSV data with varied conditions.`
+    return
+  }
   isSuggesting.value = true
   const result = await callBackend(ENDPOINTS.suggest, {
     experiments: dataset.experiments,
@@ -1004,7 +1018,10 @@ async function suggestNext() {
     poolSize: dataset.config.poolSize ?? 5000,
   })
   isSuggesting.value = false
-  if (result) aiSuggestions.value = result.suggestions || []
+  if (result) {
+    aiSuggestions.value = result.suggestions || []
+    suggestNote.value = result.note || (result.suggestions?.length === 0 ? 'Backend returned no suggestions — check experiment data or expand condition ranges.' : '')
+  }
 }
 
 async function predictSequence() {
@@ -1052,6 +1069,7 @@ async function loadFromLibrary(item) {
   Object.assign(dataset, loaded)
   showLibrary.value = false
   aiSuggestions.value = item.suggestions || []
+  suggestNote.value = ''
   seqCandidates.value = []
 }
 

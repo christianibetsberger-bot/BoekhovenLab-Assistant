@@ -161,10 +161,22 @@
         <section class="tt-section">
           <h3><i class="fas fa-calendar-xmark icon-muted"></i> Sick Days &amp; Vacation</h3>
           <div class="tt-form">
+            <div style="display:flex; gap:10px; align-items:center; font-size:0.78rem;">
+              <label class="checkbox-label" style="margin:0;">
+                <input type="radio" :value="false" v-model="absRangeMode" /> Single day
+              </label>
+              <label class="checkbox-label" style="margin:0;">
+                <input type="radio" :value="true" v-model="absRangeMode" /> Range (skip weekends + Bavarian holidays)
+              </label>
+            </div>
             <div class="tt-form-row">
               <div class="input-group" style="flex:1;">
-                <label>Date</label>
+                <label>{{ absRangeMode ? 'From' : 'Date' }}</label>
                 <input type="date" v-model="absDate" />
+              </div>
+              <div v-if="absRangeMode" class="input-group" style="flex:1;">
+                <label>To</label>
+                <input type="date" v-model="absDateTo" />
               </div>
               <div class="input-group" style="flex:1;">
                 <label>Type</label>
@@ -173,7 +185,7 @@
                   <option value="vacation">Vacation</option>
                 </select>
               </div>
-              <div class="input-group" style="flex:1;">
+              <div v-if="!absRangeMode" class="input-group" style="flex:1;">
                 <label>Duration</label>
                 <select v-model="absHalf">
                   <option :value="false">Full day</option>
@@ -181,12 +193,15 @@
                 </select>
               </div>
             </div>
+            <div v-if="absRangeMode && rangePreview" style="font-size:0.72rem; opacity:0.7; padding:4px 8px; background:var(--input-bg); border-radius:4px;">
+              <i class="fas fa-info-circle"></i> {{ rangePreview }}
+            </div>
             <div class="input-group">
               <label>Note (optional)</label>
               <input type="text" v-model="absNote" placeholder="e.g. Doctor's appointment" />
             </div>
             <button class="small success" @click="addAbsence" :disabled="isSaving">
-              <i class="fas fa-plus"></i> Log Absence
+              <i class="fas fa-plus"></i> Log {{ absRangeMode ? 'Range' : 'Absence' }}
             </button>
           </div>
 
@@ -516,10 +531,12 @@ const nbProject = ref('')
 const nbNote    = ref('')
 
 // Absence form
-const absDate = ref('')
-const absType = ref('sick')
-const absHalf = ref(false)
-const absNote = ref('')
+const absDate      = ref('')
+const absDateTo    = ref('')
+const absRangeMode = ref(false)
+const absType      = ref('sick')
+const absHalf      = ref(false)
+const absNote      = ref('')
 
 // History edit
 const editingId   = ref(null)
@@ -634,6 +651,54 @@ function isNachbuchung(entry) {
   return (new Date(entry.created_at) - new Date(entry.checked_in)) > 3600000
 }
 
+// ─── Bavarian public holidays ────────────────────────────────────────────────
+// Anonymous Gregorian algorithm (Meeus/Jones/Butcher) for Easter Sunday
+function easterDate(year) {
+  const a = year % 19
+  const b = Math.floor(year / 100), c = year % 100
+  const d = Math.floor(b / 4),  e = b % 4
+  const f = Math.floor((b + 8) / 25)
+  const g = Math.floor((b - f + 1) / 3)
+  const h = (19 * a + b - d - g + 15) % 30
+  const i = Math.floor(c / 4),  k = c % 4
+  const l = (32 + 2 * e + 2 * i - h - k) % 7
+  const m = Math.floor((a + 11 * h + 22 * l) / 451)
+  const n = h + l - 7 * m + 114
+  return new Date(year, Math.floor(n / 31) - 1, (n % 31) + 1)
+}
+
+function _fmtDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+}
+
+const _holidayCache = new Map()
+function getBavarianHolidays(year) {
+  if (_holidayCache.has(year)) return _holidayCache.get(year)
+  const set = new Set([
+    `${year}-01-01`,  // Neujahr
+    `${year}-01-06`,  // Hl. Drei Könige (Bayern)
+    `${year}-05-01`,  // Tag der Arbeit
+    `${year}-08-15`,  // Mariä Himmelfahrt (Bayern, kath.)
+    `${year}-10-03`,  // Tag der Deutschen Einheit
+    `${year}-11-01`,  // Allerheiligen (Bayern)
+    `${year}-12-25`,  // 1. Weihnachtstag
+    `${year}-12-26`,  // 2. Weihnachtstag
+  ])
+  const easter = easterDate(year)
+  for (const off of [-2, 1, 39, 50, 60]) {
+    // Karfreitag, Ostermontag, Christi Himmelfahrt, Pfingstmontag, Fronleichnam
+    const d = new Date(easter); d.setDate(d.getDate() + off)
+    set.add(_fmtDate(d))
+  }
+  _holidayCache.set(year, set)
+  return set
+}
+
+function isBavarianHoliday(dateStr) {
+  const yr = parseInt(dateStr.split('-')[0])
+  return getBavarianHolidays(yr).has(dateStr)
+}
+
 function toDatetimeLocal(ts) {
   if (!ts) return ''
   const d = new Date(ts)
@@ -692,9 +757,22 @@ function absenceDaysInWeek(weekStart) {
     })
     .reduce((s, a) => s + (a.half_day ? 0.5 : 1), 0)
 }
-// Effective weekly target for any given week, taking that week's absences into account
+// Count Bavarian public holidays falling on a Mon-Fri inside the given week
+function holidaysInWeek(weekStart) {
+  const wEnd = new Date(weekStart); wEnd.setDate(wEnd.getDate() + 7)
+  let count = 0
+  let cur = new Date(weekStart)
+  while (cur < wEnd) {
+    const dow = cur.getDay()
+    if (dow !== 0 && dow !== 6 && isBavarianHoliday(_fmtDate(cur))) count++
+    cur.setDate(cur.getDate() + 1)
+  }
+  return count
+}
+// Effective weekly target — reduced by both absences AND public holidays
 function effectiveWeekTarget(weekStart) {
-  return Math.max(0, settings.weekly_hours - (settings.weekly_hours / 5) * absenceDaysInWeek(weekStart))
+  const reduction = absenceDaysInWeek(weekStart) + holidaysInWeek(weekStart)
+  return Math.max(0, settings.weekly_hours - (settings.weekly_hours / 5) * reduction)
 }
 // Convenience for the current week's UI
 const thisWeekAbsenceDays = computed(() => absenceDaysInWeek(thisWeekStart.value))
@@ -708,6 +786,26 @@ const weekPercent = computed(() =>
 )
 
 const isWeekendToday = computed(() => { const d = now.value.getDay(); return d === 0 || d === 6 })
+
+// Live preview of how many working days the selected range will produce
+const rangePreview = computed(() => {
+  if (!absRangeMode.value || !absDate.value || !absDateTo.value) return ''
+  const [y1, m1, d1] = absDate.value.split('-').map(Number)
+  const [y2, m2, d2] = absDateTo.value.split('-').map(Number)
+  const start = new Date(y1, m1 - 1, d1), end = new Date(y2, m2 - 1, d2)
+  if (end < start) return 'End date must be after start date.'
+  let workingDays = 0, weekendDays = 0, holidayDays = 0
+  let cur = new Date(start)
+  while (cur <= end) {
+    const dow = cur.getDay()
+    const ds = _fmtDate(cur)
+    if (dow === 0 || dow === 6) weekendDays++
+    else if (isBavarianHoliday(ds)) holidayDays++
+    else workingDays++
+    cur.setDate(cur.getDate() + 1)
+  }
+  return `${workingDays} working day${workingDays === 1 ? '' : 's'} will be logged · ${weekendDays} weekend day${weekendDays === 1 ? '' : 's'} and ${holidayDays} holiday${holidayDays === 1 ? '' : 's'} skipped.`
+})
 
 const chartPeriodLabel = computed(() => {
   if (chartPeriod.value === 'week') return 'this week'
@@ -920,6 +1018,45 @@ async function submitNachbuchen() {
 async function addAbsence() {
   if (!store.user || !absDate.value) return
   isSaving.value = true
+
+  // ── Range mode: expand into one row per working weekday ──
+  if (absRangeMode.value) {
+    if (!absDateTo.value) { isSaving.value = false; return }
+    const [y1, m1, d1] = absDate.value.split('-').map(Number)
+    const [y2, m2, d2] = absDateTo.value.split('-').map(Number)
+    const start = new Date(y1, m1 - 1, d1), end = new Date(y2, m2 - 1, d2)
+    if (end < start) { alert('End date must be after start date.'); isSaving.value = false; return }
+
+    const rows = []
+    let cur = new Date(start)
+    while (cur <= end) {
+      const dow = cur.getDay()
+      const ds = _fmtDate(cur)
+      if (dow !== 0 && dow !== 6 && !isBavarianHoliday(ds)) {
+        rows.push({
+          owner_id: store.user.id,
+          date:     ds,
+          type:     absType.value,
+          half_day: false,
+          note:     absNote.value.trim(),
+        })
+      }
+      cur.setDate(cur.getDate() + 1)
+    }
+    if (!rows.length) {
+      alert('No working days in this range — only weekends and / or holidays.')
+      isSaving.value = false
+      return
+    }
+    const { data } = await db.from('time_absences').insert(rows).select()
+    if (data) absences.value = [...data, ...absences.value]
+    absNote.value = ''; absDateTo.value = ''
+    isSaving.value = false
+    bumpTT()
+    return
+  }
+
+  // ── Single-day (original behaviour) ──
   const { data } = await db.from('time_absences').insert({
     owner_id: store.user.id,
     date:     absDate.value,

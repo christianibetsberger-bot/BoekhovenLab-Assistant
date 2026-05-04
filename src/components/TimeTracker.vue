@@ -32,7 +32,7 @@
                   </select>
                 </div>
                 <div v-else style="display:flex; gap:4px;">
-                  <input type="text" v-model="newTaskName" placeholder="New task name" @keyup.enter="confirmNewTask('pending')" autofocus style="flex:1;" />
+                  <input type="text" v-model="newTaskName" placeholder="New task" @keyup.enter="confirmNewTask('pending')" autofocus style="flex:1;" />
                   <button class="small success" @click="confirmNewTask('pending')"><i class="fas fa-check"></i></button>
                   <button class="small" @click="cancelNewTask"><i class="fas fa-times"></i></button>
                 </div>
@@ -47,15 +47,15 @@
                   </select>
                 </div>
                 <div v-else style="display:flex; gap:4px;">
-                  <input type="text" v-model="newProjectName" placeholder="New project name" @keyup.enter="confirmNewProject('pending')" autofocus style="flex:1;" />
+                  <input type="text" v-model="newProjectName" placeholder="New project" @keyup.enter="confirmNewProject('pending')" autofocus style="flex:1;" />
                   <button class="small success" @click="confirmNewProject('pending')" title="Add"><i class="fas fa-check"></i></button>
                   <button class="small" @click="cancelNewProject" title="Cancel"><i class="fas fa-times"></i></button>
                 </div>
               </div>
             </div>
             <div class="input-group">
-              <label>Note (optional)</label>
-              <input type="text" v-model="pendingNote" placeholder="What are you working on?" />
+              <label>Note</label>
+              <input type="text" v-model="pendingNote" placeholder="…" />
             </div>
 
             <div v-if="activeEntry" class="tt-active-info">
@@ -68,7 +68,7 @@
                   </select>
                 </template>
                 <template v-else>
-                  <input type="text" v-model="newTaskName" placeholder="New task name" @keyup.enter="confirmNewTask('active')" autofocus style="font-size:.8rem; padding:2px 6px;" />
+                  <input type="text" v-model="newTaskName" placeholder="New task" @keyup.enter="confirmNewTask('active')" autofocus style="font-size:.8rem; padding:2px 6px;" />
                   <button class="small success" @click="confirmNewTask('active')"><i class="fas fa-check"></i></button>
                   <button class="small" @click="cancelNewTask"><i class="fas fa-times"></i></button>
                 </template>
@@ -90,7 +90,7 @@
             <!-- Nachbuchen toggle -->
             <button class="small" style="margin-top:4px; width:100%;" @click="showNachbuchen = !showNachbuchen">
               <i class="fas fa-pencil"></i>
-              {{ showNachbuchen ? 'Close Nachbuchen' : 'Nachbuchen (Add Past Entry)' }}
+              {{ showNachbuchen ? 'Close' : 'Nachbuchen' }}
             </button>
           </div>
         </section>
@@ -98,9 +98,6 @@
         <!-- Nachbuchen panel -->
         <section v-if="showNachbuchen" class="tt-section tt-section-nb">
           <h3><i class="fas fa-pencil icon-muted"></i> Nachbuchen</h3>
-          <p style="font-size:0.75rem; opacity:0.65; margin:0 0 8px;">
-            Entry will be logged with today's timestamp to indicate it was added retroactively.
-          </p>
           <div class="tt-form">
             <div class="tt-form-row">
               <div class="input-group" style="flex:1;">
@@ -126,7 +123,7 @@
                   </select>
                 </div>
                 <div v-else style="display:flex; gap:4px;">
-                  <input type="text" v-model="newTaskName" placeholder="New task name" @keyup.enter="confirmNewTask('nb')" autofocus style="flex:1;" />
+                  <input type="text" v-model="newTaskName" placeholder="New task" @keyup.enter="confirmNewTask('nb')" autofocus style="flex:1;" />
                   <button class="small success" @click="confirmNewTask('nb')"><i class="fas fa-check"></i></button>
                   <button class="small" @click="cancelNewTask"><i class="fas fa-times"></i></button>
                 </div>
@@ -141,7 +138,7 @@
                   </select>
                 </div>
                 <div v-else style="display:flex; gap:4px;">
-                  <input type="text" v-model="newProjectName" placeholder="New project name" @keyup.enter="confirmNewProject('nb')" autofocus style="flex:1;" />
+                  <input type="text" v-model="newProjectName" placeholder="New project" @keyup.enter="confirmNewProject('nb')" autofocus style="flex:1;" />
                   <button class="small success" @click="confirmNewProject('nb')"><i class="fas fa-check"></i></button>
                   <button class="small" @click="cancelNewProject"><i class="fas fa-times"></i></button>
                 </div>
@@ -166,7 +163,7 @@
                 <input type="radio" :value="false" v-model="absRangeMode" /> Single day
               </label>
               <label class="checkbox-label" style="margin:0;">
-                <input type="radio" :value="true" v-model="absRangeMode" /> Range (skip weekends + Bavarian holidays)
+                <input type="radio" :value="true" v-model="absRangeMode" /> Range
               </label>
             </div>
             <div class="tt-form-row">
@@ -197,8 +194,8 @@
               <i class="fas fa-info-circle"></i> {{ rangePreview }}
             </div>
             <div class="input-group">
-              <label>Note (optional)</label>
-              <input type="text" v-model="absNote" placeholder="e.g. Doctor's appointment" />
+              <label>Note</label>
+              <input type="text" v-model="absNote" placeholder="…" />
             </div>
             <button class="small success" @click="addAbsence" :disabled="isSaving">
               <i class="fas fa-plus"></i> Log {{ absRangeMode ? 'Range' : 'Absence' }}
@@ -256,7 +253,7 @@
             </div>
             <div class="tt-stat" :class="isWeekendToday ? 'positive' : ''">
               <div class="tt-stat-value">{{ todayHours }}</div>
-              <div class="tt-stat-label">Today{{ isWeekendToday ? ' 🔴OT' : ' (h)' }}</div>
+              <div class="tt-stat-label">Today{{ isWeekendToday ? ' 🔴' : '' }}</div>
             </div>
           </div>
           <div class="tt-progress-bar">
@@ -460,23 +457,22 @@
           </div>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:8px;">
             <div class="input-group" style="margin:0;">
-              <label>Vacation carry-over (days from last year)</label>
+              <label>Carry-over days</label>
               <input type="number" min="0" max="365" v-model.number="settings.vacation_carryover" @change="saveSettings"
                 :placeholder="'Auto: ' + vacationCarriedOver" />
             </div>
-            <div style="font-size:0.73rem; opacity:0.7; padding:6px 8px; background:var(--input-bg); border-radius:6px; border-left:3px solid var(--warning,#f59e0b); display:flex; flex-direction:column; justify-content:center; gap:2px;">
-              <div><i class="fas fa-circle-info"></i> Auto-computed: <strong>{{ vacationCarriedOver }}</strong> days</div>
-              <div>Set to 0 to use auto · Total this year: <strong>{{ totalVacationThisYear }}</strong> days</div>
+            <div style="font-size:0.73rem; opacity:0.7; padding:6px 8px; background:var(--input-bg); border-radius:6px; border-left:3px solid var(--warning,#f59e0b); display:flex; align-items:center;">
+              Auto: <strong style="margin:0 3px;">{{ vacationCarriedOver }}</strong> · Total: <strong style="margin-left:3px;">{{ totalVacationThisYear }}</strong> days (0 = use auto)
             </div>
           </div>
           <label class="checkbox-label" style="display:flex; align-items:center; gap:6px; margin-bottom:10px; font-size:0.78rem;">
             <input type="checkbox" v-model="settings.privacy_mode" @change="saveSettings" />
             <i class="fas fa-eye-slash" style="opacity:.6;"></i>
-            Privacy mode — hide live timer in the header (shows greyed-out 00:00:00)
+            Privacy mode
           </label>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
             <div class="input-group">
-              <label>Task categories (one per line)</label>
+              <label>Tasks</label>
               <textarea
                 :value="settings.custom_tasks.join('\n')"
                 @change="e => { settings.custom_tasks = e.target.value.split('\n').map(s => s.trim()).filter(Boolean); saveSettings() }"
@@ -484,12 +480,11 @@
               ></textarea>
             </div>
             <div class="input-group">
-              <label>Projects (one per line)</label>
+              <label>Projects</label>
               <textarea
                 :value="settings.custom_projects.join('\n')"
                 @change="e => { settings.custom_projects = e.target.value.split('\n').map(s => s.trim()).filter(Boolean); saveSettings() }"
                 rows="7" style="font-size:0.78rem; font-family:monospace;"
-                placeholder="Auto-populated when you log new project names"
               ></textarea>
             </div>
           </div>

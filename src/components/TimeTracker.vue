@@ -1599,8 +1599,9 @@ watch(() => settings.weekly_hours, renderCharts)
 // Live: re-render all charts on every clock tick during an active session
 watch(currentDuration, () => { if (activeEntry.value) renderCharts() })
 
-// React to mutations from the TopBarClock (header check-in/out/switch)
+// React to mutations from the TopBarClock (header check-in/out/switch/+Add)
 watch(ttBumpCounter, async () => {
+  await loadSettings()    // pick up new custom tasks / projects from header
   await loadEntries()
   await loadAbsences()
   renderCharts()

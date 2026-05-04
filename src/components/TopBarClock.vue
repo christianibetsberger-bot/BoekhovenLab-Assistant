@@ -250,6 +250,7 @@ async function persistNewTask(name) {
   const { data } = await db.from('time_settings').select('*').eq('owner_id', store.user.id).maybeSingle()
   const merged = { ...(data || {}), owner_id: store.user.id, custom_tasks: taskList.value }
   await db.from('time_settings').upsert(merged, { onConflict: 'owner_id' })
+  bumpTT()    // keep the TimeTracker module's settings.custom_tasks in sync
   return true
 }
 
@@ -293,6 +294,7 @@ async function persistNewProject(name) {
   const { data } = await db.from('time_settings').select('*').eq('owner_id', store.user.id).maybeSingle()
   const merged = { ...(data || {}), owner_id: store.user.id, custom_projects: projectList.value }
   await db.from('time_settings').upsert(merged, { onConflict: 'owner_id' })
+  bumpTT()    // keep the TimeTracker module's settings.custom_projects in sync
   return true
 }
 

@@ -715,6 +715,7 @@ import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase'
 import { ENDPOINTS } from '../services/kineticsBackend'
 import { fitKineticsLocal } from '../services/kineticsLocalFit'
+import { suggestNextLocal, predictSequenceLocal } from '../services/metisLocalService'
 import { esc } from '../utils/htmlSafe'
 
 const store = useLabStore()
@@ -1676,31 +1677,48 @@ async function suggestNext() {
     return
   }
   isSuggesting.value = true
-  const result = await callBackend(ENDPOINTS.suggest, {
+  const payload = {
     experiments: dataset.experiments,
     ranges: dataset.config.ranges,
     nSuggestions: dataset.config.nSuggestions,
     explorationCoeff: dataset.config.explorationCoeff ?? 1.41,
     ensembleSize: dataset.config.ensembleSize ?? 20,
     poolSize: dataset.config.poolSize ?? 5000,
-  })
+  }
+  let result = null
+  try {
+    result = await suggestNextLocal(payload, msg => { suggestNote.value = msg })
+  } catch (localErr) {
+    suggestNote.value = `Local METIS unavailable (${localErr.message}). Falling back to server…`
+    result = await callBackend(ENDPOINTS.suggest, payload)
+  }
   isSuggesting.value = false
   if (result) {
     aiSuggestions.value = result.suggestions || []
-    suggestNote.value = result.note || (result.suggestions?.length === 0 ? 'Backend returned no suggestions — check experiment data or expand condition ranges.' : '')
+    suggestNote.value = result.note || (result.suggestions?.length === 0 ? 'No suggestions returned — check experiment data or expand condition ranges.' : '')
   }
 }
 
 async function predictSequence() {
   isPredicting.value = true
-  const result = await callBackend(ENDPOINTS.sequencePredict, {
+  const payload = {
     experiments: dataset.experiments,
     topK: 5,
     ensembleSize: dataset.config.ensembleSize ?? 20,
     poolSize: 2000,
-  })
+  }
+  let result = null
+  try {
+    result = await predictSequenceLocal(payload, msg => { suggestNote.value = msg })
+  } catch (localErr) {
+    suggestNote.value = `Local METIS unavailable (${localErr.message}). Falling back to server…`
+    result = await callBackend(ENDPOINTS.sequencePredict, payload)
+  }
   isPredicting.value = false
-  if (result) seqCandidates.value = result.candidates || []
+  if (result) {
+    seqCandidates.value = result.candidates || []
+    suggestNote.value = ''
+  }
 }
 
 // ════════════════ Send to Wellplate ════════════════

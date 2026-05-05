@@ -842,7 +842,10 @@ function findExactDnaStock(letter) {
         targets.add(bn + suf)
     }
   }
-  return list.find(i => {
+  const sorted = [...list].sort((a, b) =>
+    ((a.scope || 'Global') === 'Personal' ? 0 : 1) - ((b.scope || 'Global') === 'Personal' ? 0 : 1)
+  )
+  return sorted.find(i => {
     const n = (i.name || '').toLowerCase().trim()
     const c = (i.code || '').toLowerCase().trim()
     return targets.has(n) || targets.has(c)

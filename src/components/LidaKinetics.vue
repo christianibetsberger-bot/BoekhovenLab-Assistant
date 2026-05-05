@@ -63,44 +63,45 @@
           </div>
         </div>
 
-        <!-- 2. Units & Replication Limits -->
+        <!-- 2. CSV Concentration Units & Initial Conditions -->
         <div class="internal-section">
-          <h3>2. Units &amp; Replication Limits</h3>
+          <h3>2. CSV Units &amp; Initial Conditions</h3>
+
+          <div class="sub-label">Concentration unit used in your CSV columns</div>
           <div class="grid-3-col">
             <div class="input-group">
               <label>T4-Ligase</label>
               <select v-model="dataset.units.ligase">
-                <option value="µM">µM</option>
-                <option value="mM">mM</option>
-                <option value="U/µL">U/µL</option>
+                <option value="µM">µM (micromolar)</option>
+                <option value="U/µL">U/µL (activity)</option>
               </select>
             </div>
             <div class="input-group">
               <label>ATP</label>
               <select v-model="dataset.units.atp">
-                <option value="µM">µM</option>
-                <option value="mM">mM</option>
+                <option value="µM">µM (micromolar)</option>
               </select>
             </div>
             <div class="input-group">
               <label>Mg²⁺</label>
               <select v-model="dataset.units.mg2">
-                <option value="mM">mM</option>
-                <option value="µM">µM</option>
+                <option value="µM">µM (micromolar)</option>
               </select>
             </div>
           </div>
-          <div class="grid-3-col" style="margin-top:8px;">
-            <div class="input-group" title="Max yieldable [R] in µM (LIMIT_B in the notebook). 100 % conversion = limit_uM.">
-              <label>limit_uM ([R]ₘₐₓ, µM)</label>
+
+          <div class="sub-label" style="margin-top:10px;">Initial concentrations for ODE fit <span style="opacity:0.7;">(all in µM)</span></div>
+          <div class="grid-3-col">
+            <div class="input-group" title="Max yieldable [R] in µM. 100% conversion corresponds to this concentration.">
+              <label>Max Yield [R]<sub>max</sub></label>
               <input type="number" step="any" min="0" v-model.number="dataset.kinetics.limit_uM" />
             </div>
-            <div class="input-group" title="Initial [A] = [a] (µM). Default 2.8.">
-              <label>A₀ (µM)</label>
+            <div class="input-group" title="Initial [A] = [a]. Default 2.8 µM.">
+              <label>A₀ initial</label>
               <input type="number" step="any" min="0" v-model.number="dataset.kinetics.A0" />
             </div>
-            <div class="input-group" title="Initial [B] = [b] (µM). Default 1.4.">
-              <label>B₀ (µM)</label>
+            <div class="input-group" title="Initial [B] = [b]. Default 1.4 µM.">
+              <label>B₀ initial</label>
               <input type="number" step="any" min="0" v-model.number="dataset.kinetics.B0" />
             </div>
           </div>
@@ -145,37 +146,34 @@
         <div class="internal-section">
           <h3>4. Active Learning Engine</h3>
 
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; padding:10px; background:rgba(59,130,246,0.05); border:1px solid var(--border-color, #cbd5e1); border-radius:6px;">
-            <div class="input-group" style="margin:0;">
-              <label style="font-size:0.75rem; font-weight:bold; color:var(--primary, #3b82f6);">Suggestions:</label>
-              <input type="number" min="1" max="96" v-model.number="dataset.config.nSuggestions" style="padding:6px;" />
-            </div>
-            <div class="input-group" style="margin:0;">
-              <label style="font-size:0.75rem; font-weight:bold; color:var(--primary, #3b82f6);">Ensemble Size (XGBoost):</label>
-              <input type="number" min="5" max="50" step="5" v-model.number="dataset.config.ensembleSize" style="padding:6px;" />
-            </div>
-            <div style="grid-column:span 2; margin-top:4px;">
-              <label style="display:block; font-size:0.75rem; font-weight:bold; margin-bottom:6px; color:var(--primary, #3b82f6);">
-                Exploration κ (UCB):
-                <strong>{{ (dataset.config.explorationCoeff ?? 1.41).toFixed(2) }}</strong>
-                <span style="font-size:0.7rem; opacity:0.65; margin-left:4px;">
-                  {{ (dataset.config.explorationCoeff ?? 1.41) === 0 ? '— pure exploit' : (dataset.config.explorationCoeff ?? 1.41) >= 3 ? '— pure explore' : '— balanced' }}
-                </span>
-              </label>
-              <input type="range" min="0" max="3" step="0.05" v-model.number="dataset.config.explorationCoeff" style="width:100%;" />
-              <div style="display:flex; justify-content:space-between; font-size:0.7rem; opacity:0.6; margin-top:2px;">
-                <span>0 · Exploit</span><span>1.41 · UCB1</span><span>3 · Explore</span>
+          <div class="al-config-box">
+            <div class="al-grid-3">
+              <div class="al-input">
+                <label>Suggestions</label>
+                <input type="number" min="1" max="96" v-model.number="dataset.config.nSuggestions" />
+              </div>
+              <div class="al-input">
+                <label>Ensemble</label>
+                <input type="number" min="5" max="50" step="5" v-model.number="dataset.config.ensembleSize" />
+              </div>
+              <div class="al-input">
+                <label>Pool size</label>
+                <input type="number" min="500" max="20000" step="500" v-model.number="dataset.config.poolSize" />
               </div>
             </div>
-            <div style="grid-column:span 2;">
-              <label style="display:block; font-size:0.75rem; font-weight:bold; margin-bottom:4px; color:var(--primary, #3b82f6);">
-                Logo Yield Threshold: top <strong>{{ 100 - dataset.config.yieldThreshold }}%</strong> of groups
-              </label>
-              <input type="range" min="0" max="100" step="5" v-model.number="dataset.config.yieldThreshold" style="width:100%;" />
+
+            <div class="slider-row">
+              <span class="slider-label">κ (UCB)</span>
+              <input type="range" min="0" max="3" step="0.05" v-model.number="dataset.config.explorationCoeff" class="slider-input" />
+              <span class="slider-value">{{ (dataset.config.explorationCoeff ?? 1.41).toFixed(2) }}</span>
+              <span class="slider-hint">{{ (dataset.config.explorationCoeff ?? 1.41) === 0 ? 'exploit' : (dataset.config.explorationCoeff ?? 1.41) >= 3 ? 'explore' : 'balanced' }}</span>
             </div>
-            <div class="input-group" style="margin:0; grid-column:span 2;">
-              <label style="font-size:0.75rem; font-weight:bold; color:var(--primary, #3b82f6);">Candidate Pool Size:</label>
-              <input type="number" min="500" max="20000" step="500" v-model.number="dataset.config.poolSize" style="padding:6px;" />
+
+            <div class="slider-row">
+              <span class="slider-label">Logo top</span>
+              <input type="range" min="0" max="100" step="5" v-model.number="dataset.config.yieldThreshold" class="slider-input" />
+              <span class="slider-value">{{ 100 - dataset.config.yieldThreshold }}%</span>
+              <span class="slider-hint">of groups</span>
             </div>
           </div>
 
@@ -428,7 +426,7 @@ function emptyDataset() {
     id: null,
     name: '',
     scope: 'Personal',
-    units: { ligase: 'mM', atp: 'mM', mg2: 'mM' },
+    units: { ligase: 'µM', atp: 'µM', mg2: 'µM' },
     // Replication-kinetics initial conditions; defaults match the antimony model.
     kinetics: { limit_uM: 1.4, A0: 2.8, B0: 1.4 },
     experiments: [],
@@ -816,10 +814,12 @@ function plotLayoutDark() {
     paper_bgcolor: isDark ? '#111827' : '#ffffff',
     plot_bgcolor:  isDark ? '#111827' : '#ffffff',
     font: { color: isDark ? '#f3f4f6' : '#1f2937', size: 10 },
-    margin: { l: 38, r: 8, b: 32, t: 6 },
+    // Generous margins so the plot content has breathing room from the
+    // plot-area container's border and the axis labels never crop.
+    margin: { l: 55, r: 22, b: 45, t: 18 },
     showlegend: false,
-    xaxis: { showgrid: false, zeroline: false, showline: true, linecolor: lineCol, linewidth: 1 },
-    yaxis: { showgrid: false, zeroline: false, showline: true, linecolor: lineCol, linewidth: 1 },
+    xaxis: { showgrid: false, zeroline: false, showline: true, linecolor: lineCol, linewidth: 1, automargin: true },
+    yaxis: { showgrid: false, zeroline: false, showline: true, linecolor: lineCol, linewidth: 1, automargin: true },
   }
 }
 
@@ -913,7 +913,7 @@ function renderHeatmap() {
   layout.yaxis.title = { text: heatY.value, font: { size: 9 } }
   layout.xaxis.type = 'category'
   layout.yaxis.type = 'category'
-  layout.margin.r = 50
+  layout.margin.r = 60   // extra room for the colorbar
   Plotly.react(heatPlotEl.value, [trace], layout, { responsive: true, displayModeBar: false })
 }
 
@@ -1097,6 +1097,11 @@ async function loadFromLibrary(item) {
   }
   loaded.kinetics = { ...fresh.kinetics, ...(loaded.kinetics || {}) }
   loaded.config = { ...fresh.config, ...(loaded.config || {}) }
+  // Legacy migration: older datasets stored 'mM' but the UI now only offers µM.
+  loaded.units = { ...fresh.units, ...(loaded.units || {}) }
+  for (const k of ['ligase', 'atp', 'mg2']) {
+    if (loaded.units[k] === 'mM') loaded.units[k] = 'µM'
+  }
   Object.assign(dataset, loaded)
   showLibrary.value = false
   aiSuggestions.value = item.suggestions || []
@@ -1238,7 +1243,10 @@ onBeforeUnmount(() => {
 }
 
 /* ── External plot legend ───────────────────────────────── */
-.plot-legend { display: flex; flex-direction: column; gap: 3px; max-height: 130px; overflow-y: auto; }
+/* Height tuned to fit ~4 entries (legend-item ~17px + 3px gap = 20px) → 80px */
+.plot-legend { display: flex; flex-direction: column; gap: 3px; max-height: 80px; overflow-y: auto; padding-right: 2px; }
+.plot-legend::-webkit-scrollbar { width: 5px; }
+.plot-legend::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 3px; }
 .legend-item {
   display: flex; align-items: center; gap: 5px;
   font-size: 0.7rem; line-height: 1.3;
@@ -1246,6 +1254,49 @@ onBeforeUnmount(() => {
 .legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.15); }
 .legend-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.85; font-family: monospace; }
 .legend-val { flex-shrink: 0; font-weight: 600; font-size: 0.68rem; opacity: 0.9; }
+
+/* ── Section 2: sub-section label ──────────────────────── */
+.sub-label {
+  font-size: 0.72rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.4px;
+  opacity: 0.65; margin-bottom: 5px;
+}
+
+/* ── AL Engine config box ───────────────────────────────── */
+.al-config-box {
+  margin-bottom: 10px;
+  padding: 9px 10px;
+  background: rgba(59,130,246,0.05);
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 6px;
+  display: flex; flex-direction: column; gap: 7px;
+}
+.al-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.al-input label {
+  display: block; font-size: 0.7rem; font-weight: bold;
+  color: var(--primary, #3b82f6); margin-bottom: 2px;
+}
+.al-input input {
+  width: 100%; padding: 4px 6px; font-size: 0.78rem;
+  border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1);
+  background: transparent; color: inherit;
+}
+
+/* ── Compact inline sliders ─────────────────────────────── */
+.slider-row { display: flex; align-items: center; gap: 8px; }
+.slider-label {
+  flex-shrink: 0; min-width: 50px;
+  font-size: 0.7rem; font-weight: bold; color: var(--primary, #3b82f6);
+}
+.slider-input { flex: 1; min-width: 0; margin: 0; }
+.slider-value {
+  flex-shrink: 0; min-width: 38px; text-align: right;
+  font-size: 0.72rem; font-weight: 700; font-family: monospace;
+}
+.slider-hint {
+  flex-shrink: 0; font-size: 0.65rem; opacity: 0.6;
+  min-width: 56px; text-align: left;
+}
 
 /* ── Sequence logo ──────────────────────────────────────── */
 .logo-wrap { width: 100%; overflow-x: auto; padding: 8px 0; color: var(--text); }

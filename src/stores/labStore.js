@@ -157,7 +157,10 @@ export const useLabStore = defineStore('lab', {
 
     async saveItemToCloud(item) {
       if (!this.user) return;
-      const payload = { item_id: String(item.id), owner_id: this.user.id, scope: item.scope || 'Global', item_data: item };
+      // JSON round-trip strips the Vue reactive proxy so Supabase receives a
+      // plain object snapshot with the current field values.
+      const plain = JSON.parse(JSON.stringify(item));
+      const payload = { item_id: String(plain.id), owner_id: this.user.id, scope: plain.scope || 'Global', item_data: plain };
       const { error } = await db.from('inventory').upsert(payload, { onConflict: 'item_id' });
       if (error) alert("Error saving inventory: " + error.message);
     },

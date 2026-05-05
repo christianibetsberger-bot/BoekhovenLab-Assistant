@@ -691,7 +691,7 @@ const generateLabelsPDF = () => {
                         <td><input type="text" v-model="item.name" @blur="store.saveItemToCloud(item)" style="padding: 6px; min-width: 120px;"></td>
                         <td>
                             <div class="input-with-select">
-                                <input type="number" v-model.number="item.stock" step="any" @blur="store.saveItemToCloud(item)" style="width: 70px; padding: 6px;">
+                                <input type="number" v-model.number="item.stock" step="any" @change="store.saveItemToCloud(item)" style="width: 70px; padding: 6px;">
                                 <select v-model="item.stockUnit" @change="store.saveItemToCloud(item)" style="padding: 6px; font-size: 0.8rem; width: 65px; border-left: none;">
                                     <option value="M">M</option><option value="mM">mM</option><option value="µM">µM</option><option value="nM">nM</option>
                                     <option value="mg/mL">mg/mL</option><option value="µg/µL">µg/µL</option><option value="ng/µL">ng/µL</option>

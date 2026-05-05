@@ -70,19 +70,27 @@ def _simulate_R_at(params, initial_R, t_eval, A0, B0, rtol=1e-4, atol=1e-7):
         return None
 
 def _simulate_R_dense(params, initial_R, t_max, A0, B0, n=100):
+    # Try progressively gentler integration settings. Borderline-stiff parameter
+    # sets (common when k2 hits its 0.1 bound on high-conversion data) can fail
+    # at the original tolerance / grid; smaller t_max + coarser n + RK45 work
+    # as last resorts. Each rung sacrifices smoothness, never correctness.
     ku, k1, k2, kr = params
     y0 = [A0, A0, B0, B0, 0.0, 0.0, float(initial_R)]
-    t_grid = np.linspace(0.0, t_max, n)
     attempts = [
-        ('LSODA', 1e-4, 1e-7),
-        ('LSODA', 1e-3, 1e-6),
-        ('LSODA', 1e-2, 1e-5),
-        ('RK45',  1e-3, 1e-6),
+        (t_max,        n,  'LSODA', 1e-4, 1e-7),
+        (t_max,        n,  'LSODA', 1e-3, 1e-6),
+        (t_max,        n,  'LSODA', 1e-2, 1e-5),
+        (t_max,        n,  'RK45',  1e-3, 1e-6),
+        (t_max * 0.95, 60, 'RK45',  1e-3, 1e-5),
+        (t_max * 0.85, 40, 'RK45',  1e-2, 1e-4),
     ]
-    for method, rtol, atol in attempts:
+    for tmax, npts, method, rtol, atol in attempts:
+        if tmax <= 0:
+            continue
+        t_grid = np.linspace(0.0, tmax, npts)
         try:
             sol = solve_ivp(
-                _replication_ode, (0.0, t_max), y0,
+                _replication_ode, (0.0, tmax), y0,
                 args=(ku, k1, k2, kr),
                 t_eval=t_grid, method=method,
                 rtol=rtol, atol=atol,

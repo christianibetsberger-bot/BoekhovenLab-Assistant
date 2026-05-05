@@ -1143,7 +1143,10 @@ function applyFits(allFits, prefix = '') {
   for (const g of dataset.experiments) {
     if (g.replicates?.length > 1) {
       const allRepFits = g.replicates.map(rep => fitsById[`${g.groupId}${REP_SEP}${rep.replicateId}`])
-      const repFits = allRepFits.filter(f => f?.ku != null && f.simT?.length > 0)
+      // A "fitted" replicate has rate constants. simT is for plotting only —
+      // if the dense post-fit simulation failed but the optimizer converged,
+      // we still want to show ✓ in the ledger and use the parameters in AL.
+      const repFits = allRepFits.filter(f => f?.ku != null)
       if (!repFits.length) {
         failCount++
         const note = allRepFits.find(f => f?.note)?.note || 'no replicate produced a usable curve'
@@ -1151,21 +1154,41 @@ function applyFits(allFits, prefix = '') {
         continue
       }
 
-      // Average simulated curves on a shared time grid.
-      const tMax = Math.max(...repFits.map(f => Math.max(...f.simT)))
-      const simT = Array.from({ length: 100 }, (_, i) => (i / 99) * tMax)
-      const allY = repFits.map(f => interpLinear(f.simT, f.simY, simT))
-      const simY = simT.map((_, i) => allY.reduce((s, y) => s + y[i], 0) / allY.length)
-
-      // Tooltip uses the lowest-cost replicate's parameters.
+      const repsWithCurves = repFits.filter(f => f.simT?.length > 0)
       const bestFit = repFits.reduce((a, b) => ((a.cost ?? Infinity) < (b.cost ?? Infinity) ? a : b))
-      g.fit = { ...bestFit, simT, simY, replicateCount: repFits.length }
-      if (repFits.length === g.replicates.length) okCount++
-      else partialCount++
+
+      if (repsWithCurves.length) {
+        // Average simulated curves over the replicates that produced one.
+        const tMax = Math.max(...repsWithCurves.map(f => Math.max(...f.simT)))
+        const simT = Array.from({ length: 100 }, (_, i) => (i / 99) * tMax)
+        const allY = repsWithCurves.map(f => interpLinear(f.simT, f.simY, simT))
+        const simY = simT.map((_, i) => allY.reduce((s, y) => s + y[i], 0) / allY.length)
+        g.fit = { ...bestFit, simT, simY, replicateCount: repsWithCurves.length }
+        if (repFits.length === g.replicates.length && repsWithCurves.length === repFits.length) {
+          okCount++
+        } else {
+          partialCount++
+          if (repsWithCurves.length < repFits.length) {
+            failureNotes.push(`${truncateSeq(g.sequence)}: ${repFits.length - repsWithCurves.length}/${repFits.length} replicate(s) converged but curve sim failed`)
+          }
+        }
+      } else {
+        // Optimizer converged but no replicate produced a smooth curve. Keep
+        // the rate constants so the ledger shows ✓ and AL can use them; the
+        // plot will just show data points without an overlay line.
+        g.fit = { ...bestFit, simT: [], simY: [], replicateCount: repFits.length, note: 'Curve sim failed (rate constants OK)' }
+        partialCount++
+        failureNotes.push(`${truncateSeq(g.sequence)}: rate constants OK but curve sim failed`)
+      }
     } else {
       const f = fitsById[g.groupId]
       if (f && f.ku != null && f.simT?.length > 0) {
         g.fit = f; okCount++
+      } else if (f && f.ku != null) {
+        // Same partial-success path for non-replicate groups.
+        g.fit = { ...f, note: 'Curve sim failed (rate constants OK)' }
+        partialCount++
+        failureNotes.push(`${truncateSeq(g.sequence)}: rate constants OK but curve sim failed`)
       } else {
         failCount++
         failureNotes.push(`${truncateSeq(g.sequence)}: ${f?.note || 'fit did not converge'}`)
@@ -1176,7 +1199,7 @@ function applyFits(allFits, prefix = '') {
   const total = dataset.experiments.length
   const parts = []
   if (okCount)      parts.push(`${okCount} fitted`)
-  if (partialCount) parts.push(`${partialCount} partial (some replicates failed)`)
+  if (partialCount) parts.push(`${partialCount} partial (rate constants OK, curve sim incomplete)`)
   if (failCount)    parts.push(`${failCount} failed`)
   const summary = parts.length === 1 && okCount === total && !prefix
     ? '' // perfect — no note needed

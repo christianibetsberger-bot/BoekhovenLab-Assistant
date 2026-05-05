@@ -119,11 +119,20 @@ def _residuals(params, t_data, y_data, initial_R, A0, B0):
     return (y_sim - y_data) + penalty
 
 def _build_initial_guesses():
-    return [
-        [1e-3, 1e-1, 1e-11, 1e-1],
-        [1e-2, 1.0,  1e-11, 1.0 ],
-        [1e-5, 1.0,  1e-11, 10.0],
+    # 4 fixed + 10 deterministic random log-uniform guesses, matching the
+    # reference Tellurium script that produced the published sigmoidal fits.
+    base = [
+        [1e-6, 1e-3, 1e-11, 1e-6 ],
+        [1e-3, 1e-1, 1e-11, 1e-1 ],
+        [1e-2, 1.0,  1e-11, 1.0  ],
+        [1e-5, 1.0,  1e-11, 10.0 ],
     ]
+    rng = np.random.default_rng(42)
+    for _ in range(10):
+        g = (10 ** rng.uniform(-4, 1.5, size=4)).tolist()
+        g[2] = 1e-11
+        base.append(g)
+    return base
 
 def fit_experiments(payload_json):
     body        = json.loads(payload_json)
@@ -163,11 +172,13 @@ def fit_experiments(payload_json):
 
             for p0 in guesses:
                 try:
+                    # k2 ≤ 1e-10 keeps the optimiser on the (physical)
+                    # irreversible-LIDA manifold; matches reference script.
                     res = least_squares(
                         _residuals, p0,
                         args=(t_data, y_data, initial_R, A0, B0),
-                        bounds=([0.0]*4, [100.0, 100.0, 0.1, 100.0]),
-                        ftol=1e-6, xtol=1e-6, max_nfev=60,
+                        bounds=([0.0]*4, [100.0, 100.0, 1e-10, 100.0]),
+                        ftol=1e-8, xtol=1e-8, max_nfev=200,
                     )
                     if res.success and res.cost < best_cost:
                         best_cost, best_res = res.cost, res
@@ -184,9 +195,9 @@ def fit_experiments(payload_json):
                 continue
 
             ku, k1, k2, kr = best_res.x
-            # Integrate only over the data window — extrapolating past t_data[-1]
-            # is the main source of dense-sim instability for borderline-stiff fits.
-            sim_t, sim_R = _simulate_R_dense(best_res.x, initial_R, float(t_data[-1]), A0, B0)
+            # Small buffer past the last data point for visual continuity.
+            # With k2 pinned to ~0 the system is no longer stiff, so this is safe.
+            sim_t, sim_R = _simulate_R_dense(best_res.x, initial_R, float(t_data[-1]) + 5.0, A0, B0)
 
             curve_note = None
             if sim_t is None:

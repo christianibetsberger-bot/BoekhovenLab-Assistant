@@ -473,11 +473,35 @@
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
             <div class="input-group">
               <label>Tasks</label>
-              <textarea
-                :value="settings.custom_tasks.join('\n')"
-                @change="e => { settings.custom_tasks = e.target.value.split('\n').map(s => s.trim()).filter(Boolean); saveSettings() }"
-                rows="7" style="font-size:0.78rem; font-family:monospace;"
-              ></textarea>
+              <div class="tt-chip-list">
+                <span v-for="task in settings.custom_tasks" :key="task" class="tt-chip">
+                  <span class="tt-chip-text">{{ task }}</span>
+                  <button
+                    type="button"
+                    class="tt-chip-x"
+                    @click="removeTaskFromSettings(task)"
+                    :title="`Remove ${task}`"
+                  >×</button>
+                </span>
+                <span v-if="!settings.custom_tasks.length" class="tt-chip-empty">No tasks yet — add one below.</span>
+              </div>
+              <div class="tt-chip-add">
+                <input
+                  type="text"
+                  v-model="newSettingsTaskName"
+                  placeholder="Add new task…"
+                  @keyup.enter="addTaskFromSettings"
+                />
+                <button
+                  type="button"
+                  class="small"
+                  @click="addTaskFromSettings"
+                  :disabled="!newSettingsTaskName.trim()"
+                >
+                  <i class="fas fa-plus"></i> Add
+                </button>
+              </div>
+              <p class="tt-chip-hint">Changes apply to every task selector in the module instantly.</p>
             </div>
             <div class="input-group">
               <label>Projects</label>
@@ -603,6 +627,23 @@ async function ensureTaskSaved(name) {
   const trimmed = (name || '').trim()
   if (!trimmed || settings.custom_tasks.includes(trimmed)) return
   settings.custom_tasks = [...settings.custom_tasks, trimmed]
+  await saveSettings()
+}
+
+// ── Settings: manage tasks list ──────────────────────────────────────────
+// Adds/removes flow through saveSettings() → Supabase upsert + bumpTT(),
+// so every task selector (the four in this module + the two in TopBarClock)
+// picks up the change automatically.
+const newSettingsTaskName = ref('')
+async function addTaskFromSettings() {
+  const name = newSettingsTaskName.value.trim()
+  newSettingsTaskName.value = ''
+  if (!name || settings.custom_tasks.includes(name)) return
+  settings.custom_tasks = [...settings.custom_tasks, name]
+  await saveSettings()
+}
+async function removeTaskFromSettings(name) {
+  settings.custom_tasks = settings.custom_tasks.filter(t => t !== name)
   await saveSettings()
 }
 function onTaskChange(field, val) {
@@ -1793,4 +1834,37 @@ onBeforeUnmount(() => {
 .tt-table-wrap  { max-height: 220px !important; }
 
 .icon-muted { opacity: .65; }
+
+/* ── Settings: tasks chip-list ─────────────────────────────────────── */
+.tt-chip-list {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  min-height: 32px; padding: 6px;
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 4px;
+  background: var(--input-bg, transparent);
+}
+.tt-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 4px 2px 8px;
+  background: rgba(59, 130, 246, 0.10);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 12px;
+  font-size: 0.75rem; line-height: 1.2;
+}
+.tt-chip-text { white-space: nowrap; }
+.tt-chip-x {
+  border: none; background: transparent;
+  width: 18px; height: 18px; padding: 0;
+  border-radius: 50%; cursor: pointer;
+  font-size: 0.95rem; line-height: 1;
+  color: rgba(239, 68, 68, 0.8);
+}
+.tt-chip-x:hover { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+.tt-chip-empty { font-size: 0.72rem; opacity: 0.55; padding: 2px 4px; }
+
+.tt-chip-add { display: flex; gap: 6px; margin-top: 6px; }
+.tt-chip-add input { flex: 1; font-size: 0.8rem; padding: 4px 8px; }
+.tt-chip-add .small { white-space: nowrap; }
+
+.tt-chip-hint { font-size: 0.7rem; opacity: 0.6; margin: 4px 0 0; }
 </style>

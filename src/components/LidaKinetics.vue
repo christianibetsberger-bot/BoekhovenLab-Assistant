@@ -1,67 +1,71 @@
 <template>
-  <div class="card">
-    <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; border-bottom: 2px solid var(--bg); padding-bottom: 12px; margin-bottom: 15px;">
-      <h2 style="border:none; padding:0; margin:0; display:flex; align-items:center; gap:10px;">
-        <i class="fas fa-dna icon-muted"></i>
-        <input
-          type="text"
-          v-model="dataset.name"
-          placeholder="LIDA Kinetics Dataset"
-          style="font-size:1.1rem; font-weight:700; color:var(--primary); border:none; border-bottom:2px solid var(--primary); background:transparent; padding:2px 0; min-width:240px;"
-        />
-      </h2>
-      <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-        <label class="checkbox-label" style="font-size:0.75rem;">
-          <input type="radio" v-model="dataset.scope" value="Personal" /> Personal
-        </label>
-        <label class="checkbox-label" style="font-size:0.75rem;">
-          <input type="radio" v-model="dataset.scope" value="Global" /> Global
-        </label>
-        <button class="small success" @click="saveToCloud" :disabled="!store.user">
-          <i class="fas fa-cloud-arrow-up"></i> Save
-        </button>
-        <button class="small secondary" @click="showLibrary = true">
-          <i class="fas fa-folder-open"></i> Library
-        </button>
-        <button class="small secondary" @click="archiveDataset" v-if="dataset.id" title="Move to Archive">
-          <i class="fas fa-box-archive"></i>
-        </button>
-        <button class="small danger" @click="newDataset" title="Start a fresh dataset">
-          <i class="fas fa-file"></i> New
-        </button>
+  <div class="card module-card">
+
+    <!-- ── Header ── -->
+    <div class="full-width-header">
+      <div class="flex-between">
+        <h2 style="display:flex; align-items:center; gap:10px; margin:0;">
+          <i class="fas fa-dna"></i>
+          <input
+            type="text"
+            v-model="dataset.name"
+            placeholder="LIDA Kinetics Dataset"
+            class="dataset-name-input"
+          />
+        </h2>
+        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+          <label class="checkbox-label"><input type="radio" v-model="dataset.scope" value="Personal" /> Personal</label>
+          <label class="checkbox-label"><input type="radio" v-model="dataset.scope" value="Global" /> Global</label>
+          <button class="small success-btn" @click="saveToCloud" :disabled="!store.user">
+            <i class="fas fa-cloud-arrow-up"></i> Save
+          </button>
+          <button class="small" @click="showLibrary = true">
+            <i class="fas fa-folder-open"></i> Library
+          </button>
+          <button class="small" @click="archiveDataset" v-if="dataset.id" title="Move to Archive">
+            <i class="fas fa-box-archive"></i>
+          </button>
+          <button class="small danger-btn" @click="newDataset" title="Start a fresh dataset">
+            <i class="fas fa-file"></i> New
+          </button>
+        </div>
       </div>
+      <p style="font-size:0.85rem; opacity:0.8; margin-top:5px;">
+        Import time-course LIDA conversion data, fit replication-kinetics ODEs, and run METIS active learning to optimise reaction conditions and DNA sequences.
+      </p>
     </div>
 
-    <div class="lida-layout">
-      <!-- ════════════════ LEFT COLUMN ════════════════ -->
-      <div class="lida-col">
+    <div class="layout-columns">
 
-        <!-- Import / Template -->
-        <section class="lida-section">
-          <h3><i class="fas fa-file-import icon-muted"></i> Import / Template</h3>
+      <!-- ════ LEFT COLUMN ════ -->
+      <div class="col-left">
+
+        <!-- 1. Import / Template -->
+        <div class="internal-section">
+          <h3>1. Import / Template</h3>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button class="small" @click="downloadTemplate">
               <i class="fas fa-download"></i> Download Template
             </button>
             <input ref="csvFileInput" type="file" accept=".csv,.tsv,.txt" style="display:none" @change="onCsvFileSelected" />
-            <button class="small success" @click="$refs.csvFileInput.click()">
+            <button class="small success-btn" @click="$refs.csvFileInput.click()">
               <i class="fas fa-file-csv"></i> Import CSV
             </button>
-            <button class="small danger" @click="clearAll" v-if="dataset.experiments.length">
+            <button class="small danger-btn" @click="clearAll" v-if="dataset.experiments.length">
               <i class="fas fa-trash"></i> Clear All
             </button>
           </div>
-          <div v-if="parseError" class="lida-error">
+          <div v-if="parseError" class="section-error">
             <i class="fas fa-triangle-exclamation"></i> {{ parseError }}
           </div>
-          <div v-if="parseStats" class="lida-info">
+          <div v-if="parseStats" class="section-info">
             <i class="fas fa-circle-check"></i> {{ parseStats }}
           </div>
-        </section>
+        </div>
 
-        <!-- Units -->
-        <section class="lida-section">
-          <h3><i class="fas fa-ruler icon-muted"></i> Units &amp; Replication Limits</h3>
+        <!-- 2. Units & Replication Limits -->
+        <div class="internal-section">
+          <h3>2. Units &amp; Replication Limits</h3>
           <div class="grid-3-col">
             <div class="input-group">
               <label>T4-Ligase</label>
@@ -100,34 +104,34 @@
               <input type="number" step="any" min="0" v-model.number="dataset.kinetics.B0" />
             </div>
           </div>
-        </section>
+        </div>
 
-        <!-- Condition Ranges -->
-        <section class="lida-section">
-          <h3><i class="fas fa-arrows-left-right-to-line icon-muted"></i> Condition Ranges (Active Learning)</h3>
+        <!-- 3. Condition Ranges -->
+        <div class="internal-section">
+          <h3>3. Condition Ranges</h3>
           <div class="grid-2-col">
-            <div class="range-group">
+            <div class="input-group">
               <label>Temperature (°C)</label>
               <div class="range-inputs">
                 <input type="number" step="any" v-model.number="dataset.config.ranges.tMin" placeholder="Min" />
                 <input type="number" step="any" v-model.number="dataset.config.ranges.tMax" placeholder="Max" />
               </div>
             </div>
-            <div class="range-group">
+            <div class="input-group">
               <label>T4-Ligase ({{ dataset.units.ligase }})</label>
               <div class="range-inputs">
                 <input type="number" step="any" v-model.number="dataset.config.ranges.ligaseMin" placeholder="Min" />
                 <input type="number" step="any" v-model.number="dataset.config.ranges.ligaseMax" placeholder="Max" />
               </div>
             </div>
-            <div class="range-group">
+            <div class="input-group">
               <label>ATP ({{ dataset.units.atp }})</label>
               <div class="range-inputs">
                 <input type="number" step="any" v-model.number="dataset.config.ranges.atpMin" placeholder="Min" />
                 <input type="number" step="any" v-model.number="dataset.config.ranges.atpMax" placeholder="Max" />
               </div>
             </div>
-            <div class="range-group">
+            <div class="input-group">
               <label>Mg²⁺ ({{ dataset.units.mg2 }})</label>
               <div class="range-inputs">
                 <input type="number" step="any" v-model.number="dataset.config.ranges.mg2Min" placeholder="Min" />
@@ -135,71 +139,68 @@
               </div>
             </div>
           </div>
-        </section>
+        </div>
 
-        <!-- AL Config -->
-        <section class="lida-section">
-          <h3><i class="fas fa-wand-magic-sparkles icon-muted"></i> Suggestion Strategy (METIS / UCB)</h3>
-          <div class="grid-2-col">
-            <div class="input-group">
-              <label>Number of suggestions</label>
-              <input type="number" min="1" max="96" v-model.number="dataset.config.nSuggestions" />
-            </div>
-            <div class="input-group">
-              <label>Ensemble size (XGBoost models)</label>
-              <input type="number" min="5" max="50" step="5" v-model.number="dataset.config.ensembleSize" />
-            </div>
-          </div>
-          <div class="input-group" style="margin-top:8px;">
-            <label>
-              Exploration κ (UCB coefficient):
-              <strong style="color:var(--primary);">{{ (dataset.config.explorationCoeff ?? 1.41).toFixed(2) }}</strong>
-              <span style="font-size:0.72rem; opacity:0.65; margin-left:6px;">
-                {{ (dataset.config.explorationCoeff ?? 1.41) === 0 ? '— pure exploit' : (dataset.config.explorationCoeff ?? 1.41) >= 3 ? '— pure explore' : '— balanced' }}
-              </span>
-            </label>
-            <input type="range" min="0" max="3" step="0.05" v-model.number="dataset.config.explorationCoeff" />
-            <div style="display:flex; justify-content:space-between; font-size:0.7rem; opacity:0.6; margin-top:2px;">
-              <span>0 · Exploit</span><span>1.41 · UCB1</span><span>3 · Explore</span>
-            </div>
-          </div>
-          <div class="input-group" style="margin-top:8px;">
-            <label>Candidate pool size</label>
-            <input type="number" min="500" max="20000" step="500" v-model.number="dataset.config.poolSize" />
-            <span style="font-size:0.72rem; opacity:0.65;">Random condition combinations sampled before UCB scoring</span>
-          </div>
-          <div class="input-group" style="margin-top:8px;">
-            <label>Yield-threshold percentile for sequence logo (default 80%)</label>
-            <input type="range" min="0" max="100" step="5" v-model.number="dataset.config.yieldThreshold" />
-            <span style="font-size:0.8rem; opacity:0.7;">{{ dataset.config.yieldThreshold }}th percentile of max conversion</span>
-          </div>
-        </section>
+        <!-- 4. Active Learning Engine -->
+        <div class="internal-section">
+          <h3>4. Active Learning Engine</h3>
 
-        <!-- Action buttons -->
-        <section class="lida-section">
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <button class="action-btn auto-btn" @click="fitKinetics" :disabled="isFitting || !dataset.experiments.length">
-              <i class="fas fa-chart-line"></i>
-              {{ isFitting ? 'Fitting…' : 'Fit Kinetics' }}
-            </button>
-            <button class="action-btn auto-btn" @click="suggestNext" :disabled="isSuggesting || !dataset.experiments.length">
-              <i class="fas fa-lightbulb"></i>
-              {{ isSuggesting ? 'Computing…' : 'Suggest Next' }}
-            </button>
-            <button class="action-btn auto-btn" @click="predictSequence" :disabled="isPredicting || !dataset.experiments.length">
-              <i class="fas fa-shuffle"></i>
-              {{ isPredicting ? 'Predicting…' : 'Predict Sequences' }}
-            </button>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; padding:10px; background:rgba(59,130,246,0.05); border:1px solid var(--border-color, #cbd5e1); border-radius:6px;">
+            <div class="input-group" style="margin:0;">
+              <label style="font-size:0.75rem; font-weight:bold; color:var(--primary, #3b82f6);">Suggestions:</label>
+              <input type="number" min="1" max="96" v-model.number="dataset.config.nSuggestions" style="padding:6px;" />
+            </div>
+            <div class="input-group" style="margin:0;">
+              <label style="font-size:0.75rem; font-weight:bold; color:var(--primary, #3b82f6);">Ensemble Size (XGBoost):</label>
+              <input type="number" min="5" max="50" step="5" v-model.number="dataset.config.ensembleSize" style="padding:6px;" />
+            </div>
+            <div style="grid-column:span 2; margin-top:4px;">
+              <label style="display:block; font-size:0.75rem; font-weight:bold; margin-bottom:6px; color:var(--primary, #3b82f6);">
+                Exploration κ (UCB):
+                <strong>{{ (dataset.config.explorationCoeff ?? 1.41).toFixed(2) }}</strong>
+                <span style="font-size:0.7rem; opacity:0.65; margin-left:4px;">
+                  {{ (dataset.config.explorationCoeff ?? 1.41) === 0 ? '— pure exploit' : (dataset.config.explorationCoeff ?? 1.41) >= 3 ? '— pure explore' : '— balanced' }}
+                </span>
+              </label>
+              <input type="range" min="0" max="3" step="0.05" v-model.number="dataset.config.explorationCoeff" style="width:100%;" />
+              <div style="display:flex; justify-content:space-between; font-size:0.7rem; opacity:0.6; margin-top:2px;">
+                <span>0 · Exploit</span><span>1.41 · UCB1</span><span>3 · Explore</span>
+              </div>
+            </div>
+            <div style="grid-column:span 2;">
+              <label style="display:block; font-size:0.75rem; font-weight:bold; margin-bottom:4px; color:var(--primary, #3b82f6);">
+                Logo Yield Threshold: top <strong>{{ 100 - dataset.config.yieldThreshold }}%</strong> of groups
+              </label>
+              <input type="range" min="0" max="100" step="5" v-model.number="dataset.config.yieldThreshold" style="width:100%;" />
+            </div>
+            <div class="input-group" style="margin:0; grid-column:span 2;">
+              <label style="font-size:0.75rem; font-weight:bold; color:var(--primary, #3b82f6);">Candidate Pool Size:</label>
+              <input type="number" min="500" max="20000" step="500" v-model.number="dataset.config.poolSize" style="padding:6px;" />
+            </div>
           </div>
-          <div v-if="backendError" class="lida-error" style="margin-top:8px;">
+
+          <button class="action-btn auto-btn" @click="fitKinetics" :disabled="isFitting || !dataset.experiments.length" style="width:100%; margin-bottom:8px;">
+            <i class="fas" :class="isFitting ? 'fa-spinner fa-spin' : 'fa-chart-line'"></i>
+            <span>{{ isFitting ? 'Fitting…' : 'Fit Kinetics' }}</span>
+          </button>
+          <button class="action-btn auto-btn" @click="suggestNext" :disabled="isSuggesting || !dataset.experiments.length" style="width:100%; margin-bottom:8px;">
+            <i class="fas" :class="isSuggesting ? 'fa-spinner fa-spin' : 'fa-lightbulb'"></i>
+            <span>{{ isSuggesting ? 'Computing…' : 'Suggest Next Experiments (METIS)' }}</span>
+          </button>
+          <button class="action-btn auto-btn" @click="predictSequence" :disabled="isPredicting || !dataset.experiments.length" style="width:100%;">
+            <i class="fas" :class="isPredicting ? 'fa-spinner fa-spin' : 'fa-shuffle'"></i>
+            <span>{{ isPredicting ? 'Predicting…' : 'Predict High-Yield Sequences (METIS)' }}</span>
+          </button>
+
+          <div v-if="backendError" class="section-error" style="margin-top:8px;">
             <i class="fas fa-triangle-exclamation"></i> {{ backendError }}
           </div>
-        </section>
+        </div>
 
-        <!-- Ledger -->
-        <section class="lida-section">
-          <h3><i class="fas fa-list icon-muted"></i> Experiment Groups ({{ dataset.experiments.length }})</h3>
-          <div class="ledger-wrap">
+        <!-- 5. Experiment Ledger -->
+        <div class="internal-section" style="flex-grow:1;">
+          <h3>5. Experiment Ledger ({{ dataset.experiments.length }})</h3>
+          <div class="ledger-table-container">
             <table class="ledger-table">
               <thead>
                 <tr>
@@ -234,13 +235,13 @@
                   <td><strong>{{ formatNum(g.maxConversion) }}</strong></td>
                   <td>
                     <span v-if="g.fit && g.fit.ku != null" :title="fitTooltip(g.fit)">
-                      <i class="fas fa-check" style="color:var(--success);"></i>
+                      <i class="fas fa-check" style="color:#10b981;"></i>
                     </span>
                     <span v-else style="opacity:0.4;">—</span>
                   </td>
                   <td>
-                    <button class="small danger" @click="removeGroup(i)" title="Remove group">
-                      <i class="fas fa-times"></i>
+                    <button class="clear-btn" @click="removeGroup(i)" title="Remove group">
+                      <i class="fas fa-trash"></i>
                     </button>
                   </td>
                 </tr>
@@ -252,22 +253,25 @@
               </tbody>
             </table>
           </div>
-        </section>
+        </div>
+
       </div>
 
-      <!-- ════════════════ RIGHT COLUMN ════════════════ -->
-      <div class="lida-col">
+      <!-- ════ RIGHT COLUMN ════ -->
+      <div class="col-right">
 
         <!-- Kinetic Curves -->
-        <section class="lida-section">
-          <h3><i class="fas fa-chart-line icon-muted"></i> Kinetic Curves</h3>
-          <div ref="curvePlotEl" class="lida-plot"></div>
-        </section>
+        <div class="internal-section">
+          <div class="flex-between" style="margin-bottom:10px;">
+            <h3 style="margin:0; border:none; padding:0;">Kinetic Curves</h3>
+          </div>
+          <div ref="curvePlotEl" class="plot-area"></div>
+        </div>
 
         <!-- Condition Heatmap -->
-        <section class="lida-section">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-            <h3 style="margin:0;"><i class="fas fa-fire icon-muted"></i> Condition Heatmap</h3>
+        <div class="internal-section">
+          <div class="flex-between" style="margin-bottom:10px;">
+            <h3 style="margin:0; border:none; padding:0;">Condition Heatmap</h3>
             <div style="display:flex; gap:6px; align-items:center; font-size:0.8rem;">
               <label>X:</label>
               <select v-model="heatX" style="width:auto; padding:4px 8px;">
@@ -285,75 +289,82 @@
               </select>
             </div>
           </div>
-          <div ref="heatPlotEl" class="lida-plot"></div>
-        </section>
+          <div ref="heatPlotEl" class="plot-area"></div>
+        </div>
 
         <!-- Sequence Logo -->
-        <section class="lida-section">
-          <h3><i class="fas fa-align-center icon-muted"></i> Sequence Logo (top {{ 100 - dataset.config.yieldThreshold }}%)</h3>
-          <div v-if="logoWarning" class="lida-warn">
+        <div class="internal-section">
+          <h3>Sequence Logo (top {{ 100 - dataset.config.yieldThreshold }}%)</h3>
+          <div v-if="logoWarning" class="section-warn">
             <i class="fas fa-circle-info"></i> {{ logoWarning }}
           </div>
           <div ref="logoEl" class="logo-wrap" v-html="logoSvg"></div>
-        </section>
+        </div>
 
-        <!-- Suggestions -->
-        <section class="lida-section">
-          <h3><i class="fas fa-lightbulb icon-muted"></i> Suggested Next Experiments</h3>
-          <div v-if="suggestNote" class="lida-warn" style="margin-bottom:8px;">
+        <!-- Suggested Next Experiments -->
+        <div class="internal-section">
+          <h3>Suggested Next Experiments</h3>
+          <div v-if="suggestNote" class="section-warn" style="margin-bottom:8px;">
             <i class="fas fa-circle-info"></i> {{ suggestNote }}
           </div>
           <div v-if="!aiSuggestions.length && !suggestNote" style="opacity:0.5; font-size:0.8rem; padding:8px 0;">
-            Click <strong>Suggest Next</strong> above to run METIS active learning on your experiment data.
+            Click <strong>Suggest Next Experiments</strong> to run METIS active learning on your data.
           </div>
-          <div class="suggestions-list">
-            <div v-for="(s, i) in aiSuggestions" :key="i" class="suggestion-card">
-              <div class="sug-rank">#{{ i + 1 }}</div>
-              <div class="sug-body">
-                <div class="sug-seq" :title="s.sequence">{{ s.sequence }}</div>
-                <div class="sug-cond">
-                  T: {{ formatNum(s.conditions.temperature) }}°C ·
-                  Lig: {{ formatNum(s.conditions.ligase) }} ·
-                  ATP: {{ formatNum(s.conditions.atp) }} ·
-                  Mg²⁺: {{ formatNum(s.conditions.mg2) }} ·
-                  Env: {{ s.conditions.env }}
+          <div v-if="aiSuggestions.length" style="max-height:220px; overflow-y:auto; padding-right:4px;">
+            <div class="suggestion-card" v-for="(s, i) in aiSuggestions" :key="i">
+              <div class="flex-between">
+                <div>
+                  <span class="sug-id">#{{ i + 1 }}</span>
+                  <span class="sug-seq" :title="s.sequence">{{ s.sequence }}</span>
                 </div>
-                <div class="sug-pred">
-                  Predicted: <strong>{{ formatNum(s.predicted_conversion) }}%</strong>
-                  <span style="opacity:0.7;">± {{ formatNum(s.uncertainty) }}</span>
-                </div>
+                <span style="font-size:0.78rem; color:var(--primary, #3b82f6); font-weight:bold;">
+                  {{ formatNum(s.predicted_conversion) }}%
+                </span>
+              </div>
+              <div style="font-size:0.72rem; opacity:0.75; margin-top:3px;">
+                T: {{ formatNum(s.conditions.temperature) }}°C ·
+                Lig: {{ formatNum(s.conditions.ligase) }} ·
+                ATP: {{ formatNum(s.conditions.atp) }} ·
+                Mg²⁺: {{ formatNum(s.conditions.mg2) }} ·
+                Env: {{ s.conditions.env }}
+                <span style="opacity:0.7;"> · ±{{ formatNum(s.uncertainty) }}</span>
               </div>
             </div>
           </div>
-        </section>
+        </div>
 
-        <!-- Sequence prediction -->
-        <section class="lida-section" v-if="seqCandidates.length">
-          <h3><i class="fas fa-shuffle icon-muted"></i> Predicted High-Yield Sequences</h3>
-          <div class="suggestions-list">
-            <div v-for="(c, i) in seqCandidates" :key="i" class="suggestion-card">
-              <div class="sug-rank">#{{ i + 1 }}</div>
-              <div class="sug-body">
-                <div class="sug-seq">{{ c.sequence }}</div>
-                <div class="sug-pred">
-                  Predicted: <strong>{{ formatNum(c.predicted_conversion) }}%</strong>
-                  <span v-if="c.uncertainty != null" style="opacity:0.7;">± {{ formatNum(c.uncertainty) }}</span>
+        <!-- Predicted High-Yield Sequences -->
+        <div class="internal-section" v-if="seqCandidates.length">
+          <h3>Predicted High-Yield Sequences</h3>
+          <div style="max-height:220px; overflow-y:auto; padding-right:4px;">
+            <div class="suggestion-card" v-for="(c, i) in seqCandidates" :key="i">
+              <div class="flex-between">
+                <div>
+                  <span class="sug-id">#{{ i + 1 }}</span>
+                  <span class="sug-seq">{{ c.sequence }}</span>
                 </div>
+                <span style="font-size:0.78rem; color:var(--primary, #3b82f6); font-weight:bold;">
+                  {{ formatNum(c.predicted_conversion) }}%
+                </span>
+              </div>
+              <div v-if="c.uncertainty != null" style="font-size:0.72rem; opacity:0.65; margin-top:2px;">
+                ±{{ formatNum(c.uncertainty) }} uncertainty
               </div>
             </div>
           </div>
-        </section>
+        </div>
+
       </div>
     </div>
 
     <!-- Cloud Library Modal -->
-    <div v-if="showLibrary" class="lida-modal" @click.self="showLibrary = false">
-      <div class="lida-modal-body">
-        <div class="lida-modal-header">
+    <div v-if="showLibrary" class="modal-overlay" @click.self="showLibrary = false">
+      <div class="modal-body">
+        <div class="modal-header flex-between">
           <h3 style="margin:0;"><i class="fas fa-folder-open"></i> LIDA Kinetics Library</h3>
-          <button class="small" @click="showLibrary = false"><i class="fas fa-times"></i></button>
+          <button class="clear-btn" @click="showLibrary = false"><i class="fas fa-times"></i></button>
         </div>
-        <div class="lida-modal-content">
+        <div class="modal-content">
           <div v-if="!libraryItems.length" style="text-align:center; opacity:0.6; padding:30px;">
             No saved datasets. Save the current dataset to populate the library.
           </div>
@@ -361,13 +372,11 @@
             <div>
               <strong>{{ item.name || 'Untitled' }}</strong>
               <span class="lib-scope" :class="`scope-${item.scope?.toLowerCase()}`">{{ item.scope }}</span>
-              <div style="font-size:0.75rem; opacity:0.7;">
-                {{ item.experiments?.length || 0 }} groups
-              </div>
+              <div style="font-size:0.75rem; opacity:0.7;">{{ item.experiments?.length || 0 }} groups</div>
             </div>
             <div style="display:flex; gap:6px;">
               <button class="small" @click="loadFromLibrary(item)"><i class="fas fa-download"></i> Open</button>
-              <button class="small danger" @click="deleteFromLibrary(item)" v-if="item.owner_id === store.user?.id">
+              <button class="small danger-btn" @click="deleteFromLibrary(item)" v-if="item.owner_id === store.user?.id">
                 <i class="fas fa-trash"></i>
               </button>
             </div>
@@ -375,6 +384,7 @@
         </div>
       </div>
     </div>
+
   </div>
 </template>
 
@@ -1098,154 +1108,143 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.lida-layout {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 15px;
-}
-@media (max-width: 1024px) {
-  .lida-layout { grid-template-columns: 1fr; }
-}
-.lida-col { display: flex; flex-direction: column; gap: 15px; min-width: 0; }
+/* ── Layout ─────────────────────────────────────────────── */
+.module-card { display: flex; flex-direction: column; gap: 10px; }
 
-.lida-section {
-  background: var(--panel-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px;
-}
-.lida-section h3 {
-  font-size: 0.95rem;
-  color: var(--primary);
-  margin: 0 0 10px 0;
-  display: flex; align-items: center; gap: 8px;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 6px;
+.layout-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+@media (max-width: 1024px) { .layout-columns { grid-template-columns: 1fr; } }
+
+.col-left  { display: flex; flex-direction: column; gap: 15px; min-width: 0; }
+.col-right { display: flex; flex-direction: column; gap: 15px; min-width: 0; }
+
+/* ── Header ─────────────────────────────────────────────── */
+.full-width-header { margin-bottom: 5px; }
+.dataset-name-input {
+  font-size: 1.1rem; font-weight: 700; color: var(--primary, #3b82f6);
+  border: none; border-bottom: 2px solid var(--primary, #3b82f6);
+  background: transparent; padding: 2px 0; min-width: 200px; outline: none;
 }
 
+/* ── Sections ────────────────────────────────────────────── */
+.internal-section h3 {
+  font-size: 1.05rem;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  padding-bottom: 6px; margin-bottom: 10px; margin-top: 0;
+  color: var(--primary, #3b82f6);
+}
+
+/* ── Grids & range inputs ─────────────────────────────────── */
 .grid-2-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .grid-3-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 
-.range-group label { font-size: 0.75rem; font-weight: 600; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.4px; display: block; margin-bottom: 4px; }
 .range-inputs { display: flex; gap: 6px; }
 .range-inputs input { flex: 1; min-width: 0; }
 
-.lida-error {
-  background: var(--danger-bg);
-  color: var(--danger);
-  border: 1px solid var(--danger);
-  border-radius: var(--radius);
-  padding: 8px 10px;
-  margin-top: 8px;
-  font-size: 0.8rem;
-  display: flex; align-items: center; gap: 8px;
+/* ── Input groups ───────────────────────────────────────── */
+.input-group label { display: block; font-size: 0.8rem; margin-bottom: 4px; font-weight: bold; opacity: 0.8; }
+.input-group input,
+.input-group select { width: 100%; padding: 6px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; font-size: 0.85rem; }
+
+/* ── Status banners ─────────────────────────────────────── */
+.section-error {
+  background: rgba(239,68,68,0.1); color: #ef4444;
+  border: 1px solid #ef4444; border-radius: 4px;
+  padding: 8px 10px; margin-top: 8px;
+  font-size: 0.8rem; display: flex; align-items: center; gap: 8px;
 }
-.lida-info {
-  background: color-mix(in srgb, var(--success) 12%, transparent);
-  color: var(--success);
-  border: 1px solid var(--success);
-  border-radius: var(--radius);
-  padding: 8px 10px;
-  margin-top: 8px;
-  font-size: 0.8rem;
-  display: flex; align-items: center; gap: 8px;
+.section-info {
+  background: rgba(16,185,129,0.1); color: #10b981;
+  border: 1px solid #10b981; border-radius: 4px;
+  padding: 8px 10px; margin-top: 8px;
+  font-size: 0.8rem; display: flex; align-items: center; gap: 8px;
 }
-.lida-warn {
-  background: color-mix(in srgb, var(--primary) 8%, transparent);
-  color: var(--primary);
-  border: 1px solid var(--primary);
-  border-radius: var(--radius);
-  padding: 6px 10px;
-  margin-bottom: 8px;
-  font-size: 0.75rem;
-  display: flex; align-items: center; gap: 8px;
+.section-warn {
+  background: rgba(59,130,246,0.08); color: var(--primary, #3b82f6);
+  border: 1px solid var(--primary, #3b82f6); border-radius: 4px;
+  padding: 6px 10px; margin-bottom: 8px;
+  font-size: 0.75rem; display: flex; align-items: center; gap: 8px;
 }
 
+/* ── Action buttons ─────────────────────────────────────── */
 .action-btn {
-  padding: 8px 12px;
-  border-radius: 6px;
-  border: none;
-  font-weight: 600;
-  font-size: 0.8rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  transition: filter 0.18s;
+  display: flex; align-items: center; justify-content: center;
+  gap: 8px; padding: 10px; border-radius: 6px;
+  font-weight: bold; cursor: pointer; transition: all 0.2s;
+  border: none; font-size: 0.85rem;
 }
-.action-btn:hover:not(:disabled) { filter: brightness(0.92); }
-.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.auto-btn { background: var(--primary); color: #fff; }
+.auto-btn { background: #3b82f6; color: white; box-shadow: 0 2px 4px rgba(59,130,246,0.3); }
+.auto-btn:hover:not(:disabled) { background: #2563eb; transform: translateY(-1px); }
+.auto-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.ledger-wrap { max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+/* ── Scoped button variants ─────────────────────────────── */
+.success-btn { background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+.danger-btn  { background: rgba(239,68,68,0.1); color: #ef4444; border: 1px solid #ef4444; border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+.danger-btn:hover { background: #ef4444; color: white; }
+.clear-btn   { background: transparent; border: none; color: #ef4444; cursor: pointer; padding: 2px; border-radius: 4px; }
+
+/* ── Ledger ─────────────────────────────────────────────── */
+.ledger-table-container { max-height: 280px; overflow-y: auto; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; }
 .ledger-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
-.ledger-table th { position: sticky; top: 0; background: var(--input-bg); z-index: 1; padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); font-weight: 700; opacity: 0.85; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.4px; }
-.ledger-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.ledger-table th {
+  position: sticky; top: 0; background: var(--input-bg, #f8fafc); z-index: 1;
+  padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border-color, #e2e8f0);
+  font-weight: 700; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.4px;
+}
+.ledger-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-color, #f1f5f9); }
 .seq-cell { font-family: monospace; font-size: 0.75rem; }
 .env-cell { font-size: 0.75rem; opacity: 0.85; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.lida-plot { width: 100%; height: 280px; border: 1px solid var(--border); border-radius: var(--radius); }
+/* ── Plot areas ─────────────────────────────────────────── */
+.plot-area {
+  width: 100%; height: 280px;
+  border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); overflow: hidden;
+}
 
+/* ── Sequence logo ──────────────────────────────────────── */
 .logo-wrap { width: 100%; overflow-x: auto; padding: 8px 0; color: var(--text); }
 .logo-wrap svg { display: block; }
 
-.suggestions-list { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+/* ── Suggestion cards ───────────────────────────────────── */
 .suggestion-card {
-  display: flex; gap: 10px; align-items: flex-start;
   padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--input-bg);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  background: var(--summary-bg, #f8fafc);
+  margin-bottom: 6px;
   font-size: 0.8rem;
 }
-.sug-rank { font-weight: 700; color: var(--primary); min-width: 24px; }
-.sug-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sug-id  { font-weight: 700; color: var(--primary, #3b82f6); margin-right: 5px; font-size: 0.75rem; }
 .sug-seq { font-family: monospace; font-size: 0.78rem; word-break: break-all; }
-.sug-cond { font-size: 0.72rem; opacity: 0.75; }
-.sug-pred { font-size: 0.78rem; }
 
-.lida-modal {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.55);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 2000;
-}
-.lida-modal-body {
-  background: var(--surface);
-  border-radius: var(--radius);
-  width: 92%;
-  max-width: 720px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.lida-modal-header {
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--border);
-  display: flex; justify-content: space-between; align-items: center;
-}
-.lida-modal-content { padding: 14px 18px; overflow-y: auto; }
+/* ── Utilities ──────────────────────────────────────────── */
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; cursor: pointer; color: #475569; font-weight: bold; }
 
+/* ── Modal ──────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center; z-index: 2000;
+}
+.modal-body {
+  background: var(--surface); border-radius: 8px;
+  width: 92%; max-width: 720px; max-height: 80vh;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.modal-header { padding: 14px 18px; border-bottom: 1px solid var(--border-color, #e2e8f0); }
+.modal-content { padding: 14px 18px; overflow-y: auto; }
+
+/* ── Library ────────────────────────────────────────────── */
 .library-row {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel-bg);
-  margin-bottom: 8px;
+  padding: 10px 12px; border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px; background: var(--surface); margin-bottom: 8px;
 }
 .lib-scope {
-  display: inline-block;
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-size: 0.7rem;
-  margin-left: 6px;
-  background: var(--summary-bg);
-  border: 1px solid var(--border);
+  display: inline-block; padding: 1px 8px; border-radius: 999px;
+  font-size: 0.7rem; margin-left: 6px;
+  background: var(--summary-bg); border: 1px solid var(--border-color, #e2e8f0);
 }
-.scope-global { background: color-mix(in srgb, var(--success) 18%, transparent); border-color: var(--success); }
-.scope-personal { background: color-mix(in srgb, var(--primary) 12%, transparent); border-color: var(--primary); }
-
-.icon-muted { opacity: 0.65; }
+.scope-global   { background: rgba(16,185,129,0.18); border-color: #10b981; }
+.scope-personal { background: rgba(59,130,246,0.12); border-color: #3b82f6; }
 </style>

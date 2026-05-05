@@ -367,6 +367,7 @@
                 <div>
                   <span class="sug-id">#{{ i + 1 }}</span>
                   <span class="sug-seq" :title="s.sequence">{{ s.sequence }}</span>
+                  <span v-if="seqNameOf(s.sequence)" class="sug-name">{{ seqNameOf(s.sequence) }}</span>
                 </div>
                 <span style="font-size:0.78rem; color:var(--primary, #3b82f6); font-weight:bold;">
                   {{ formatNum(s.predicted_conversion) }}%
@@ -389,8 +390,7 @@
               <i class="fas fa-flask-vial"></i> Send to Wellplate
             </div>
             <p class="wellplate-export-hint">
-              Enter stock concs (or pick from inventory), set the well volume, and pick a plate.
-              Volumes per well are computed as <code>V = target_conc × wellVol / stock</code>; MQ H₂O fills the rest.
+              Pick stocks from inventory or enter concentrations. DNA building blocks appear automatically when sequences in your CSV have a <strong>Name</strong> column (e.g. "Eβ" → A-side E, B-side β). Volume formula: <code>V = target × wellVol / stock</code>; MQ H₂O fills the rest.
             </p>
 
             <div class="wellplate-stock-grid">
@@ -489,6 +489,84 @@
                   </div>
                 </div>
               </div>
+
+              <!-- DNA Building Blocks — shown only when suggestions include named sequences -->
+              <template v-if="exportBuildingBlocks.aside.length || exportBuildingBlocks.bside.length">
+                <div class="stock-section-label" style="margin-top:10px;">DNA Building Blocks</div>
+                <div class="stock-section-hint">
+                  A-side target: {{ dataset.kinetics.A0 }} µM (A₀) · B-side target: {{ dataset.kinetics.B0 }} µM (B₀)
+                </div>
+
+                <!-- A-side strands -->
+                <div class="stock-row" v-for="letter in exportBuildingBlocks.aside" :key="'aside_' + letter">
+                  <label>A-side <strong>{{ letter }}</strong> strand ({{ dataset.kinetics.A0 }} µM target)</label>
+                  <div class="stock-input-row">
+                    <input type="number" step="any"
+                      :value="dnaStocks[letter]?.conc ?? 0"
+                      @input="setDnaConc(letter, $event.target.value)"
+                      placeholder="stock conc (µM)" />
+                    <span class="stock-unit">µM</span>
+                    <div class="inv-picker" @click.stop>
+                      <button class="inv-pick-btn" @click="activeExportInv = activeExportInv === 'dna_a_' + letter ? null : 'dna_a_' + letter">
+                        <i class="fas fa-tag"></i>
+                        {{ dnaStocks[letter]?.inv ? `[${dnaStocks[letter].inv.code}] ${dnaStocks[letter].inv.name}` : 'Inventory…' }}
+                      </button>
+                      <button v-if="dnaStocks[letter]?.inv" class="inv-clear-btn" @click="clearDnaStockInv(letter)" title="Clear">
+                        <i class="fas fa-xmark"></i>
+                      </button>
+                      <div v-if="activeExportInv === 'dna_a_' + letter" class="inv-dropdown">
+                        <input type="text" v-model="dnaInvSearch[letter]" :placeholder="`Search '${letter}' in inventory…`" @click.stop />
+                        <div class="inv-results">
+                          <div
+                            v-for="inv in filterDnaInventory(dnaInvSearch[letter], letter)"
+                            :key="inv.id"
+                            class="inv-item"
+                            @mousedown.prevent="selectDnaStockInv(letter, inv)"
+                          >
+                            [{{ inv.code }}] {{ inv.name }} <span class="inv-stock">({{ inv.stock }} {{ inv.stockUnit || '?' }})</span>
+                          </div>
+                          <div v-if="!filterDnaInventory(dnaInvSearch[letter], letter).length" class="inv-empty">No matching items.</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- B-side strands -->
+                <div class="stock-row" v-for="letter in exportBuildingBlocks.bside" :key="'bside_' + letter">
+                  <label>B-side <strong>{{ letter }}</strong> strand ({{ dataset.kinetics.B0 }} µM target)</label>
+                  <div class="stock-input-row">
+                    <input type="number" step="any"
+                      :value="dnaStocks[letter]?.conc ?? 0"
+                      @input="setDnaConc(letter, $event.target.value)"
+                      placeholder="stock conc (µM)" />
+                    <span class="stock-unit">µM</span>
+                    <div class="inv-picker" @click.stop>
+                      <button class="inv-pick-btn" @click="activeExportInv = activeExportInv === 'dna_b_' + letter ? null : 'dna_b_' + letter">
+                        <i class="fas fa-tag"></i>
+                        {{ dnaStocks[letter]?.inv ? `[${dnaStocks[letter].inv.code}] ${dnaStocks[letter].inv.name}` : 'Inventory…' }}
+                      </button>
+                      <button v-if="dnaStocks[letter]?.inv" class="inv-clear-btn" @click="clearDnaStockInv(letter)" title="Clear">
+                        <i class="fas fa-xmark"></i>
+                      </button>
+                      <div v-if="activeExportInv === 'dna_b_' + letter" class="inv-dropdown">
+                        <input type="text" v-model="dnaInvSearch[letter]" :placeholder="`Search '${letter}' in inventory…`" @click.stop />
+                        <div class="inv-results">
+                          <div
+                            v-for="inv in filterDnaInventory(dnaInvSearch[letter], letter)"
+                            :key="inv.id"
+                            class="inv-item"
+                            @mousedown.prevent="selectDnaStockInv(letter, inv)"
+                          >
+                            [{{ inv.code }}] {{ inv.name }} <span class="inv-stock">({{ inv.stock }} {{ inv.stockUnit || '?' }})</span>
+                          </div>
+                          <div v-if="!filterDnaInventory(dnaInvSearch[letter], letter).length" class="inv-empty">No matching items.</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
             </div>
 
             <div class="wellplate-export-row">
@@ -651,6 +729,76 @@ const exportInvSearch = reactive({ ligase: '', atp: '', mg2: '' })
 const exportError = ref('')
 const exportSuccess = ref('')
 
+// ── DNA Building Block state ────────────────────────────────────────────────
+// Sequence names in the CSV follow the pattern <LatinUpper><greeklower>, e.g.
+// "Eβ". The uppercase Latin letter is the A-side strand; the Greek lowercase
+// letter is the B-side strand. Both get their own inventory-linked stock entry.
+
+const GREEK_LETTERS = 'αβγδεζηθικλμνξοπρστυφχψω'
+
+function parseSeqName(name) {
+  if (!name) return { aside: null, bside: null }
+  const latinMatch = name.match(/[A-Z]/)
+  const greekChar = [...(name || '')].find(c => GREEK_LETTERS.includes(c))
+  return { aside: latinMatch?.[0] ?? null, bside: greekChar ?? null }
+}
+
+function seqNameOf(seq) {
+  return dataset.experiments.find(e => e.sequence === seq)?.seqName ?? null
+}
+
+// Per-building-block stock concentrations and inventory selections.
+// Keyed by the building-block letter (e.g. 'E', 'β'). A-side and B-side
+// letters come from different character sets so they can share one map.
+const dnaStocks    = reactive({})  // { 'E': { conc: 0, inv: null }, ... }
+const dnaInvSearch = reactive({})  // { 'E': '', ... }
+
+// Unique A-side / B-side letters from all current METIS suggestions.
+const exportBuildingBlocks = computed(() => {
+  const aside = new Set()
+  const bside = new Set()
+  for (const s of aiSuggestions.value) {
+    const { aside: a, bside: b } = parseSeqName(seqNameOf(s.sequence))
+    if (a) aside.add(a)
+    if (b) bside.add(b)
+  }
+  return { aside: [...aside].sort(), bside: [...bside].sort() }
+})
+
+function setDnaConc(letter, val) {
+  if (!dnaStocks[letter]) dnaStocks[letter] = { conc: 0, inv: null }
+  dnaStocks[letter].conc = Number(val) || 0
+}
+
+function selectDnaStockInv(letter, inv) {
+  if (!dnaStocks[letter]) dnaStocks[letter] = { conc: 0, inv: null }
+  dnaStocks[letter].inv = inv
+  if (typeof inv?.stock === 'number') dnaStocks[letter].conc = inv.stock
+  activeExportInv.value = null
+}
+
+function clearDnaStockInv(letter) {
+  if (dnaStocks[letter]) dnaStocks[letter].inv = null
+}
+
+// Pre-filters by the building-block letter when no search query is active,
+// so the most relevant stocks surface immediately without the user typing.
+function filterDnaInventory(query, letter) {
+  const list = store.inventory || []
+  const q = (query || '').toLowerCase()
+  if (q) {
+    return list.filter(i =>
+      (i.name || '').toLowerCase().includes(q) ||
+      (i.code || '').toLowerCase().includes(q)
+    )
+  }
+  const byLetter = list.filter(i =>
+    (i.name || '').includes(letter) ||
+    (i.code || '').includes(letter)
+  )
+  return byLetter.length > 0 ? byLetter : list
+}
+
 function filterExportInventory(query) {
   const q = (query || '').toLowerCase()
   const list = store.inventory || []
@@ -745,24 +893,24 @@ function removeGroup(i) {
 
 // ════════════════ CSV ════════════════
 
-const TEMPLATE_HEADER = ['DNA-Sequence', 'Time', 'Conversion', 'T4-Ligase', 'ATP', 'Temperature', 'Environment', 'Mg2+', 'Replicate']
+const TEMPLATE_HEADER = ['DNA-Sequence', 'Name', 'Time', 'Conversion', 'T4-Ligase', 'ATP', 'Temperature', 'Environment', 'Mg2+', 'Replicate']
 
 function downloadTemplate() {
   const rows = [
     TEMPLATE_HEADER.join(','),
-    'GATCAGCTGATCAG,0,0,1,1,30,none,5,1',
-    'GATCAGCTGATCAG,30,15,1,1,30,none,5,1',
-    'GATCAGCTGATCAG,60,42,1,1,30,none,5,1',
-    'GATCAGCTGATCAG,90,68,1,1,30,none,5,1',
-    'GATCAGCTGATCAG,120,82,1,1,30,none,5,1',
-    'GATCAGCTGATCAG,0,0,1,1,30,none,5,2',
-    'GATCAGCTGATCAG,30,18,1,1,30,none,5,2',
-    'GATCAGCTGATCAG,60,39,1,1,30,none,5,2',
-    'GATCAGCTGATCAG,90,71,1,1,30,none,5,2',
-    'GATCAGCTGATCAG,120,79,1,1,30,none,5,2',
-    'TTACCGTACCGTAC,0,0,2,2,37,synthetic_cells,10,1',
-    'TTACCGTACCGTAC,30,8,2,2,37,synthetic_cells,10,1',
-    'TTACCGTACCGTAC,60,22,2,2,37,synthetic_cells,10,1',
+    'GATCAGCTGATCAG,Eβ,0,0,1,1,30,none,5,1',
+    'GATCAGCTGATCAG,Eβ,30,15,1,1,30,none,5,1',
+    'GATCAGCTGATCAG,Eβ,60,42,1,1,30,none,5,1',
+    'GATCAGCTGATCAG,Eβ,90,68,1,1,30,none,5,1',
+    'GATCAGCTGATCAG,Eβ,120,82,1,1,30,none,5,1',
+    'GATCAGCTGATCAG,Eβ,0,0,1,1,30,none,5,2',
+    'GATCAGCTGATCAG,Eβ,30,18,1,1,30,none,5,2',
+    'GATCAGCTGATCAG,Eβ,60,39,1,1,30,none,5,2',
+    'GATCAGCTGATCAG,Eβ,90,71,1,1,30,none,5,2',
+    'GATCAGCTGATCAG,Eβ,120,79,1,1,30,none,5,2',
+    'TTACCGTACCGTAC,Aα,0,0,2,2,37,synthetic_cells,10,1',
+    'TTACCGTACCGTAC,Aα,30,8,2,2,37,synthetic_cells,10,1',
+    'TTACCGTACCGTAC,Aα,60,22,2,2,37,synthetic_cells,10,1',
   ]
   const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
@@ -816,6 +964,11 @@ const HEADER_ALIASES = {
   rep: 'replicate',
   repid: 'replicate',
   replicatenumber: 'replicate',
+  name: 'seqname',
+  seqname: 'seqname',
+  dnaname: 'seqname',
+  buildingblock: 'seqname',
+  buildingblockname: 'seqname',
 }
 
 function onCsvFileSelected(e) {
@@ -855,6 +1008,7 @@ function parseCsv(text) {
   }
 
   const hasReplCol = headerKeys.includes('replicate')
+  const hasNameCol = headerKeys.includes('seqname')
   const idx = name => headerKeys.indexOf(name)
   const rows = []
   let badRows = 0
@@ -869,6 +1023,7 @@ function parseCsv(text) {
     if (isNaN(conv) || conv < 0 || conv > 100) { badRows++; continue }
     rows.push({
       sequence: seq,
+      seqName: hasNameCol ? (String(cols[idx('seqname')] || '').trim() || null) : null,
       time,
       conversion: conv,
       replicateId: hasReplCol ? String(cols[idx('replicate')] || '1').trim() : null,
@@ -953,6 +1108,7 @@ function parseCsv(text) {
       groupsByKey.set(key, {
         groupId: key,
         sequence: r.sequence,
+        seqName: r.seqName || null,
         conditions: r.conditions,
         timeCourse: [],
         maxConversion: 0,
@@ -960,7 +1116,9 @@ function parseCsv(text) {
       })
       repsByKey.set(key, new Map())
     }
-    groupsByKey.get(key).timeCourse.push({ time: r.time, conversion: r.conversion })
+    const grp = groupsByKey.get(key)
+    if (r.seqName && !grp.seqName) grp.seqName = r.seqName
+    grp.timeCourse.push({ time: r.time, conversion: r.conversion })
     const repsMap = repsByKey.get(key)
     if (!repsMap.has(r.replicateId)) repsMap.set(r.replicateId, [])
     repsMap.get(r.replicateId).push({ time: r.time, conversion: r.conversion })
@@ -1472,11 +1630,12 @@ async function predictSequence() {
 // formatted to match PhasePredictor.vue's cell template so the same
 // downstream Opentrons (.opnp) export pipeline picks them up unchanged.
 
-function getInvTag(inv, vol, targetConc, unit) {
+function getInvTag(inv, vol, targetConc, unit, label = '') {
+  const pre = label ? `<strong>${esc(label)}:</strong> ` : ''
   if (!inv) {
-    return `<strong>Manual stock:</strong> ${esc(vol)} µL (${esc(targetConc)} ${esc(unit)})<br>`
+    return `${pre}<strong>Manual:</strong> ${esc(vol)} µL (${esc(targetConc)} ${esc(unit)})<br>`
   }
-  return `&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(inv.code)}] ${esc(inv.name)} (${esc(store.formatNum ? store.formatNum(inv.stock) : inv.stock)} ${esc(inv.stockUnit || unit)})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity:0.7;"></i></span>&nbsp; ${esc(vol)} µL (${esc(targetConc)} ${esc(unit)})<br>`
+  return `${pre}&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(inv.code)}] ${esc(inv.name)} (${esc(store.formatNum ? store.formatNum(inv.stock) : inv.stock)} ${esc(inv.stockUnit || unit)})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity:0.7;"></i></span>&nbsp; ${esc(vol)} µL (${esc(targetConc)} ${esc(unit)})<br>`
 }
 
 function exportSuggestionsToPlate() {
@@ -1504,11 +1663,20 @@ function exportSuggestionsToPlate() {
   const stockA = Number(exportStocks.atp)    || 0
   const stockM = Number(exportStocks.mg2)    || 0
   if (stockL <= 0 || stockA <= 0 || stockM <= 0) {
-    exportError.value = 'All three stock concentrations must be > 0. Set them manually or pick from inventory.'
+    exportError.value = 'T4-Ligase, ATP, and Mg²⁺ stock concentrations must all be > 0. Set them manually or pick from inventory.'
+    return
+  }
+
+  // If any suggestion has a named sequence, all required building-block stocks must be set.
+  const { aside: asideBlocks, bside: bsideBlocks } = exportBuildingBlocks.value
+  const missingDna = [...asideBlocks, ...bsideBlocks].filter(l => !(dnaStocks[l]?.conc > 0))
+  if (missingDna.length) {
+    exportError.value = `Set stock concentrations for building block${missingDna.length > 1 ? 's' : ''}: ${missingDna.join(', ')}.`
     return
   }
 
   let writtenCount = 0, skippedOverflow = 0, skippedExcessVol = 0
+  const fmt = n => Number(n).toFixed(2)
   aiSuggestions.value.forEach((s, i) => {
     const rOff = Math.floor((startCol + i) / 12)
     const cOff = (startCol + i) % 12
@@ -1520,22 +1688,36 @@ function exportSuggestionsToPlate() {
     const vL = (s.conditions.ligase * wellVol) / stockL
     const vA = (s.conditions.atp    * wellVol) / stockA
     const vM = (s.conditions.mg2    * wellVol) / stockM
-    const vSum = vL + vA + vM
+
+    // DNA building blocks: volumes computed from A0 / B0 ODE initial conditions.
+    const { aside, bside } = parseSeqName(seqNameOf(s.sequence))
+    const asideConc = aside && dnaStocks[aside]?.conc > 0 ? dnaStocks[aside].conc : 0
+    const bsideConc = bside && dnaStocks[bside]?.conc > 0 ? dnaStocks[bside].conc : 0
+    const vAs = asideConc > 0 ? (dataset.kinetics.A0 * wellVol) / asideConc : 0
+    const vBs = bsideConc > 0 ? (dataset.kinetics.B0 * wellVol) / bsideConc : 0
+
+    const vSum = vL + vA + vM + vAs + vBs
     const vWater = wellVol - vSum
-    const fmt = n => Number(n).toFixed(2)
 
     const warn = vWater < 0
       ? `<br><span style="color:#ef4444; font-size:0.7rem;">⚠️ Stock volumes (${fmt(vSum)} µL) exceed well volume — increase stocks or shrink well.</span>`
       : ''
     if (vWater < 0) skippedExcessVol++
 
+    const nameLabel = seqNameOf(s.sequence)
+      ? ` <strong style="color:#8b5cf6; font-size:0.72rem;">${esc(seqNameOf(s.sequence))}</strong>` : ''
+    let dnaHtml = ''
+    if (aside) dnaHtml += getInvTag(dnaStocks[aside]?.inv ?? null, fmt(vAs), formatNum(dataset.kinetics.A0), 'µM', `A [${aside}]`)
+    if (bside) dnaHtml += getInvTag(dnaStocks[bside]?.inv ?? null, fmt(vBs), formatNum(dataset.kinetics.B0), 'µM', `B [${bside}]`)
+
     plate.wells[wId] =
-      `<strong style="color: var(--primary);">METIS [#${i + 1}]</strong> ` +
-      `<span style="font-family:monospace; font-size:0.78rem;">${esc(s.sequence)}</span><br>` +
+      `<strong style="color: var(--primary);">METIS [#${i + 1}]</strong>` +
+      `<span style="font-family:monospace; font-size:0.78rem;"> ${esc(s.sequence)}</span>${nameLabel}<br>` +
       `<span style="font-size:0.72rem; opacity:0.75;">T ${esc(formatNum(s.conditions.temperature))} °C · env ${esc(s.conditions.env || 'none')} · pred ${esc(formatNum(s.predicted_conversion))}%</span><br>` +
-      getInvTag(exportStocks.ligaseInv, fmt(vL), formatNum(s.conditions.ligase), dataset.units.ligase) +
-      getInvTag(exportStocks.atpInv,    fmt(vA), formatNum(s.conditions.atp),    dataset.units.atp) +
-      getInvTag(exportStocks.mg2Inv,    fmt(vM), formatNum(s.conditions.mg2),    dataset.units.mg2) +
+      dnaHtml +
+      getInvTag(exportStocks.ligaseInv, fmt(vL), formatNum(s.conditions.ligase), dataset.units.ligase, 'T4-Ligase') +
+      getInvTag(exportStocks.atpInv,    fmt(vA), formatNum(s.conditions.atp),    dataset.units.atp, 'ATP') +
+      getInvTag(exportStocks.mg2Inv,    fmt(vM), formatNum(s.conditions.mg2),    dataset.units.mg2, 'Mg²⁺') +
       `<strong>MQ H₂O:</strong> ${fmt(Math.max(0, vWater))} µL${warn}`
     writtenCount++
   })
@@ -1603,6 +1785,14 @@ async function archiveDataset() {
 
 watch(() => [dataset.experiments, dataset.config.yieldThreshold, heatX.value, heatY.value, store.isDarkMode], renderAll, { deep: true })
 watch(seqCandidates, computePredictedLogo, { deep: true })
+// Ensure a dnaStocks entry exists for every building-block letter that appears
+// in the current suggestions so v-model bindings in the template never hit undefined.
+watch(exportBuildingBlocks, ({ aside, bside }) => {
+  for (const l of [...aside, ...bside]) {
+    if (!dnaStocks[l]) dnaStocks[l] = { conc: 0, inv: null }
+    if (dnaInvSearch[l] == null) dnaInvSearch[l] = ''
+  }
+}, { immediate: true })
 
 onMounted(() => {
   nextTick(renderAll)
@@ -1895,6 +2085,16 @@ onBeforeUnmount(() => {
 }
 .sug-id  { font-weight: 700; color: var(--primary, #3b82f6); margin-right: 5px; font-size: 0.75rem; }
 .sug-seq { font-family: monospace; font-size: 0.78rem; word-break: break-all; }
+.sug-name { font-size: 0.72rem; font-weight: 700; color: #8b5cf6; margin-left: 6px; }
+
+/* ── DNA Building Block sub-section ────────────────────────── */
+.stock-section-label {
+  font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.4px; color: #8b5cf6;
+}
+.stock-section-hint {
+  font-size: 0.68rem; opacity: 0.6; margin-bottom: 4px;
+}
 
 /* ── Utilities ──────────────────────────────────────────── */
 .flex-between { display: flex; justify-content: space-between; align-items: center; }

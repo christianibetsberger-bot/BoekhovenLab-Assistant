@@ -78,6 +78,12 @@ export async function fitKineticsLocal(payload, onProgress) {
   const id = nextRequestId++
   const w = getWorker()
 
+  // Vue's reactive Proxies cannot be structured-cloned across the worker
+  // boundary ("The object can not be cloned"). JSON round-tripping strips
+  // the proxies and gives us a plain-object payload that postMessage can
+  // serialize. The Python side parses JSON anyway, so this is free.
+  const cloneable = JSON.parse(JSON.stringify(payload))
+
   return new Promise((resolve, reject) => {
     const handler = (e) => {
       const msg = e.data
@@ -96,7 +102,7 @@ export async function fitKineticsLocal(payload, onProgress) {
       }
     }
     w.addEventListener('message', handler)
-    w.postMessage({ type: 'fit', id, payload })
+    w.postMessage({ type: 'fit', id, payload: cloneable })
   })
 }
 

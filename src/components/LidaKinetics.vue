@@ -686,6 +686,49 @@ function parseCsv(text) {
 
   if (!rows.length) { parseError.value = 'No valid rows found.'; return }
 
+  // ── Modal-condition normalization (Replicate column only) ─────────────────
+  // When the user provides an explicit Replicate column, every row sharing
+  // (sequence, replicateId) belongs to the SAME experiment by user intent —
+  // even if a few rows have minor typos in conditions (a common case is
+  // T4-Ligase being entered differently at t=0). We replace each replicate's
+  // conditions with the per-replicate modal value across all its rows so
+  // the downstream groupKey lumps them correctly. Inconsistencies are
+  // surfaced via parseStats so the user can audit.
+  let normalizedReps = 0
+  if (hasReplCol) {
+    const repBuckets = new Map()
+    for (const r of rows) {
+      const k = `${r.sequence}|||${r.replicateId}`
+      if (!repBuckets.has(k)) repBuckets.set(k, [])
+      repBuckets.get(k).push(r)
+    }
+
+    const FIELDS = ['temperature', 'ligase', 'atp', 'mg2', 'env']
+    for (const repRows of repBuckets.values()) {
+      // Compute mode per field across this replicate.
+      const modal = {}
+      for (const f of FIELDS) {
+        const counts = new Map()
+        for (const r of repRows) {
+          const v = r.conditions[f]
+          counts.set(v, (counts.get(v) || 0) + 1)
+        }
+        let bestV = repRows[0].conditions[f], bestC = -1
+        for (const [v, c] of counts) {
+          if (c > bestC) { bestV = v; bestC = c }
+        }
+        modal[f] = bestV
+      }
+
+      // Detect any row that disagrees with the modal — these are the typos.
+      const inconsistent = repRows.some(r => FIELDS.some(f => r.conditions[f] !== modal[f]))
+      if (inconsistent) normalizedReps++
+
+      // Apply modal conditions to every row in the replicate.
+      for (const r of repRows) r.conditions = { ...modal }
+    }
+  }
+
   // Auto-detect replicates (no Replicate column):
   // Two rows are replicates iff they share the EXACT same sequence, every condition,
   // AND the same time point — only conversion% differs. Anything else → different group.
@@ -748,6 +791,7 @@ function parseCsv(text) {
   const nRepGroups = [...groupsByKey.values()].filter(g => g.replicates?.length > 1).length
   parseStats.value = `Imported ${rows.length} rows into ${groupsByKey.size} group(s).`
   if (nRepGroups > 0) parseStats.value += ` ${nRepGroups} group(s) detected with multiple replicates.`
+  if (normalizedReps > 0) parseStats.value += ` Normalized ${normalizedReps} replicate(s) with inconsistent conditions across timepoints (used the most-common value per column).`
   if (badRows > 0) parseStats.value += ` Skipped ${badRows} invalid row(s).`
 }
 

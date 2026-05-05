@@ -177,6 +177,13 @@
             </div>
           </div>
 
+          <div class="engine-row" title="Where the ODE fit runs. Local uses Pyodide in your browser (faster, no server queue, ~12 MB first-load). Server uses Render. Auto tries Local first.">
+            <span class="engine-label">Fit engine</span>
+            <label class="engine-opt"><input type="radio" v-model="dataset.config.fitEngine" value="auto" /> Auto</label>
+            <label class="engine-opt"><input type="radio" v-model="dataset.config.fitEngine" value="local" /> Local (browser)</label>
+            <label class="engine-opt"><input type="radio" v-model="dataset.config.fitEngine" value="server" /> Server (Render)</label>
+          </div>
+
           <div class="action-row">
             <button class="compact-btn" @click="fitKinetics" :disabled="isFitting || !dataset.experiments.length">
               <i class="fas" :class="isFitting ? 'fa-spinner fa-spin' : 'fa-chart-line'"></i>
@@ -417,6 +424,7 @@ import Plotly from 'plotly.js-dist-min'
 import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase'
 import { ENDPOINTS } from '../services/kineticsBackend'
+import { fitKineticsLocal } from '../services/kineticsLocalFit'
 import { esc } from '../utils/htmlSafe'
 
 const store = useLabStore()
@@ -440,6 +448,10 @@ function emptyDataset() {
       ensembleSize: 20,
       poolSize: 5000,
       yieldThreshold: 80,
+      // 'auto' = try Pyodide-in-browser, fall back to Render if it fails
+      // 'local' = always use Pyodide (no network needed after first load)
+      // 'server' = always use the Render backend
+      fitEngine: 'auto',
     },
     suggestions: [],
   }
@@ -984,15 +996,16 @@ function meanTimeCourse(timeCourse) {
     .sort((a, b) => a.time - b.time)
 }
 
-// Chunk size for fitKinetics: each fit takes ~30-50s on Render's free-tier
-// shared CPU, so 2 per request keeps us comfortably under gunicorn's 120s
-// worker timeout. Sending all groups in one request was causing the worker
-// to be killed mid-response (browser sees this as 'Load failed', not HTTP).
+// Chunk size for the SERVER fit path: each ODE fit takes ~30-50 s on Render's
+// free-tier shared CPU, so 2 per request keeps us comfortably under gunicorn's
+// 120 s worker timeout. The local Pyodide path doesn't chunk — there's no
+// per-request timeout in the browser.
 const FIT_CHUNK_SIZE = 2
 
 async function fitKinetics() {
   isFitting.value = true
   fitNote.value = ''
+  backendError.value = ''
 
   // Expand replicate groups into one entry per replicate for individual fitting.
   const REP_SEP = '|||rep'
@@ -1013,7 +1026,39 @@ async function fitKinetics() {
     }
   }
 
-  // Split into chunks so each backend call stays under the 120s worker timeout.
+  const payload = {
+    experiments: flatExps,
+    limit_uM: dataset.kinetics.limit_uM,
+    A0: dataset.kinetics.A0,
+    B0: dataset.kinetics.B0,
+  }
+
+  const engine = dataset.config.fitEngine || 'auto'
+
+  // Try local first for 'local' or 'auto'.
+  if (engine === 'local' || engine === 'auto') {
+    try {
+      const result = await fitKineticsLocal(payload, msg => { fitNote.value = msg })
+      isFitting.value = false
+      applyFits(result.fits || [])
+      return
+    } catch (err) {
+      if (engine === 'local') {
+        // Strict local mode — surface the failure, don't fall back.
+        isFitting.value = false
+        backendError.value = `Local engine failed: ${err.message}. Switch to Server or Auto to use the Render backend.`
+        return
+      }
+      // Auto mode — log and fall through to the server path.
+      fitNote.value = `Local engine unavailable (${err.message}). Falling back to server…`
+    }
+  }
+
+  // Server path — chunked to fit the 120 s gunicorn timeout.
+  await fitKineticsServer(flatExps)
+}
+
+async function fitKineticsServer(flatExps) {
   const chunks = []
   for (let i = 0; i < flatExps.length; i += FIT_CHUNK_SIZE) {
     chunks.push(flatExps.slice(i, i + FIT_CHUNK_SIZE))
@@ -1032,7 +1077,6 @@ async function fitKinetics() {
     })
     if (!result) {
       // backendError is already set by callBackend.
-      // Keep partial results so the user sees what *did* fit.
       isFitting.value = false
       if (allFits.length) {
         applyFits(allFits, `Backend dropped after batch ${ci} of ${chunks.length} — showing partial results, retry to fit the rest. `)
@@ -1258,6 +1302,15 @@ onBeforeUnmount(() => {
 }
 
 /* ── Action buttons ─────────────────────────────────────── */
+.engine-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-size: 0.72rem; opacity: 0.85;
+  margin-bottom: 6px; padding: 4px 0;
+}
+.engine-label { font-weight: 700; color: var(--primary, #3b82f6); text-transform: uppercase; letter-spacing: 0.4px; }
+.engine-opt { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.engine-opt input { margin: 0; }
+
 .action-row { display: flex; gap: 6px; }
 .compact-btn {
   flex: 1; min-width: 0;

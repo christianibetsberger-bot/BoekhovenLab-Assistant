@@ -70,19 +70,20 @@ def _simulate_R_at(params, initial_R, t_eval, A0, B0, rtol=1e-4, atol=1e-7):
         return None
 
 def _simulate_R_dense(params, initial_R, t_max, A0, B0, n=100):
-    # Try progressively gentler integration settings. Borderline-stiff parameter
-    # sets (common when k2 hits its 0.1 bound on high-conversion data) can fail
-    # at the original tolerance / grid; smaller t_max + coarser n + RK45 work
-    # as last resorts. Each rung sacrifices smoothness, never correctness.
+    # Try every solver scipy ships at progressively looser tolerances and
+    # shorter intervals. Includes Radau/BDF for stiff parameter combos.
     ku, k1, k2, kr = params
     y0 = [A0, A0, B0, B0, 0.0, 0.0, float(initial_R)]
     attempts = [
         (t_max,        n,  'LSODA', 1e-4, 1e-7),
         (t_max,        n,  'LSODA', 1e-3, 1e-6),
         (t_max,        n,  'LSODA', 1e-2, 1e-5),
+        (t_max,        n,  'Radau', 1e-3, 1e-6),
+        (t_max,        n,  'BDF',   1e-3, 1e-6),
         (t_max,        n,  'RK45',  1e-3, 1e-6),
         (t_max * 0.95, 60, 'RK45',  1e-3, 1e-5),
         (t_max * 0.85, 40, 'RK45',  1e-2, 1e-4),
+        (t_max * 0.5,  30, 'LSODA', 1e-2, 1e-4),
     ]
     for tmax, npts, method, rtol, atol in attempts:
         if tmax <= 0:
@@ -183,10 +184,21 @@ def fit_experiments(payload_json):
                 continue
 
             ku, k1, k2, kr = best_res.x
-            sim_t, sim_R = _simulate_R_dense(best_res.x, initial_R, float(t_data[-1]) + 5.0, A0, B0)
-            sim_y_pct = (sim_R / limit_uM) * 100.0 if sim_R is not None else None
+            # Integrate only over the data window — extrapolating past t_data[-1]
+            # is the main source of dense-sim instability for borderline-stiff fits.
+            sim_t, sim_R = _simulate_R_dense(best_res.x, initial_R, float(t_data[-1]), A0, B0)
 
-            fits.append({
+            curve_note = None
+            if sim_t is None:
+                # Last-resort: smooth interpolation through the data the optimiser
+                # minimised against. Always works, always renders a curve.
+                sim_t = np.linspace(0.0, float(t_data[-1]), 50)
+                sim_R = np.interp(sim_t, t_data, y_data)
+                curve_note = 'Curve via data interpolation (ODE sim unstable for fit params).'
+
+            sim_y_pct = (sim_R / limit_uM) * 100.0
+
+            fit_record = {
                 'groupId': gid,
                 'model':   'replication_kinetics',
                 'ku':      float(ku),
@@ -197,9 +209,12 @@ def fit_experiments(payload_json):
                 'limit_uM': limit_uM,
                 'seed_uM':  initial_R,
                 'cost':     float(best_cost),
-                'simT':  _safe_floats(sim_t)     if sim_t     is not None else [],
-                'simY':  _safe_floats(sim_y_pct) if sim_y_pct is not None else [],
-            })
+                'simT':  _safe_floats(sim_t),
+                'simY':  _safe_floats(sim_y_pct),
+            }
+            if curve_note:
+                fit_record['note'] = curve_note
+            fits.append(fit_record)
         except Exception as exc:
             fits.append({'groupId': gid, 'model': None,
                          'ku': None, 'k1': None, 'k2': None, 'kr': None, 'k_bg': None,

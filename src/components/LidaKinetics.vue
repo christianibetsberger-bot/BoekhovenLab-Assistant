@@ -395,6 +395,17 @@
             </p>
 
             <div class="wellplate-stock-grid">
+              <!-- Inventory scope toggle — applies to all stock dropdowns in this panel -->
+              <div class="stock-scope-row">
+                <span class="stock-scope-label">Inventory:</span>
+                <label class="scope-opt" :class="{ active: exportInvScope === 'Global' }">
+                  <input type="radio" value="Global" v-model="exportInvScope" /> Global
+                </label>
+                <label class="scope-opt" :class="{ active: exportInvScope === 'Personal' }">
+                  <input type="radio" value="Personal" v-model="exportInvScope" /> Personal
+                </label>
+              </div>
+
               <!-- T4-Ligase -->
               <div class="stock-row">
                 <label>T4-Ligase stock</label>
@@ -807,6 +818,36 @@ function seqNameOf(seq) {
 // letters come from different character sets so they can share one map.
 const dnaStocks    = reactive({})  // { 'E': { conc: 0, inv: null }, ... }
 const dnaInvSearch = reactive({})  // { 'E': '', ... }
+const exportInvScope = ref('Global')  // 'Global' | 'Personal' — filters all stock dropdowns in the panel
+
+const GREEK_TO_LATIN = {
+  'α':'alpha','β':'beta','γ':'gamma','δ':'delta','ε':'epsilon',
+  'ζ':'zeta','η':'eta','θ':'theta','ι':'iota','κ':'kappa',
+  'λ':'lambda','μ':'mu','ν':'nu','ξ':'xi','ο':'omicron',
+  'π':'pi','ρ':'rho','σ':'sigma','τ':'tau','υ':'upsilon',
+  'φ':'phi','χ':'chi','ψ':'psi','ω':'omega',
+}
+
+function findExactDnaStock(letter) {
+  const list = store.inventory || []
+  const isPrime = letter.endsWith("'")
+  const base = isPrime ? letter.slice(0, -1) : letter
+  const latin = GREEK_TO_LATIN[base] ?? null
+  const targets = new Set([base.toLowerCase()])
+  if (latin) targets.add(latin)
+  if (isPrime) {
+    const bases = [base.toLowerCase(), ...(latin ? [latin] : [])]
+    for (const bn of bases) {
+      for (const suf of ["'", " prime", "prime", "comp", " comp", " complement", "complement", " counterstrand", "counterstrand"])
+        targets.add(bn + suf)
+    }
+  }
+  return list.find(i => {
+    const n = (i.name || '').toLowerCase().trim()
+    const c = (i.code || '').toLowerCase().trim()
+    return targets.has(n) || targets.has(c)
+  }) ?? null
+}
 
 // Unique building-block letters sourced from ALL imported experiments so the
 // stock UI covers every strand needed for the full lab setup, not just what
@@ -854,8 +895,12 @@ function clearDnaStockInv(letter) {
 // Pre-filters by the building-block letter when no search query is active.
 // For counterstrand keys that end in ' (prime), also matches " prime", "'",
 // and "comp" suffixes so inventory items named "E prime" or "E'" are found.
+function scopedInventory() {
+  return (store.inventory || []).filter(i => (i.scope || 'Global') === exportInvScope.value)
+}
+
 function filterDnaInventory(query, letter) {
-  const list = store.inventory || []
+  const list = scopedInventory()
   const q = (query || '').toLowerCase()
   if (q) {
     return list.filter(i =>
@@ -866,22 +911,27 @@ function filterDnaInventory(query, letter) {
   const isPrime = letter.endsWith("'")
   const base = isPrime ? letter.slice(0, -1) : letter
   const bl = base.toLowerCase()
+  const latin = GREEK_TO_LATIN[base] ?? null
   const byLetter = list.filter(i => {
     const n = (i.name || '').toLowerCase()
     const c = (i.code || '').toLowerCase()
     if (isPrime) {
+      const latinBl = latin ?? bl
       return n.includes(letter.toLowerCase()) || c.includes(letter.toLowerCase()) ||
-             n.includes(bl + ' prime') || n.includes(bl + "'") ||
-             n.includes(bl + 'comp')  || c.includes(bl + "'")
+             n.includes(bl + ' prime') || n.includes(bl + "'") || n.includes(bl + 'comp') ||
+             n.includes(latinBl + ' prime') || n.includes(latinBl + "'") || n.includes(latinBl + 'comp') ||
+             c.includes(bl + "'") || c.includes(latinBl + "'")
     }
-    return (i.name || '').includes(base) || (i.code || '').includes(base)
+    const latinBase = latin ?? ''
+    return n.includes(bl) || c.includes(bl) ||
+           (latinBase && (n.includes(latinBase) || c.includes(latinBase)))
   })
   return byLetter.length > 0 ? byLetter : list
 }
 
 function filterExportInventory(query) {
   const q = (query || '').toLowerCase()
-  const list = store.inventory || []
+  const list = scopedInventory()
   if (!q) return list
   return list.filter(i =>
     (i.name || '').toLowerCase().includes(q) ||
@@ -1900,6 +1950,13 @@ watch(exportBuildingBlocks, ({ aside, bside, asideComp, bsideComp }) => {
   for (const l of [...aside, ...bside, ...asideComp, ...bsideComp]) {
     if (!dnaStocks[l]) dnaStocks[l] = { conc: 0, inv: null }
     if (dnaInvSearch[l] == null) dnaInvSearch[l] = ''
+    if (!dnaStocks[l].inv) {
+      const match = findExactDnaStock(l)
+      if (match) {
+        dnaStocks[l].inv = match
+        if (typeof match.stock === 'number') dnaStocks[l].conc = match.stock
+      }
+    }
   }
 }, { immediate: true })
 
@@ -2126,6 +2183,18 @@ onBeforeUnmount(() => {
 }
 
 .wellplate-stock-grid { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.stock-scope-row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  padding: 4px 8px; background: rgba(139,92,246,0.06); border-radius: 6px;
+}
+.stock-scope-label { font-size: 0.7rem; font-weight: 700; opacity: 0.7; }
+.scope-opt {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 0.72rem; cursor: pointer; opacity: 0.65;
+  padding: 2px 8px; border-radius: 4px; transition: opacity 0.15s;
+}
+.scope-opt input { margin: 0; cursor: pointer; }
+.scope-opt.active { opacity: 1; font-weight: 700; }
 .stock-row { display: flex; flex-direction: column; gap: 2px; }
 .stock-row label {
   font-size: 0.7rem; font-weight: 700; opacity: 0.75;

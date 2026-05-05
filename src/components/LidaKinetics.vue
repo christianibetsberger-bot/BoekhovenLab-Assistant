@@ -179,18 +179,20 @@
             </div>
           </div>
 
-          <button class="action-btn auto-btn" @click="fitKinetics" :disabled="isFitting || !dataset.experiments.length" style="width:100%; margin-bottom:8px;">
-            <i class="fas" :class="isFitting ? 'fa-spinner fa-spin' : 'fa-chart-line'"></i>
-            <span>{{ isFitting ? 'Fitting…' : 'Fit Kinetics' }}</span>
-          </button>
-          <button class="action-btn auto-btn" @click="suggestNext" :disabled="isSuggesting || !dataset.experiments.length" style="width:100%; margin-bottom:8px;">
-            <i class="fas" :class="isSuggesting ? 'fa-spinner fa-spin' : 'fa-lightbulb'"></i>
-            <span>{{ isSuggesting ? 'Computing…' : 'Suggest Next Experiments (METIS)' }}</span>
-          </button>
-          <button class="action-btn auto-btn" @click="predictSequence" :disabled="isPredicting || !dataset.experiments.length" style="width:100%;">
-            <i class="fas" :class="isPredicting ? 'fa-spinner fa-spin' : 'fa-shuffle'"></i>
-            <span>{{ isPredicting ? 'Predicting…' : 'Predict High-Yield Sequences (METIS)' }}</span>
-          </button>
+          <div class="action-row">
+            <button class="compact-btn" @click="fitKinetics" :disabled="isFitting || !dataset.experiments.length">
+              <i class="fas" :class="isFitting ? 'fa-spinner fa-spin' : 'fa-chart-line'"></i>
+              {{ isFitting ? 'Fitting…' : 'Fit Kinetics' }}
+            </button>
+            <button class="compact-btn" @click="suggestNext" :disabled="isSuggesting || !dataset.experiments.length">
+              <i class="fas" :class="isSuggesting ? 'fa-spinner fa-spin' : 'fa-lightbulb'"></i>
+              {{ isSuggesting ? 'Computing…' : 'Suggest Next' }}
+            </button>
+            <button class="compact-btn" @click="predictSequence" :disabled="isPredicting || !dataset.experiments.length">
+              <i class="fas" :class="isPredicting ? 'fa-spinner fa-spin' : 'fa-shuffle'"></i>
+              {{ isPredicting ? 'Predicting…' : 'Predict Sequences' }}
+            </button>
+          </div>
 
           <div v-if="backendError" class="section-error" style="margin-top:8px;">
             <i class="fas fa-triangle-exclamation"></i> {{ backendError }}
@@ -260,36 +262,56 @@
       <!-- ════ RIGHT COLUMN ════ -->
       <div class="col-right">
 
-        <!-- Kinetic Curves -->
+        <!-- Plots: Kinetic Curves + Heatmap side by side -->
         <div class="internal-section">
-          <div class="flex-between" style="margin-bottom:10px;">
-            <h3 style="margin:0; border:none; padding:0;">Kinetic Curves</h3>
-          </div>
-          <div ref="curvePlotEl" class="plot-area"></div>
-        </div>
+          <div class="plots-row">
 
-        <!-- Condition Heatmap -->
-        <div class="internal-section">
-          <div class="flex-between" style="margin-bottom:10px;">
-            <h3 style="margin:0; border:none; padding:0;">Condition Heatmap</h3>
-            <div style="display:flex; gap:6px; align-items:center; font-size:0.8rem;">
-              <label>X:</label>
-              <select v-model="heatX" style="width:auto; padding:4px 8px;">
-                <option value="temperature">Temperature</option>
-                <option value="ligase">Ligase</option>
-                <option value="atp">ATP</option>
-                <option value="mg2">Mg²⁺</option>
-              </select>
-              <label>Y:</label>
-              <select v-model="heatY" style="width:auto; padding:4px 8px;">
-                <option value="temperature">Temperature</option>
-                <option value="ligase">Ligase</option>
-                <option value="atp">ATP</option>
-                <option value="mg2">Mg²⁺</option>
-              </select>
+            <!-- Kinetic Curves -->
+            <div class="plot-col">
+              <div class="plot-col-header">
+                <span class="plot-title">Kinetic Curves</span>
+              </div>
+              <div ref="curvePlotEl" class="plot-area"></div>
+              <!-- External legend -->
+              <div class="plot-legend" v-if="dataset.experiments.length">
+                <div class="legend-item" v-for="(g, i) in dataset.experiments" :key="g.groupId">
+                  <span class="legend-dot" :style="{ background: PASTEL_COLORS[i % PASTEL_COLORS.length] }"></span>
+                  <span class="legend-label" :title="g.sequence">
+                    {{ truncateSeq(g.sequence) }} · {{ formatNum(g.conditions.temperature) }}°C
+                  </span>
+                  <span class="legend-val">
+                    {{ formatNum(g.maxConversion) }}%
+                    <i v-if="g.fit && g.fit.ku != null" class="fas fa-check" style="color:#10b981; font-size:0.65rem; margin-left:2px;"></i>
+                  </span>
+                </div>
+              </div>
             </div>
+
+            <!-- Condition Heatmap -->
+            <div class="plot-col">
+              <div class="plot-col-header flex-between">
+                <span class="plot-title">Heatmap</span>
+                <div style="display:flex; gap:3px; align-items:center; font-size:0.72rem;">
+                  <label style="opacity:0.7;">X</label>
+                  <select v-model="heatX" class="axis-select">
+                    <option value="temperature">T °C</option>
+                    <option value="ligase">Lig</option>
+                    <option value="atp">ATP</option>
+                    <option value="mg2">Mg²⁺</option>
+                  </select>
+                  <label style="opacity:0.7;">Y</label>
+                  <select v-model="heatY" class="axis-select">
+                    <option value="temperature">T °C</option>
+                    <option value="ligase">Lig</option>
+                    <option value="atp">ATP</option>
+                    <option value="mg2">Mg²⁺</option>
+                  </select>
+                </div>
+              </div>
+              <div ref="heatPlotEl" class="plot-area"></div>
+            </div>
+
           </div>
-          <div ref="heatPlotEl" class="plot-area"></div>
         </div>
 
         <!-- Sequence Logo -->
@@ -308,7 +330,7 @@
             <i class="fas fa-circle-info"></i> {{ suggestNote }}
           </div>
           <div v-if="!aiSuggestions.length && !suggestNote" style="opacity:0.5; font-size:0.8rem; padding:8px 0;">
-            Click <strong>Suggest Next Experiments</strong> to run METIS active learning on your data.
+            Click <strong>Suggest Next</strong> to run METIS active learning on your data.
           </div>
           <div v-if="aiSuggestions.length" style="max-height:220px; overflow-y:auto; padding-right:4px;">
             <div class="suggestion-card" v-for="(s, i) in aiSuggestions" :key="i">
@@ -787,17 +809,17 @@ function computeLogo() {
 
 // ════════════════ Plotly: kinetic curves ════════════════
 
-function plotLayoutDark(title) {
+function plotLayoutDark() {
   const isDark = store.isDarkMode
+  const lineCol = isDark ? '#374151' : '#d1d5db'
   return {
     paper_bgcolor: isDark ? '#111827' : '#ffffff',
-    plot_bgcolor: isDark ? '#111827' : '#ffffff',
-    font: { color: isDark ? '#f3f4f6' : '#1f2937', size: 11 },
-    margin: { l: 50, r: 20, b: 40, t: 30 },
-    title: { text: title, font: { size: 12 } },
-    xaxis: { gridcolor: isDark ? '#374151' : '#e5e7eb', zerolinecolor: isDark ? '#4b5563' : '#d1d5db' },
-    yaxis: { gridcolor: isDark ? '#374151' : '#e5e7eb', zerolinecolor: isDark ? '#4b5563' : '#d1d5db' },
-    legend: { orientation: 'h', y: -0.18, x: 0, font: { size: 9 } },
+    plot_bgcolor:  isDark ? '#111827' : '#ffffff',
+    font: { color: isDark ? '#f3f4f6' : '#1f2937', size: 10 },
+    margin: { l: 38, r: 8, b: 32, t: 6 },
+    showlegend: false,
+    xaxis: { showgrid: false, zeroline: false, showline: true, linecolor: lineCol, linewidth: 1 },
+    yaxis: { showgrid: false, zeroline: false, showline: true, linecolor: lineCol, linewidth: 1 },
   }
 }
 
@@ -848,9 +870,9 @@ function renderCurves() {
     }
   })
 
-  const layout = plotLayoutDark('Conversion vs. Time')
-  layout.xaxis.title = { text: 'Time (min)', font: { size: 10 } }
-  layout.yaxis.title = { text: 'Conversion (%)', font: { size: 10 } }
+  const layout = plotLayoutDark()
+  layout.xaxis.title = { text: 'Time (min)', font: { size: 9 } }
+  layout.yaxis.title = { text: 'Conv (%)', font: { size: 9 } }
   layout.yaxis.range = [0, 105]
   Plotly.react(curvePlotEl.value, traces, layout, { responsive: true, displayModeBar: false })
 }
@@ -886,11 +908,12 @@ function renderHeatmap() {
     colorbar: { title: { text: 'Max %', font: { size: 10 } }, thickness: 12 },
     hovertemplate: `${heatX.value}: %{x}<br>${heatY.value}: %{y}<br>Max conv: %{z:.1f}%<extra></extra>`,
   }
-  const layout = plotLayoutDark(`Max Conversion: ${heatX.value} × ${heatY.value}`)
-  layout.xaxis.title = { text: heatX.value, font: { size: 10 } }
-  layout.yaxis.title = { text: heatY.value, font: { size: 10 } }
+  const layout = plotLayoutDark()
+  layout.xaxis.title = { text: heatX.value, font: { size: 9 } }
+  layout.yaxis.title = { text: heatY.value, font: { size: 9 } }
   layout.xaxis.type = 'category'
   layout.yaxis.type = 'category'
+  layout.margin.r = 50
   Plotly.react(heatPlotEl.value, [trace], layout, { responsive: true, displayModeBar: false })
 }
 
@@ -1166,15 +1189,18 @@ onBeforeUnmount(() => {
 }
 
 /* ── Action buttons ─────────────────────────────────────── */
-.action-btn {
-  display: flex; align-items: center; justify-content: center;
-  gap: 8px; padding: 10px; border-radius: 6px;
-  font-weight: bold; cursor: pointer; transition: all 0.2s;
-  border: none; font-size: 0.85rem;
+.action-row { display: flex; gap: 6px; }
+.compact-btn {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 7px 6px; border-radius: 6px; border: none;
+  font-weight: bold; font-size: 0.76rem;
+  background: #3b82f6; color: white;
+  box-shadow: 0 2px 4px rgba(59,130,246,0.3);
+  cursor: pointer; transition: all 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.auto-btn { background: #3b82f6; color: white; box-shadow: 0 2px 4px rgba(59,130,246,0.3); }
-.auto-btn:hover:not(:disabled) { background: #2563eb; transform: translateY(-1px); }
-.auto-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.compact-btn:hover:not(:disabled) { background: #2563eb; transform: translateY(-1px); }
+.compact-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Scoped button variants ─────────────────────────────── */
 .success-btn { background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
@@ -1194,12 +1220,32 @@ onBeforeUnmount(() => {
 .seq-cell { font-family: monospace; font-size: 0.75rem; }
 .env-cell { font-size: 0.75rem; opacity: 0.85; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ── Plots side-by-side ─────────────────────────────────── */
+.plots-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.plot-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.plot-col-header {
+  display: flex; align-items: center; justify-content: space-between;
+  min-height: 22px;
+}
+.plot-title { font-size: 0.8rem; font-weight: 700; opacity: 0.85; }
+.axis-select { font-size: 0.72rem; padding: 2px 4px; border-radius: 3px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; }
+
 /* ── Plot areas ─────────────────────────────────────────── */
 .plot-area {
-  width: 100%; height: 280px;
-  border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0);
-  box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); overflow: hidden;
+  width: 100%; aspect-ratio: 1 / 1;
+  border-radius: 6px; border: 1px solid var(--border-color, #e2e8f0);
+  overflow: hidden;
 }
+
+/* ── External plot legend ───────────────────────────────── */
+.plot-legend { display: flex; flex-direction: column; gap: 3px; max-height: 130px; overflow-y: auto; }
+.legend-item {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 0.7rem; line-height: 1.3;
+}
+.legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.15); }
+.legend-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.85; font-family: monospace; }
+.legend-val { flex-shrink: 0; font-weight: 600; font-size: 0.68rem; opacity: 0.9; }
 
 /* ── Sequence logo ──────────────────────────────────────── */
 .logo-wrap { width: 100%; overflow-x: auto; padding: 8px 0; color: var(--text); }

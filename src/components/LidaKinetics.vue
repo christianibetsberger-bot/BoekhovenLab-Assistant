@@ -195,6 +195,9 @@
           <div v-if="backendError" class="section-error" style="margin-top:8px;">
             <i class="fas fa-triangle-exclamation"></i> {{ backendError }}
           </div>
+          <div v-if="fitNote" class="section-warn" style="margin-top:8px;">
+            <i class="fas fa-circle-info"></i> {{ fitNote }}
+          </div>
         </div>
 
         <!-- 5. Experiment Ledger -->
@@ -452,6 +455,7 @@ const isPredicting = ref(false)
 
 const aiSuggestions = ref([])
 const suggestNote = ref('')
+const fitNote = ref('')
 const seqCandidates = ref([])
 
 const heatX = ref('temperature')
@@ -509,6 +513,7 @@ function newDataset() {
   Object.assign(dataset, emptyDataset())
   aiSuggestions.value = []
   suggestNote.value = ''
+  fitNote.value = ''
   seqCandidates.value = []
   backendError.value = ''
   parseError.value = ''
@@ -520,6 +525,7 @@ function clearAll() {
   dataset.experiments = []
   aiSuggestions.value = []
   suggestNote.value = ''
+  fitNote.value = ''
   seqCandidates.value = []
 }
 
@@ -980,6 +986,7 @@ function meanTimeCourse(timeCourse) {
 
 async function fitKinetics() {
   isFitting.value = true
+  fitNote.value = ''
 
   // Expand replicate groups into one entry per replicate for individual fitting.
   const REP_SEP = '|||rep'
@@ -1010,14 +1017,19 @@ async function fitKinetics() {
   if (!result) return
 
   const fitsById = Object.fromEntries((result.fits || []).map(f => [f.groupId, f]))
+  const failureNotes = []
+  let okCount = 0, partialCount = 0, failCount = 0
 
   for (const g of dataset.experiments) {
     if (g.replicates?.length > 1) {
-      // Collect individual replicate fits that succeeded.
-      const repFits = g.replicates
-        .map(rep => fitsById[`${g.groupId}${REP_SEP}${rep.replicateId}`])
-        .filter(f => f?.ku != null && f.simT?.length > 0)
-      if (!repFits.length) continue
+      const allRepFits = g.replicates.map(rep => fitsById[`${g.groupId}${REP_SEP}${rep.replicateId}`])
+      const repFits = allRepFits.filter(f => f?.ku != null && f.simT?.length > 0)
+      if (!repFits.length) {
+        failCount++
+        const note = allRepFits.find(f => f?.note)?.note || 'no replicate produced a usable curve'
+        failureNotes.push(`${truncateSeq(g.sequence)}: ${note}`)
+        continue
+      }
 
       // Average simulated curves on a shared time grid.
       const tMax = Math.max(...repFits.map(f => Math.max(...f.simT)))
@@ -1028,15 +1040,33 @@ async function fitKinetics() {
       // Tooltip uses the lowest-cost replicate's parameters.
       const bestFit = repFits.reduce((a, b) => ((a.cost ?? Infinity) < (b.cost ?? Infinity) ? a : b))
       g.fit = { ...bestFit, simT, simY, replicateCount: repFits.length }
+      if (repFits.length === g.replicates.length) okCount++
+      else partialCount++
     } else {
       const f = fitsById[g.groupId]
-      if (f) g.fit = f
+      if (f && f.ku != null && f.simT?.length > 0) {
+        g.fit = f; okCount++
+      } else {
+        failCount++
+        failureNotes.push(`${truncateSeq(g.sequence)}: ${f?.note || 'fit did not converge'}`)
+      }
     }
   }
+
+  const total = dataset.experiments.length
+  const parts = []
+  if (okCount)      parts.push(`${okCount} fitted`)
+  if (partialCount) parts.push(`${partialCount} partial (some replicates failed)`)
+  if (failCount)    parts.push(`${failCount} failed`)
+  fitNote.value = parts.length === 1 && okCount === total
+    ? '' // perfect — no note needed
+    : `${parts.join(' · ')} of ${total} group${total === 1 ? '' : 's'}` +
+      (failureNotes.length ? `. Issues: ${failureNotes.slice(0, 3).join('; ')}${failureNotes.length > 3 ? '…' : ''}` : '')
 }
 
 async function suggestNext() {
   suggestNote.value = ''
+  fitNote.value = ''
   if (dataset.experiments.length < 3) {
     suggestNote.value = `METIS needs at least 3 experiment groups to train on — you have ${dataset.experiments.length}. Import more CSV data with varied conditions.`
     return
@@ -1106,6 +1136,7 @@ async function loadFromLibrary(item) {
   showLibrary.value = false
   aiSuggestions.value = item.suggestions || []
   suggestNote.value = ''
+  fitNote.value = ''
   seqCandidates.value = []
 }
 

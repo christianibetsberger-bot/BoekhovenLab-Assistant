@@ -984,6 +984,12 @@ function meanTimeCourse(timeCourse) {
     .sort((a, b) => a.time - b.time)
 }
 
+// Chunk size for fitKinetics: each fit takes ~30-50s on Render's free-tier
+// shared CPU, so 2 per request keeps us comfortably under gunicorn's 120s
+// worker timeout. Sending all groups in one request was causing the worker
+// to be killed mid-response (browser sees this as 'Load failed', not HTTP).
+const FIT_CHUNK_SIZE = 2
+
 async function fitKinetics() {
   isFitting.value = true
   fitNote.value = ''
@@ -1007,16 +1013,42 @@ async function fitKinetics() {
     }
   }
 
-  const result = await callBackend(ENDPOINTS.fit, {
-    experiments: flatExps,
-    limit_uM: dataset.kinetics.limit_uM,
-    A0: dataset.kinetics.A0,
-    B0: dataset.kinetics.B0,
-  })
-  isFitting.value = false
-  if (!result) return
+  // Split into chunks so each backend call stays under the 120s worker timeout.
+  const chunks = []
+  for (let i = 0; i < flatExps.length; i += FIT_CHUNK_SIZE) {
+    chunks.push(flatExps.slice(i, i + FIT_CHUNK_SIZE))
+  }
 
-  const fitsById = Object.fromEntries((result.fits || []).map(f => [f.groupId, f]))
+  const allFits = []
+  for (let ci = 0; ci < chunks.length; ci++) {
+    if (chunks.length > 1) {
+      fitNote.value = `Fitting batch ${ci + 1} of ${chunks.length} (${chunks[ci].length} fit${chunks[ci].length === 1 ? '' : 's'})…`
+    }
+    const result = await callBackend(ENDPOINTS.fit, {
+      experiments: chunks[ci],
+      limit_uM: dataset.kinetics.limit_uM,
+      A0: dataset.kinetics.A0,
+      B0: dataset.kinetics.B0,
+    })
+    if (!result) {
+      // backendError is already set by callBackend.
+      // Keep partial results so the user sees what *did* fit.
+      isFitting.value = false
+      if (allFits.length) {
+        applyFits(allFits, `Backend dropped after batch ${ci} of ${chunks.length} — showing partial results, retry to fit the rest. `)
+      }
+      return
+    }
+    allFits.push(...(result.fits || []))
+  }
+
+  isFitting.value = false
+  applyFits(allFits)
+}
+
+function applyFits(allFits, prefix = '') {
+  const fitsById = Object.fromEntries(allFits.map(f => [f.groupId, f]))
+  const REP_SEP = '|||rep'
   const failureNotes = []
   let okCount = 0, partialCount = 0, failCount = 0
 
@@ -1058,10 +1090,11 @@ async function fitKinetics() {
   if (okCount)      parts.push(`${okCount} fitted`)
   if (partialCount) parts.push(`${partialCount} partial (some replicates failed)`)
   if (failCount)    parts.push(`${failCount} failed`)
-  fitNote.value = parts.length === 1 && okCount === total
+  const summary = parts.length === 1 && okCount === total && !prefix
     ? '' // perfect — no note needed
     : `${parts.join(' · ')} of ${total} group${total === 1 ? '' : 's'}` +
       (failureNotes.length ? `. Issues: ${failureNotes.slice(0, 3).join('; ')}${failureNotes.length > 3 ? '…' : ''}` : '')
+  fitNote.value = (prefix + summary).trim()
 }
 
 async function suggestNext() {

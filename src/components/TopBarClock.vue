@@ -250,7 +250,13 @@ async function persistNewTask(name) {
   taskList.value = [...taskList.value, name]
   const { data } = await db.from('time_settings').select('*').eq('owner_id', store.user.id).maybeSingle()
   const merged = { ...(data || {}), owner_id: store.user.id, custom_tasks: taskList.value }
-  await db.from('time_settings').upsert(merged, { onConflict: 'owner_id' })
+  const { error } = await db.from('time_settings').upsert(merged, { onConflict: 'owner_id' })
+  if (error) {
+    console.error('time_settings upsert failed (persistNewTask):', error)
+    // Roll back the optimistic local addition so the UI matches reality.
+    taskList.value = taskList.value.filter(t => t !== name)
+    return false
+  }
   bumpTT()    // keep the TimeTracker module's settings.custom_tasks in sync
   return true
 }

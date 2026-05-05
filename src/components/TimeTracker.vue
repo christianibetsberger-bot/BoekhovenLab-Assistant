@@ -502,6 +502,9 @@
                 </button>
               </div>
               <p class="tt-chip-hint">Changes apply to every task selector in the module instantly.</p>
+              <p v-if="settingsError" class="tt-chip-error">
+                <i class="fas fa-triangle-exclamation"></i> {{ settingsError }}
+              </p>
             </div>
             <div class="input-group">
               <label>Projects</label>
@@ -633,18 +636,24 @@ async function ensureTaskSaved(name) {
 // ── Settings: manage tasks list ──────────────────────────────────────────
 // Adds/removes flow through saveSettings() → Supabase upsert + bumpTT(),
 // so every task selector (the four in this module + the two in TopBarClock)
-// picks up the change automatically.
+// picks up the change automatically. Both helpers roll back the optimistic
+// local update if the upsert fails, so the UI never claims something is
+// saved when it isn't.
 const newSettingsTaskName = ref('')
 async function addTaskFromSettings() {
   const name = newSettingsTaskName.value.trim()
   newSettingsTaskName.value = ''
   if (!name || settings.custom_tasks.includes(name)) return
+  const prev = settings.custom_tasks
   settings.custom_tasks = [...settings.custom_tasks, name]
   await saveSettings()
+  if (settingsError.value) settings.custom_tasks = prev
 }
 async function removeTaskFromSettings(name) {
+  const prev = settings.custom_tasks
   settings.custom_tasks = settings.custom_tasks.filter(t => t !== name)
   await saveSettings()
+  if (settingsError.value) settings.custom_tasks = prev
 }
 function onTaskChange(field, val) {
   if (val === '__new__') {
@@ -987,20 +996,42 @@ async function loadSettings() {
   ttProjectList.value = settings.custom_projects
 }
 
+// Set true while we're writing settings ourselves; the watcher on
+// ttBumpCounter checks this flag to avoid clobbering the local state
+// with a re-read while our upsert is still propagating.
+let savingSettings = false
+const settingsError = ref('')
+
 async function saveSettings() {
-  if (!store.user) return
-  await db.from('time_settings').upsert({
-    owner_id:               store.user.id,
-    weekly_hours:           settings.weekly_hours,
-    vacation_days_per_year: settings.vacation_days_per_year,
-    vacation_carryover:     settings.vacation_carryover,
-    timezone:               settings.timezone,
-    privacy_mode:           settings.privacy_mode,
-    custom_tasks:           settings.custom_tasks,
-    custom_projects:        settings.custom_projects,
-  }, { onConflict: 'owner_id' })
-  ttProjectList.value = settings.custom_projects  // broadcast before bump
-  bumpTT()
+  if (!store.user) {
+    settingsError.value = 'Not signed in — settings cannot be saved.'
+    return
+  }
+  settingsError.value = ''
+  savingSettings = true
+  try {
+    const { error } = await db.from('time_settings').upsert({
+      owner_id:               store.user.id,
+      weekly_hours:           settings.weekly_hours,
+      vacation_days_per_year: settings.vacation_days_per_year,
+      vacation_carryover:     settings.vacation_carryover,
+      timezone:               settings.timezone,
+      privacy_mode:           settings.privacy_mode,
+      custom_tasks:           settings.custom_tasks,
+      custom_projects:        settings.custom_projects,
+    }, { onConflict: 'owner_id' })
+    if (error) {
+      settingsError.value = `Settings save failed: ${error.message}`
+      console.error('time_settings upsert failed:', error)
+      return  // don't bump — nothing was persisted
+    }
+    ttProjectList.value = settings.custom_projects  // broadcast before bump
+    bumpTT()
+  } finally {
+    // Release after a tick so the bump-driven watcher sees the flag.
+    await nextTick()
+    savingSettings = false
+  }
 }
 
 // Auto-add new project name to the user's persistent project list.
@@ -1683,9 +1714,12 @@ watch(() => settings.weekly_hours, renderCharts)
 // Live: re-render all charts on every clock tick during an active session
 watch(currentDuration, () => { if (activeEntry.value) renderCharts() })
 
-// React to mutations from the TopBarClock (header check-in/out/switch/+Add)
+// React to mutations from the TopBarClock (header check-in/out/switch/+Add).
+// If WE just bumped (savingSettings is true), the local settings are already
+// authoritative and a re-read would race against our pending upsert and could
+// momentarily revert the UI. Just refresh the time-entries view in that case.
 watch(ttBumpCounter, async () => {
-  await loadSettings()    // pick up new custom tasks / projects from header
+  if (!savingSettings) await loadSettings()
   await loadEntries()
   await loadAbsences()
   renderCharts()
@@ -1867,4 +1901,14 @@ onBeforeUnmount(() => {
 .tt-chip-add .small { white-space: nowrap; }
 
 .tt-chip-hint { font-size: 0.7rem; opacity: 0.6; margin: 4px 0 0; }
+.tt-chip-error {
+  font-size: 0.72rem;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.10);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin: 6px 0 0;
+  display: flex; align-items: center; gap: 6px;
+}
 </style>

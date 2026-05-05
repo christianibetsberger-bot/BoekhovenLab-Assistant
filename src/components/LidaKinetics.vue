@@ -1,5 +1,5 @@
 <template>
-  <div class="card module-card">
+  <div class="card module-card" @click="activeExportInv = null">
 
     <!-- ── Header ── -->
     <div class="full-width-header">
@@ -331,13 +331,25 @@
           </div>
         </div>
 
-        <!-- Sequence Logo -->
+        <!-- Sequence Logos: observed (top yield) + predicted (METIS) -->
         <div class="internal-section">
-          <h3>Sequence Logo (top {{ 100 - dataset.config.yieldThreshold }}%)</h3>
-          <div v-if="logoWarning" class="section-warn">
-            <i class="fas fa-circle-info"></i> {{ logoWarning }}
+          <div class="logos-row">
+            <div class="logo-col">
+              <div class="logo-col-header">Observed (top {{ 100 - dataset.config.yieldThreshold }}%)</div>
+              <div v-if="logoWarning" class="section-warn">
+                <i class="fas fa-circle-info"></i> {{ logoWarning }}
+              </div>
+              <div ref="logoEl" class="logo-wrap" v-html="logoSvg"></div>
+              <div v-if="!logoSvg" class="logo-empty">No experiments yet.</div>
+            </div>
+            <div class="logo-col">
+              <div class="logo-col-header">Predicted (METIS top-{{ seqCandidates.length || '?' }})</div>
+              <div class="logo-wrap" v-html="predictedLogoSvg"></div>
+              <div v-if="!predictedLogoSvg" class="logo-empty">
+                Run <strong>Predict Sequences</strong> to generate.
+              </div>
+            </div>
           </div>
-          <div ref="logoEl" class="logo-wrap" v-html="logoSvg"></div>
         </div>
 
         <!-- Suggested Next Experiments -->
@@ -364,10 +376,147 @@
                 T: {{ formatNum(s.conditions.temperature) }}°C ·
                 Lig: {{ formatNum(s.conditions.ligase) }} ·
                 ATP: {{ formatNum(s.conditions.atp) }} ·
-                Mg²⁺: {{ formatNum(s.conditions.mg2) }} ·
+                <span class="no-upper">Mg²⁺</span>: {{ formatNum(s.conditions.mg2) }} ·
                 Env: {{ s.conditions.env }}
                 <span style="opacity:0.7;"> · ±{{ formatNum(s.uncertainty) }}</span>
               </div>
+            </div>
+          </div>
+
+          <!-- Send to Wellplate -->
+          <div v-if="aiSuggestions.length" class="wellplate-export">
+            <div class="wellplate-export-header">
+              <i class="fas fa-flask-vial"></i> Send to Wellplate
+            </div>
+            <p class="wellplate-export-hint">
+              Enter stock concs (or pick from inventory), set the well volume, and pick a plate.
+              Volumes per well are computed as <code>V = target_conc × wellVol / stock</code>; MQ H₂O fills the rest.
+            </p>
+
+            <div class="wellplate-stock-grid">
+              <!-- T4-Ligase -->
+              <div class="stock-row">
+                <label>T4-Ligase stock</label>
+                <div class="stock-input-row">
+                  <input type="number" step="any" v-model.number="exportStocks.ligase" :placeholder="`stock conc (${dataset.units.ligase})`" />
+                  <span class="stock-unit">{{ dataset.units.ligase }}</span>
+                  <div class="inv-picker" @click.stop>
+                    <button class="inv-pick-btn" @click="activeExportInv = activeExportInv === 'ligase' ? null : 'ligase'">
+                      <i class="fas fa-tag"></i>
+                      {{ exportStocks.ligaseInv ? `[${exportStocks.ligaseInv.code}] ${exportStocks.ligaseInv.name}` : 'Inventory…' }}
+                    </button>
+                    <button v-if="exportStocks.ligaseInv" class="inv-clear-btn" @click="clearExportInv('ligase')" title="Clear">
+                      <i class="fas fa-xmark"></i>
+                    </button>
+                    <div v-if="activeExportInv === 'ligase'" class="inv-dropdown">
+                      <input type="text" v-model="exportInvSearch.ligase" placeholder="Search inventory…" @click.stop />
+                      <div class="inv-results">
+                        <div
+                          v-for="inv in filterExportInventory(exportInvSearch.ligase)"
+                          :key="inv.id"
+                          class="inv-item"
+                          @mousedown.prevent="selectExportInv('ligase', inv)"
+                        >
+                          [{{ inv.code }}] {{ inv.name }} <span class="inv-stock">({{ inv.stock }} {{ inv.stockUnit || '?' }})</span>
+                        </div>
+                        <div v-if="!filterExportInventory(exportInvSearch.ligase).length" class="inv-empty">No items.</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ATP -->
+              <div class="stock-row">
+                <label>ATP stock</label>
+                <div class="stock-input-row">
+                  <input type="number" step="any" v-model.number="exportStocks.atp" :placeholder="`stock conc (${dataset.units.atp})`" />
+                  <span class="stock-unit">{{ dataset.units.atp }}</span>
+                  <div class="inv-picker" @click.stop>
+                    <button class="inv-pick-btn" @click="activeExportInv = activeExportInv === 'atp' ? null : 'atp'">
+                      <i class="fas fa-tag"></i>
+                      {{ exportStocks.atpInv ? `[${exportStocks.atpInv.code}] ${exportStocks.atpInv.name}` : 'Inventory…' }}
+                    </button>
+                    <button v-if="exportStocks.atpInv" class="inv-clear-btn" @click="clearExportInv('atp')" title="Clear">
+                      <i class="fas fa-xmark"></i>
+                    </button>
+                    <div v-if="activeExportInv === 'atp'" class="inv-dropdown">
+                      <input type="text" v-model="exportInvSearch.atp" placeholder="Search inventory…" @click.stop />
+                      <div class="inv-results">
+                        <div
+                          v-for="inv in filterExportInventory(exportInvSearch.atp)"
+                          :key="inv.id"
+                          class="inv-item"
+                          @mousedown.prevent="selectExportInv('atp', inv)"
+                        >
+                          [{{ inv.code }}] {{ inv.name }} <span class="inv-stock">({{ inv.stock }} {{ inv.stockUnit || '?' }})</span>
+                        </div>
+                        <div v-if="!filterExportInventory(exportInvSearch.atp).length" class="inv-empty">No items.</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Mg²⁺ -->
+              <div class="stock-row">
+                <label><span class="no-upper">Mg²⁺</span> stock</label>
+                <div class="stock-input-row">
+                  <input type="number" step="any" v-model.number="exportStocks.mg2" :placeholder="`stock conc (${dataset.units.mg2})`" />
+                  <span class="stock-unit">{{ dataset.units.mg2 }}</span>
+                  <div class="inv-picker" @click.stop>
+                    <button class="inv-pick-btn" @click="activeExportInv = activeExportInv === 'mg2' ? null : 'mg2'">
+                      <i class="fas fa-tag"></i>
+                      {{ exportStocks.mg2Inv ? `[${exportStocks.mg2Inv.code}] ${exportStocks.mg2Inv.name}` : 'Inventory…' }}
+                    </button>
+                    <button v-if="exportStocks.mg2Inv" class="inv-clear-btn" @click="clearExportInv('mg2')" title="Clear">
+                      <i class="fas fa-xmark"></i>
+                    </button>
+                    <div v-if="activeExportInv === 'mg2'" class="inv-dropdown">
+                      <input type="text" v-model="exportInvSearch.mg2" placeholder="Search inventory…" @click.stop />
+                      <div class="inv-results">
+                        <div
+                          v-for="inv in filterExportInventory(exportInvSearch.mg2)"
+                          :key="inv.id"
+                          class="inv-item"
+                          @mousedown.prevent="selectExportInv('mg2', inv)"
+                        >
+                          [{{ inv.code }}] {{ inv.name }} <span class="inv-stock">({{ inv.stock }} {{ inv.stockUnit || '?' }})</span>
+                        </div>
+                        <div v-if="!filterExportInventory(exportInvSearch.mg2).length" class="inv-empty">No items.</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="wellplate-export-row">
+              <div class="input-group" style="flex:1; min-width:120px;">
+                <label>Well volume (µL)</label>
+                <input type="number" step="any" min="1" v-model.number="exportWellVol" />
+              </div>
+              <div class="input-group" style="flex:2; min-width:160px;">
+                <label>Target plate</label>
+                <select v-model="exportPlateId">
+                  <option value="" disabled>Select a plate…</option>
+                  <option v-for="p in store.wellPlates" :key="p.id" :value="p.id">{{ p.name }}</option>
+                </select>
+              </div>
+              <div class="input-group" style="flex:0 0 90px;">
+                <label>Start well</label>
+                <input type="text" v-model="exportStartWell" placeholder="A1" maxlength="3" />
+              </div>
+              <button class="compact-btn" style="background:#8b5cf6; box-shadow:0 2px 4px rgba(139,92,246,0.3); align-self:flex-end;" @click="exportSuggestionsToPlate" :disabled="!exportPlateId">
+                <i class="fas fa-arrow-down"></i> Send
+              </button>
+            </div>
+
+            <div v-if="exportError" class="section-error" style="margin-top:6px;">
+              <i class="fas fa-triangle-exclamation"></i> {{ exportError }}
+            </div>
+            <div v-if="exportSuccess" class="section-info" style="margin-top:6px;">
+              <i class="fas fa-circle-check"></i> {{ exportSuccess }}
             </div>
           </div>
         </div>
@@ -484,11 +633,51 @@ const heatY = ref('ligase')
 
 const showLibrary = ref(false)
 
+// ── Send-to-Wellplate state ─────────────────────────────────────────────
+// Mirrors the pattern in PhasePredictor.vue: stock concentrations + an
+// inventory tag per component, a well volume, a target plate, and a start
+// well. Each METIS suggestion writes one well; volumes are computed as
+//   V_component = (target_conc × wellVol) / stock_conc.
+// MQ H₂O fills the remainder so total per-well volume == exportWellVol.
+const exportStocks = reactive({
+  ligase: 0, atp: 0, mg2: 0,
+  ligaseInv: null, atpInv: null, mg2Inv: null,
+})
+const exportWellVol = ref(100)
+const exportPlateId = ref('')
+const exportStartWell = ref('A1')
+const activeExportInv = ref(null)  // 'ligase' | 'atp' | 'mg2' | null
+const exportInvSearch = reactive({ ligase: '', atp: '', mg2: '' })
+const exportError = ref('')
+const exportSuccess = ref('')
+
+function filterExportInventory(query) {
+  const q = (query || '').toLowerCase()
+  const list = store.inventory || []
+  if (!q) return list
+  return list.filter(i =>
+    (i.name || '').toLowerCase().includes(q) ||
+    (i.code || '').toLowerCase().includes(q) ||
+    (i.cas  || '').toLowerCase().includes(q)
+  )
+}
+
+function selectExportInv(field, inv) {
+  exportStocks[`${field}Inv`] = inv
+  if (typeof inv?.stock === 'number') exportStocks[field] = inv.stock
+  activeExportInv.value = null
+}
+
+function clearExportInv(field) {
+  exportStocks[`${field}Inv`] = null
+}
+
 const csvFileInput = ref(null)
 const curvePlotEl = ref(null)
 const heatPlotEl = ref(null)
 const logoEl = ref(null)
 const logoSvg = ref('')
+const predictedLogoSvg = ref('')
 const logoWarning = ref('')
 
 const libraryItems = computed(() => {
@@ -806,23 +995,12 @@ function parseCsv(text) {
 
 // ════════════════ Sequence logo (frontend) ════════════════
 
-function computeLogo() {
-  logoWarning.value = ''
-  if (!dataset.experiments.length) { logoSvg.value = ''; return }
-
-  const allMax = dataset.experiments.map(g => g.maxConversion).sort((a, b) => a - b)
-  const cutIdx = Math.floor(allMax.length * dataset.config.yieldThreshold / 100)
-  const cutoff = allMax[Math.min(cutIdx, allMax.length - 1)]
-  const top = dataset.experiments.filter(g => g.maxConversion >= cutoff)
-
-  if (!top.length) { logoSvg.value = ''; return }
-
-  const maxLen = Math.max(...top.map(g => g.sequence.length))
-  const lengths = new Set(top.map(g => g.sequence.length))
-  if (lengths.size > 1) {
-    logoWarning.value = `${top.length} sequences have ${lengths.size} different lengths; logo extends to longest (${maxLen}); shorter sequences excluded from later positions.`
-  }
-
+// Renders a sequence logo SVG from a list of equal-or-mixed-length DNA strings.
+// Letter heights are Shannon-entropy-derived information content (bits, max 2).
+// Used for both the OBSERVED top-yield logo and the PREDICTED logo from METIS.
+function buildLogoSvg(seqs) {
+  if (!seqs?.length) return ''
+  const maxLen = Math.max(...seqs.map(s => s.length))
   const charW = 22
   const charH = 60
   const pad = { left: 28, top: 6, bottom: 18, right: 6 }
@@ -839,9 +1017,9 @@ function computeLogo() {
   for (let i = 0; i < maxLen; i++) {
     const counts = { A: 0, C: 0, G: 0, T: 0 }
     let total = 0
-    for (const g of top) {
-      if (i < g.sequence.length) {
-        const b = g.sequence[i]
+    for (const s of seqs) {
+      if (i < s.length) {
+        const b = s[i]
         if (counts[b] != null) { counts[b]++; total++ }
       }
     }
@@ -873,7 +1051,35 @@ function computeLogo() {
     body += `<text x="${xCenter}" y="${pad.top + charH + 12}" font-size="9" fill="currentColor" opacity="0.7" text-anchor="middle">${i + 1}</text>`
   }
 
-  logoSvg.value = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="width:100%; max-width:${W}px;">${body}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="width:100%; max-width:${W}px;">${body}</svg>`
+}
+
+function computeLogo() {
+  logoWarning.value = ''
+  if (!dataset.experiments.length) { logoSvg.value = ''; return }
+
+  const allMax = dataset.experiments.map(g => g.maxConversion).sort((a, b) => a - b)
+  const cutIdx = Math.floor(allMax.length * dataset.config.yieldThreshold / 100)
+  const cutoff = allMax[Math.min(cutIdx, allMax.length - 1)]
+  const top = dataset.experiments.filter(g => g.maxConversion >= cutoff)
+
+  if (!top.length) { logoSvg.value = ''; return }
+
+  const lengths = new Set(top.map(g => g.sequence.length))
+  if (lengths.size > 1) {
+    const maxLen = Math.max(...top.map(g => g.sequence.length))
+    logoWarning.value = `${top.length} sequences have ${lengths.size} different lengths; logo extends to longest (${maxLen}); shorter sequences excluded from later positions.`
+  }
+
+  logoSvg.value = buildLogoSvg(top.map(g => g.sequence))
+}
+
+// Sequence logo from METIS-predicted high-yield sequences. Shows the
+// motif the model thinks should perform well — useful next to the
+// observed logo for spotting positions the AI wants to change.
+function computePredictedLogo() {
+  if (!seqCandidates.value?.length) { predictedLogoSvg.value = ''; return }
+  predictedLogoSvg.value = buildLogoSvg(seqCandidates.value.map(c => c.sequence))
 }
 
 // ════════════════ Plotly: kinetic curves ════════════════
@@ -997,6 +1203,7 @@ function renderHeatmap() {
 
 function renderAll() {
   computeLogo()
+  computePredictedLogo()
   nextTick(() => {
     renderCurves()
     renderHeatmap()
@@ -1259,6 +1466,86 @@ async function predictSequence() {
   if (result) seqCandidates.value = result.candidates || []
 }
 
+// ════════════════ Send to Wellplate ════════════════
+//
+// Writes each METIS suggestion into one well of the user's chosen plate,
+// formatted to match PhasePredictor.vue's cell template so the same
+// downstream Opentrons (.opnp) export pipeline picks them up unchanged.
+
+function getInvTag(inv, vol, targetConc, unit) {
+  if (!inv) {
+    return `<strong>Manual stock:</strong> ${esc(vol)} µL (${esc(targetConc)} ${esc(unit)})<br>`
+  }
+  return `&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(inv.code)}] ${esc(inv.name)} (${esc(store.formatNum ? store.formatNum(inv.stock) : inv.stock)} ${esc(inv.stockUnit || unit)})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity:0.7;"></i></span>&nbsp; ${esc(vol)} µL (${esc(targetConc)} ${esc(unit)})<br>`
+}
+
+function exportSuggestionsToPlate() {
+  exportError.value = ''
+  exportSuccess.value = ''
+  if (!aiSuggestions.value.length) {
+    exportError.value = 'No METIS suggestions yet. Run "Suggest Next" first.'
+    return
+  }
+  if (!exportPlateId.value) {
+    exportError.value = 'Pick a target plate.'
+    return
+  }
+  const plate = store.wellPlates.find(p => p.id === exportPlateId.value)
+  if (!plate) { exportError.value = 'Selected plate not found.'; return }
+  const m = (exportStartWell.value || '').toUpperCase().trim().match(/^([A-Z])(\d{1,2})$/)
+  if (!m) { exportError.value = 'Invalid start well — use format like A1, B2, H12.'; return }
+  const startRow = m[1].charCodeAt(0) - 65
+  const startCol = parseInt(m[2]) - 1
+
+  const wellVol = Number(exportWellVol.value) || 0
+  if (wellVol <= 0) { exportError.value = 'Well volume must be > 0 µL.'; return }
+
+  const stockL = Number(exportStocks.ligase) || 0
+  const stockA = Number(exportStocks.atp)    || 0
+  const stockM = Number(exportStocks.mg2)    || 0
+  if (stockL <= 0 || stockA <= 0 || stockM <= 0) {
+    exportError.value = 'All three stock concentrations must be > 0. Set them manually or pick from inventory.'
+    return
+  }
+
+  let writtenCount = 0, skippedOverflow = 0, skippedExcessVol = 0
+  aiSuggestions.value.forEach((s, i) => {
+    const rOff = Math.floor((startCol + i) / 12)
+    const cOff = (startCol + i) % 12
+    const targetR = startRow + rOff
+    const targetC = cOff
+    if (targetR >= 8 || targetC >= 12) { skippedOverflow++; return }
+    const wId = String.fromCharCode(65 + targetR) + (targetC + 1)
+
+    const vL = (s.conditions.ligase * wellVol) / stockL
+    const vA = (s.conditions.atp    * wellVol) / stockA
+    const vM = (s.conditions.mg2    * wellVol) / stockM
+    const vSum = vL + vA + vM
+    const vWater = wellVol - vSum
+    const fmt = n => Number(n).toFixed(2)
+
+    const warn = vWater < 0
+      ? `<br><span style="color:#ef4444; font-size:0.7rem;">⚠️ Stock volumes (${fmt(vSum)} µL) exceed well volume — increase stocks or shrink well.</span>`
+      : ''
+    if (vWater < 0) skippedExcessVol++
+
+    plate.wells[wId] =
+      `<strong style="color: var(--primary);">METIS [#${i + 1}]</strong> ` +
+      `<span style="font-family:monospace; font-size:0.78rem;">${esc(s.sequence)}</span><br>` +
+      `<span style="font-size:0.72rem; opacity:0.75;">T ${esc(formatNum(s.conditions.temperature))} °C · env ${esc(s.conditions.env || 'none')} · pred ${esc(formatNum(s.predicted_conversion))}%</span><br>` +
+      getInvTag(exportStocks.ligaseInv, fmt(vL), formatNum(s.conditions.ligase), dataset.units.ligase) +
+      getInvTag(exportStocks.atpInv,    fmt(vA), formatNum(s.conditions.atp),    dataset.units.atp) +
+      getInvTag(exportStocks.mg2Inv,    fmt(vM), formatNum(s.conditions.mg2),    dataset.units.mg2) +
+      `<strong>MQ H₂O:</strong> ${fmt(Math.max(0, vWater))} µL${warn}`
+    writtenCount++
+  })
+
+  const parts = [`Wrote ${writtenCount} well${writtenCount === 1 ? '' : 's'} to "${plate.name}" starting at ${exportStartWell.value.toUpperCase()}`]
+  if (skippedOverflow)  parts.push(`${skippedOverflow} skipped (off-plate)`)
+  if (skippedExcessVol) parts.push(`${skippedExcessVol} flagged with stock-volume warning`)
+  exportSuccess.value = parts.join('. ') + '.'
+}
+
 // ════════════════ Cloud persistence ════════════════
 
 async function saveToCloud() {
@@ -1315,6 +1602,7 @@ async function archiveDataset() {
 // ════════════════ Mount ════════════════
 
 watch(() => [dataset.experiments, dataset.config.yieldThreshold, heatX.value, heatY.value, store.isDarkMode], renderAll, { deep: true })
+watch(seqCandidates, computePredictedLogo, { deep: true })
 
 onMounted(() => {
   nextTick(renderAll)
@@ -1503,6 +1791,98 @@ onBeforeUnmount(() => {
 /* ── Sequence logo ──────────────────────────────────────── */
 .logo-wrap { width: 100%; overflow-x: auto; padding: 8px 0; color: var(--text); }
 .logo-wrap svg { display: block; }
+
+.logos-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 900px) { .logos-row { grid-template-columns: 1fr; } }
+.logo-col { display: flex; flex-direction: column; min-width: 0; }
+.logo-col-header {
+  font-size: 0.75rem; font-weight: 700; opacity: 0.85;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  padding-bottom: 4px; margin-bottom: 6px;
+}
+.logo-empty {
+  font-size: 0.75rem; opacity: 0.5; padding: 24px 8px; text-align: center;
+}
+
+/* ── Send-to-Wellplate panel ───────────────────────────── */
+.wellplate-export {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  background: rgba(139, 92, 246, 0.04);
+}
+.wellplate-export-header {
+  font-size: 0.82rem; font-weight: 700;
+  color: #8b5cf6;
+  margin-bottom: 4px;
+  display: flex; align-items: center; gap: 6px;
+}
+.wellplate-export-hint {
+  font-size: 0.7rem; opacity: 0.65; margin: 0 0 8px;
+}
+.wellplate-export-hint code {
+  font-family: monospace; font-size: 0.7rem;
+  background: rgba(0,0,0,0.07); padding: 0 4px; border-radius: 3px;
+}
+
+.wellplate-stock-grid { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.stock-row { display: flex; flex-direction: column; gap: 2px; }
+.stock-row label {
+  font-size: 0.7rem; font-weight: 700; opacity: 0.75;
+}
+.stock-input-row {
+  display: flex; align-items: center; gap: 6px;
+}
+.stock-input-row input[type="number"] {
+  flex: 0 0 110px;
+  padding: 4px 6px; font-size: 0.78rem;
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 4px;
+  background: transparent; color: inherit;
+}
+.stock-unit { font-size: 0.7rem; opacity: 0.55; min-width: 24px; }
+
+.inv-picker { position: relative; flex: 1; display: flex; gap: 4px; align-items: center; min-width: 0; }
+.inv-pick-btn {
+  flex: 1; min-width: 0;
+  padding: 4px 8px; font-size: 0.72rem;
+  border: 1px solid var(--border-color, #cbd5e1); border-radius: 4px;
+  background: transparent; color: inherit; cursor: pointer;
+  text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.inv-pick-btn:hover { background: rgba(139, 92, 246, 0.08); }
+.inv-clear-btn {
+  border: none; background: transparent; color: #ef4444; cursor: pointer;
+  padding: 0 4px; font-size: 0.85rem;
+}
+
+.inv-dropdown {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 50;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px;
+  box-shadow: 0 10px 15px -3px rgba(0,0,0,0.18);
+  overflow: hidden;
+  min-width: 240px;
+}
+.inv-dropdown input[type="text"] {
+  width: 100%; padding: 6px 8px; font-size: 0.78rem;
+  border: none; border-bottom: 1px solid var(--border-color, #cbd5e1);
+  background: var(--input-bg, transparent); color: inherit; outline: none;
+}
+.inv-results { max-height: 180px; overflow-y: auto; }
+.inv-item {
+  padding: 6px 10px; font-size: 0.75rem; cursor: pointer;
+  border-bottom: 1px solid var(--border-color, #f1f5f9);
+}
+.inv-item:hover { background: rgba(139, 92, 246, 0.10); }
+.inv-stock { opacity: 0.65; font-size: 0.7rem; }
+.inv-empty { padding: 10px; text-align: center; opacity: 0.5; font-size: 0.7rem; }
+
+.wellplate-export-row {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end;
+  margin-top: 4px;
+}
 
 /* ── Suggestion cards ───────────────────────────────────── */
 .suggestion-card {

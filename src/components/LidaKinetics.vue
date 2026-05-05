@@ -490,39 +490,36 @@
                 </div>
               </div>
 
-              <!-- DNA Building Blocks — shown only when suggestions include named sequences -->
+              <!-- DNA Building Blocks — sourced from all imported experiments -->
               <template v-if="exportBuildingBlocks.aside.length || exportBuildingBlocks.bside.length">
-                <div class="stock-section-label" style="margin-top:10px;">DNA Building Blocks</div>
+                <div class="stock-section-label" style="margin-top:10px;">DNA Building Blocks &amp; Counterstrands</div>
                 <div class="stock-section-hint">
-                  A-side target: {{ dataset.kinetics.A0 }} µM (A₀) · B-side target: {{ dataset.kinetics.B0 }} µM (B₀)
+                  Main strands target A₀ = {{ dataset.kinetics.A0 }} µM / B₀ = {{ dataset.kinetics.B0 }} µM.
+                  Counterstrands (X′) are always co-present and use the same targets.
+                  Inventory is pre-filtered by letter; type to search freely.
                 </div>
 
-                <!-- A-side strands -->
+                <!-- ─ helper template so A/B/comp rows share identical markup ─ -->
+                <!-- A-side main strands (e.g. E) -->
+                <div class="strand-group-label">A-side strands</div>
                 <div class="stock-row" v-for="letter in exportBuildingBlocks.aside" :key="'aside_' + letter">
-                  <label>A-side <strong>{{ letter }}</strong> strand ({{ dataset.kinetics.A0 }} µM target)</label>
+                  <label><strong>{{ letter }}</strong> (A-side · {{ dataset.kinetics.A0 }} µM)</label>
                   <div class="stock-input-row">
                     <input type="number" step="any"
                       :value="dnaStocks[letter]?.conc ?? 0"
                       @input="setDnaConc(letter, $event.target.value)"
-                      placeholder="stock conc (µM)" />
+                      placeholder="stock (µM)" />
                     <span class="stock-unit">µM</span>
                     <div class="inv-picker" @click.stop>
                       <button class="inv-pick-btn" @click="activeExportInv = activeExportInv === 'dna_a_' + letter ? null : 'dna_a_' + letter">
                         <i class="fas fa-tag"></i>
                         {{ dnaStocks[letter]?.inv ? `[${dnaStocks[letter].inv.code}] ${dnaStocks[letter].inv.name}` : 'Inventory…' }}
                       </button>
-                      <button v-if="dnaStocks[letter]?.inv" class="inv-clear-btn" @click="clearDnaStockInv(letter)" title="Clear">
-                        <i class="fas fa-xmark"></i>
-                      </button>
+                      <button v-if="dnaStocks[letter]?.inv" class="inv-clear-btn" @click="clearDnaStockInv(letter)" title="Clear"><i class="fas fa-xmark"></i></button>
                       <div v-if="activeExportInv === 'dna_a_' + letter" class="inv-dropdown">
                         <input type="text" v-model="dnaInvSearch[letter]" :placeholder="`Search '${letter}' in inventory…`" @click.stop />
                         <div class="inv-results">
-                          <div
-                            v-for="inv in filterDnaInventory(dnaInvSearch[letter], letter)"
-                            :key="inv.id"
-                            class="inv-item"
-                            @mousedown.prevent="selectDnaStockInv(letter, inv)"
-                          >
+                          <div v-for="inv in filterDnaInventory(dnaInvSearch[letter], letter)" :key="inv.id" class="inv-item" @mousedown.prevent="selectDnaStockInv(letter, inv)">
                             [{{ inv.code }}] {{ inv.name }} <span class="inv-stock">({{ inv.stock }} {{ inv.stockUnit || '?' }})</span>
                           </div>
                           <div v-if="!filterDnaInventory(dnaInvSearch[letter], letter).length" class="inv-empty">No matching items.</div>
@@ -532,32 +529,84 @@
                   </div>
                 </div>
 
-                <!-- B-side strands -->
+                <!-- B-side main strands (e.g. β) -->
+                <div class="strand-group-label">B-side strands</div>
                 <div class="stock-row" v-for="letter in exportBuildingBlocks.bside" :key="'bside_' + letter">
-                  <label>B-side <strong>{{ letter }}</strong> strand ({{ dataset.kinetics.B0 }} µM target)</label>
+                  <label><strong>{{ letter }}</strong> (B-side · {{ dataset.kinetics.B0 }} µM)</label>
                   <div class="stock-input-row">
                     <input type="number" step="any"
                       :value="dnaStocks[letter]?.conc ?? 0"
                       @input="setDnaConc(letter, $event.target.value)"
-                      placeholder="stock conc (µM)" />
+                      placeholder="stock (µM)" />
                     <span class="stock-unit">µM</span>
                     <div class="inv-picker" @click.stop>
                       <button class="inv-pick-btn" @click="activeExportInv = activeExportInv === 'dna_b_' + letter ? null : 'dna_b_' + letter">
                         <i class="fas fa-tag"></i>
                         {{ dnaStocks[letter]?.inv ? `[${dnaStocks[letter].inv.code}] ${dnaStocks[letter].inv.name}` : 'Inventory…' }}
                       </button>
-                      <button v-if="dnaStocks[letter]?.inv" class="inv-clear-btn" @click="clearDnaStockInv(letter)" title="Clear">
-                        <i class="fas fa-xmark"></i>
-                      </button>
+                      <button v-if="dnaStocks[letter]?.inv" class="inv-clear-btn" @click="clearDnaStockInv(letter)" title="Clear"><i class="fas fa-xmark"></i></button>
                       <div v-if="activeExportInv === 'dna_b_' + letter" class="inv-dropdown">
                         <input type="text" v-model="dnaInvSearch[letter]" :placeholder="`Search '${letter}' in inventory…`" @click.stop />
                         <div class="inv-results">
-                          <div
-                            v-for="inv in filterDnaInventory(dnaInvSearch[letter], letter)"
-                            :key="inv.id"
-                            class="inv-item"
-                            @mousedown.prevent="selectDnaStockInv(letter, inv)"
-                          >
+                          <div v-for="inv in filterDnaInventory(dnaInvSearch[letter], letter)" :key="inv.id" class="inv-item" @mousedown.prevent="selectDnaStockInv(letter, inv)">
+                            [{{ inv.code }}] {{ inv.name }} <span class="inv-stock">({{ inv.stock }} {{ inv.stockUnit || '?' }})</span>
+                          </div>
+                          <div v-if="!filterDnaInventory(dnaInvSearch[letter], letter).length" class="inv-empty">No matching items.</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- A-side counterstrands (e.g. E′) -->
+                <div class="strand-group-label" style="color:#6366f1;">A-side counterstrands</div>
+                <div class="stock-row" v-for="letter in exportBuildingBlocks.asideComp" :key="'acomp_' + letter">
+                  <label><strong>{{ letter }}</strong> (A′-counterstrand · {{ dataset.kinetics.A0 }} µM)</label>
+                  <div class="stock-input-row">
+                    <input type="number" step="any"
+                      :value="dnaStocks[letter]?.conc ?? 0"
+                      @input="setDnaConc(letter, $event.target.value)"
+                      placeholder="stock (µM)" />
+                    <span class="stock-unit">µM</span>
+                    <div class="inv-picker" @click.stop>
+                      <button class="inv-pick-btn" @click="activeExportInv = activeExportInv === 'dna_ac_' + letter ? null : 'dna_ac_' + letter">
+                        <i class="fas fa-tag"></i>
+                        {{ dnaStocks[letter]?.inv ? `[${dnaStocks[letter].inv.code}] ${dnaStocks[letter].inv.name}` : 'Inventory…' }}
+                      </button>
+                      <button v-if="dnaStocks[letter]?.inv" class="inv-clear-btn" @click="clearDnaStockInv(letter)" title="Clear"><i class="fas fa-xmark"></i></button>
+                      <div v-if="activeExportInv === 'dna_ac_' + letter" class="inv-dropdown">
+                        <input type="text" v-model="dnaInvSearch[letter]" :placeholder="`Search '${letter}' in inventory…`" @click.stop />
+                        <div class="inv-results">
+                          <div v-for="inv in filterDnaInventory(dnaInvSearch[letter], letter)" :key="inv.id" class="inv-item" @mousedown.prevent="selectDnaStockInv(letter, inv)">
+                            [{{ inv.code }}] {{ inv.name }} <span class="inv-stock">({{ inv.stock }} {{ inv.stockUnit || '?' }})</span>
+                          </div>
+                          <div v-if="!filterDnaInventory(dnaInvSearch[letter], letter).length" class="inv-empty">No matching items.</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- B-side counterstrands (e.g. β′) -->
+                <div class="strand-group-label" style="color:#6366f1;">B-side counterstrands</div>
+                <div class="stock-row" v-for="letter in exportBuildingBlocks.bsideComp" :key="'bcomp_' + letter">
+                  <label><strong>{{ letter }}</strong> (B′-counterstrand · {{ dataset.kinetics.B0 }} µM)</label>
+                  <div class="stock-input-row">
+                    <input type="number" step="any"
+                      :value="dnaStocks[letter]?.conc ?? 0"
+                      @input="setDnaConc(letter, $event.target.value)"
+                      placeholder="stock (µM)" />
+                    <span class="stock-unit">µM</span>
+                    <div class="inv-picker" @click.stop>
+                      <button class="inv-pick-btn" @click="activeExportInv = activeExportInv === 'dna_bc_' + letter ? null : 'dna_bc_' + letter">
+                        <i class="fas fa-tag"></i>
+                        {{ dnaStocks[letter]?.inv ? `[${dnaStocks[letter].inv.code}] ${dnaStocks[letter].inv.name}` : 'Inventory…' }}
+                      </button>
+                      <button v-if="dnaStocks[letter]?.inv" class="inv-clear-btn" @click="clearDnaStockInv(letter)" title="Clear"><i class="fas fa-xmark"></i></button>
+                      <div v-if="activeExportInv === 'dna_bc_' + letter" class="inv-dropdown">
+                        <input type="text" v-model="dnaInvSearch[letter]" :placeholder="`Search '${letter}' in inventory…`" @click.stop />
+                        <div class="inv-results">
+                          <div v-for="inv in filterDnaInventory(dnaInvSearch[letter], letter)" :key="inv.id" class="inv-item" @mousedown.prevent="selectDnaStockInv(letter, inv)">
                             [{{ inv.code }}] {{ inv.name }} <span class="inv-stock">({{ inv.stock }} {{ inv.stockUnit || '?' }})</span>
                           </div>
                           <div v-if="!filterDnaInventory(dnaInvSearch[letter], letter).length" class="inv-empty">No matching items.</div>
@@ -753,16 +802,31 @@ function seqNameOf(seq) {
 const dnaStocks    = reactive({})  // { 'E': { conc: 0, inv: null }, ... }
 const dnaInvSearch = reactive({})  // { 'E': '', ... }
 
-// Unique A-side / B-side letters from all current METIS suggestions.
+// Unique building-block letters sourced from ALL imported experiments so the
+// stock UI covers every strand needed for the full lab setup, not just what
+// METIS happens to suggest in one run.
+// Returns four arrays:
+//   aside     – A-side main strand letters    (e.g. ['E'])
+//   bside     – B-side main strand letters    (e.g. ['β'])
+//   asideComp – A-side counterstrand letters  (e.g. ["E'"])
+//   bsideComp – B-side counterstrand letters  (e.g. ["β'"])
+// Eβ always implies E'β', so counterstrands are derived automatically.
 const exportBuildingBlocks = computed(() => {
   const aside = new Set()
   const bside = new Set()
-  for (const s of aiSuggestions.value) {
-    const { aside: a, bside: b } = parseSeqName(seqNameOf(s.sequence))
+  for (const exp of dataset.experiments) {
+    const { aside: a, bside: b } = parseSeqName(exp.seqName)
     if (a) aside.add(a)
     if (b) bside.add(b)
   }
-  return { aside: [...aside].sort(), bside: [...bside].sort() }
+  const asideArr = [...aside].sort()
+  const bsideArr = [...bside].sort()
+  return {
+    aside:     asideArr,
+    bside:     bsideArr,
+    asideComp: asideArr.map(l => `${l}'`),
+    bsideComp: bsideArr.map(l => `${l}'`),
+  }
 })
 
 function setDnaConc(letter, val) {
@@ -781,8 +845,9 @@ function clearDnaStockInv(letter) {
   if (dnaStocks[letter]) dnaStocks[letter].inv = null
 }
 
-// Pre-filters by the building-block letter when no search query is active,
-// so the most relevant stocks surface immediately without the user typing.
+// Pre-filters by the building-block letter when no search query is active.
+// For counterstrand keys that end in ' (prime), also matches " prime", "'",
+// and "comp" suffixes so inventory items named "E prime" or "E'" are found.
 function filterDnaInventory(query, letter) {
   const list = store.inventory || []
   const q = (query || '').toLowerCase()
@@ -792,10 +857,19 @@ function filterDnaInventory(query, letter) {
       (i.code || '').toLowerCase().includes(q)
     )
   }
-  const byLetter = list.filter(i =>
-    (i.name || '').includes(letter) ||
-    (i.code || '').includes(letter)
-  )
+  const isPrime = letter.endsWith("'")
+  const base = isPrime ? letter.slice(0, -1) : letter
+  const bl = base.toLowerCase()
+  const byLetter = list.filter(i => {
+    const n = (i.name || '').toLowerCase()
+    const c = (i.code || '').toLowerCase()
+    if (isPrime) {
+      return n.includes(letter.toLowerCase()) || c.includes(letter.toLowerCase()) ||
+             n.includes(bl + ' prime') || n.includes(bl + "'") ||
+             n.includes(bl + 'comp')  || c.includes(bl + "'")
+    }
+    return (i.name || '').includes(base) || (i.code || '').includes(base)
+  })
   return byLetter.length > 0 ? byLetter : list
 }
 
@@ -1667,11 +1741,12 @@ function exportSuggestionsToPlate() {
     return
   }
 
-  // If any suggestion has a named sequence, all required building-block stocks must be set.
-  const { aside: asideBlocks, bside: bsideBlocks } = exportBuildingBlocks.value
-  const missingDna = [...asideBlocks, ...bsideBlocks].filter(l => !(dnaStocks[l]?.conc > 0))
+  // All building-block stocks (main strands + counterstrands) must be set.
+  const { aside: asideBlocks, bside: bsideBlocks, asideComp, bsideComp } = exportBuildingBlocks.value
+  const allDnaBlocks = [...asideBlocks, ...bsideBlocks, ...asideComp, ...bsideComp]
+  const missingDna = allDnaBlocks.filter(l => !(dnaStocks[l]?.conc > 0))
   if (missingDna.length) {
-    exportError.value = `Set stock concentrations for building block${missingDna.length > 1 ? 's' : ''}: ${missingDna.join(', ')}.`
+    exportError.value = `Set stock concentrations for: ${missingDna.join(', ')}.`
     return
   }
 
@@ -1689,14 +1764,23 @@ function exportSuggestionsToPlate() {
     const vA = (s.conditions.atp    * wellVol) / stockA
     const vM = (s.conditions.mg2    * wellVol) / stockM
 
-    // DNA building blocks: volumes computed from A0 / B0 ODE initial conditions.
+    // Main strands: A-side and B-side. Counterstrand keys have trailing ' (prime).
+    // Target concentrations match the ODE initial conditions: A0 for A/A', B0 for B/B'.
     const { aside, bside } = parseSeqName(seqNameOf(s.sequence))
-    const asideConc = aside && dnaStocks[aside]?.conc > 0 ? dnaStocks[aside].conc : 0
-    const bsideConc = bside && dnaStocks[bside]?.conc > 0 ? dnaStocks[bside].conc : 0
-    const vAs = asideConc > 0 ? (dataset.kinetics.A0 * wellVol) / asideConc : 0
-    const vBs = bsideConc > 0 ? (dataset.kinetics.B0 * wellVol) / bsideConc : 0
+    const asideKey  = aside  || null
+    const bsideKey  = bside  || null
+    const asideCompKey = aside  ? `${aside}'`  : null
+    const bsideCompKey = bside  ? `${bside}'`  : null
 
-    const vSum = vL + vA + vM + vAs + vBs
+    const stockOf = k => (k && dnaStocks[k]?.conc > 0) ? dnaStocks[k].conc : 0
+    const volOf   = (k, target) => { const s = stockOf(k); return s > 0 ? (target * wellVol) / s : 0 }
+
+    const vAs  = volOf(asideKey,     dataset.kinetics.A0)
+    const vBs  = volOf(bsideKey,     dataset.kinetics.B0)
+    const vAsc = volOf(asideCompKey, dataset.kinetics.A0)
+    const vBsc = volOf(bsideCompKey, dataset.kinetics.B0)
+
+    const vSum   = vL + vA + vM + vAs + vBs + vAsc + vBsc
     const vWater = wellVol - vSum
 
     const warn = vWater < 0
@@ -1707,8 +1791,10 @@ function exportSuggestionsToPlate() {
     const nameLabel = seqNameOf(s.sequence)
       ? ` <strong style="color:#8b5cf6; font-size:0.72rem;">${esc(seqNameOf(s.sequence))}</strong>` : ''
     let dnaHtml = ''
-    if (aside) dnaHtml += getInvTag(dnaStocks[aside]?.inv ?? null, fmt(vAs), formatNum(dataset.kinetics.A0), 'µM', `A [${aside}]`)
-    if (bside) dnaHtml += getInvTag(dnaStocks[bside]?.inv ?? null, fmt(vBs), formatNum(dataset.kinetics.B0), 'µM', `B [${bside}]`)
+    if (asideKey)     dnaHtml += getInvTag(dnaStocks[asideKey]?.inv     ?? null, fmt(vAs),  formatNum(dataset.kinetics.A0), 'µM', `A [${asideKey}]`)
+    if (bsideKey)     dnaHtml += getInvTag(dnaStocks[bsideKey]?.inv     ?? null, fmt(vBs),  formatNum(dataset.kinetics.B0), 'µM', `B [${bsideKey}]`)
+    if (asideCompKey) dnaHtml += getInvTag(dnaStocks[asideCompKey]?.inv ?? null, fmt(vAsc), formatNum(dataset.kinetics.A0), 'µM', `A′ [${asideCompKey}]`)
+    if (bsideCompKey) dnaHtml += getInvTag(dnaStocks[bsideCompKey]?.inv ?? null, fmt(vBsc), formatNum(dataset.kinetics.B0), 'µM', `B′ [${bsideCompKey}]`)
 
     plate.wells[wId] =
       `<strong style="color: var(--primary);">METIS [#${i + 1}]</strong>` +
@@ -1787,8 +1873,8 @@ watch(() => [dataset.experiments, dataset.config.yieldThreshold, heatX.value, he
 watch(seqCandidates, computePredictedLogo, { deep: true })
 // Ensure a dnaStocks entry exists for every building-block letter that appears
 // in the current suggestions so v-model bindings in the template never hit undefined.
-watch(exportBuildingBlocks, ({ aside, bside }) => {
-  for (const l of [...aside, ...bside]) {
+watch(exportBuildingBlocks, ({ aside, bside, asideComp, bsideComp }) => {
+  for (const l of [...aside, ...bside, ...asideComp, ...bsideComp]) {
     if (!dnaStocks[l]) dnaStocks[l] = { conc: 0, inv: null }
     if (dnaInvSearch[l] == null) dnaInvSearch[l] = ''
   }
@@ -2094,6 +2180,11 @@ onBeforeUnmount(() => {
 }
 .stock-section-hint {
   font-size: 0.68rem; opacity: 0.6; margin-bottom: 4px;
+}
+.strand-group-label {
+  font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.3px; color: #8b5cf6; opacity: 0.75;
+  margin-top: 6px; margin-bottom: 2px;
 }
 
 /* ── Utilities ──────────────────────────────────────────── */

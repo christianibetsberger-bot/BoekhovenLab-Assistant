@@ -256,6 +256,18 @@ async function init() {
     await pyodide.loadPackage(['numpy', 'pandas', 'scikit-learn', 'xgboost'])
 
     self.postMessage({ type: 'progress', stage: 'compiling-code', text: 'Compiling METIS engine…' })
+    // XGBoost 2.1.x predates scikit-learn 1.6's __sklearn_tags__ API.
+    // Patch XGBRegressor before running METIS_CODE so RandomizedSearchCV
+    // can introspect it. METIS_CODE itself is not modified.
+    pyodide.runPython(`
+try:
+    from xgboost import XGBRegressor
+    if not hasattr(XGBRegressor, '__sklearn_tags__'):
+        from sklearn.base import RegressorMixin
+        XGBRegressor.__sklearn_tags__ = RegressorMixin.__sklearn_tags__
+except Exception:
+    pass
+`)
     pyodide.runPython(METIS_CODE)
 
     self.postMessage({ type: 'ready' })

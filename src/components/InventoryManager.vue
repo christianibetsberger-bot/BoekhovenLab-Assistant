@@ -101,6 +101,7 @@ const updateManualSequence = (item) => {
         for (let i = 0; i < cleanSeq.length; i++) if (cleanSeq[i] === 'G' || cleanSeq[i] === 'C') gcCount++;
         item.gc = (gcCount / cleanSeq.length) * 100;
     } else item.gc = 0;
+    store.saveItemToCloud(item)
 }
 
 const calculatedGcFallback = (sequence) => {
@@ -112,7 +113,7 @@ const calculatedGcFallback = (sequence) => {
 }
 
 const viewProperties = (item) => { viewingItem.value = item; }
-const toggleScope = (item) => { item.scope = (item.scope || 'Global') === 'Personal' ? 'Global' : 'Personal'; }
+const toggleScope = (item) => { item.scope = (item.scope || 'Global') === 'Personal' ? 'Global' : 'Personal'; store.saveItemToCloud(item); }
 const addInventoryItem = () => {
     const newItem = { id: 'inv_' + crypto.randomUUID(), code: 'NEW', cas: '', itemClass: 'Other', name: 'New Stock', stock: 100, stockUnit: 'µM', location: '', sequence: '', oligoType: 'DNA', manualMw: null, tm: 0, scope: inventoryMode.value };
     store.inventory.unshift(newItem);
@@ -506,7 +507,7 @@ const generateLabelsPDF = () => {
                     <div><strong>CAS Number:</strong><br> <input type="text" v-model="viewingItem.cas" placeholder="e.g. 50-00-0" style="padding: 4px; margin-top: 4px; width: 100%;"></div>
                 </div>
             </template>
-            <button @click="viewingItem = null" style="margin-top: 20px; width: 100%;">Save & Close</button>
+            <button @click="store.saveItemToCloud(viewingItem); viewingItem = null" style="margin-top: 20px; width: 100%;">Save & Close</button>
         </div>
     </div>
 
@@ -680,25 +681,25 @@ const generateLabelsPDF = () => {
                 </thead>
                 <tbody>
                     <tr v-for="item in filteredInventory" :key="item.id">
-                        <td><input type="text" v-model="item.code" style="width: 55px; padding: 6px;"></td>
-                        <td><input type="text" v-model="item.cas" placeholder="-" style="width: 70px; padding: 6px; font-size:0.8rem;"></td>
+                        <td><input type="text" v-model="item.code" @blur="store.saveItemToCloud(item)" style="width: 55px; padding: 6px;"></td>
+                        <td><input type="text" v-model="item.cas" placeholder="-" @blur="store.saveItemToCloud(item)" style="width: 70px; padding: 6px; font-size:0.8rem;"></td>
                         <td>
-                            <select v-model="item.itemClass" style="width: 80px; padding: 6px; font-size:0.8rem;">
+                            <select v-model="item.itemClass" @change="store.saveItemToCloud(item)" style="width: 80px; padding: 6px; font-size:0.8rem;">
                                 <option v-for="cls in store.classOptions" :key="cls" :value="cls">{{ cls }}</option>
                             </select>
                         </td>
-                        <td><input type="text" v-model="item.name" style="padding: 6px; min-width: 120px;"></td>
+                        <td><input type="text" v-model="item.name" @blur="store.saveItemToCloud(item)" style="padding: 6px; min-width: 120px;"></td>
                         <td>
                             <div class="input-with-select">
-                                <input type="number" v-model.number="item.stock" step="any" style="width: 70px; padding: 6px;">
-                                <select v-model="item.stockUnit" style="padding: 6px; font-size: 0.8rem; width: 65px; border-left: none;">
+                                <input type="number" v-model.number="item.stock" step="any" @blur="store.saveItemToCloud(item)" style="width: 70px; padding: 6px;">
+                                <select v-model="item.stockUnit" @change="store.saveItemToCloud(item)" style="padding: 6px; font-size: 0.8rem; width: 65px; border-left: none;">
                                     <option value="M">M</option><option value="mM">mM</option><option value="µM">µM</option><option value="nM">nM</option>
                                     <option value="mg/mL">mg/mL</option><option value="µg/µL">µg/µL</option><option value="ng/µL">ng/µL</option>
                                     <option value="X">X</option><option value="U/µL">U/µL</option><option value="%">%</option>
                                 </select>
                             </div>
                         </td>
-                        <td><input type="text" v-model="item.location" placeholder="e.g., Box 1" style="width: 100px; padding: 6px;"></td>
+                        <td><input type="text" v-model="item.location" placeholder="e.g., Box 1" @blur="store.saveItemToCloud(item)" style="width: 100px; padding: 6px;"></td>
                         <td style="white-space: nowrap;">
                             <button class="secondary small" @click="toggleScope(item)" :title="(item.scope || 'Global') === 'Personal' ? 'Move to Global' : 'Move to Personal'" style="margin-right: 5px;">
                                 <i class="fas" :class="(item.scope || 'Global') === 'Personal' ? 'fa-globe' : 'fa-user'"></i>

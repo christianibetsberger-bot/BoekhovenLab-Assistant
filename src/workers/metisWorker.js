@@ -256,17 +256,39 @@ async function init() {
     await pyodide.loadPackage(['numpy', 'pandas', 'scikit-learn', 'xgboost'])
 
     self.postMessage({ type: 'progress', stage: 'compiling-code', text: 'Compiling METIS engine…' })
-    // XGBoost 2.1.x predates scikit-learn 1.6's __sklearn_tags__ API.
-    // Patch XGBRegressor before running METIS_CODE so RandomizedSearchCV
-    // can introspect it. METIS_CODE itself is not modified.
+    // XGBoost 2.1.2 + scikit-learn 1.6.1 (Pyodide 0.27.7) incompatibility.
+    //
+    // sklearn 1.6's get_tags() loops through type(estimator).__mro__ and calls
+    // klass.__sklearn_tags__(estimator) on every class that defines it.
+    // XGBRegressor's MRO ends: … BaseEstimator → RegressorMixin → object.
+    // When get_tags calls RegressorMixin.__sklearn_tags__(estimator), that
+    // method calls super().__sklearn_tags__().  super(RegressorMixin, self)
+    // in XGBRegressor's MRO resolves to object, which has no __sklearn_tags__
+    // → AttributeError.
+    //
+    // Fix: inject a root class _XGBTagsBase between RegressorMixin and object
+    // by appending it to XGBRegressor.__bases__.  The new MRO becomes:
+    //   … BaseEstimator → RegressorMixin → _XGBTagsBase → object
+    // _XGBTagsBase.__sklearn_tags__ creates Tags() directly (no super call),
+    // terminating the cooperative chain cleanly.  METIS_CODE is not modified.
     pyodide.runPython(`
 try:
     from xgboost import XGBRegressor
-    if not hasattr(XGBRegressor, '__sklearn_tags__'):
-        from sklearn.base import RegressorMixin
-        XGBRegressor.__sklearn_tags__ = RegressorMixin.__sklearn_tags__
-except Exception:
-    pass
+    from sklearn.utils._tags import Tags, TargetTags
+
+    class _XGBTagsBase:
+        def __sklearn_tags__(self):
+            # Root: create Tags directly without calling super().
+            try:
+                return Tags(estimator_type=None, target_tags=TargetTags(required=False),
+                            transformer_tags=None, regressor_tags=None, classifier_tags=None)
+            except TypeError:
+                return Tags()
+
+    if _XGBTagsBase not in XGBRegressor.__mro__:
+        XGBRegressor.__bases__ = XGBRegressor.__bases__ + (_XGBTagsBase,)
+except Exception as _e:
+    print(f"XGBoost compat shim error: {_e}")
 `)
     pyodide.runPython(METIS_CODE)
 

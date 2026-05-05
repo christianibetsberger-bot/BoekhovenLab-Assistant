@@ -384,13 +384,14 @@
             </div>
           </div>
 
-          <!-- Send to Wellplate -->
-          <div v-if="aiSuggestions.length" class="wellplate-export">
+          <!-- Send to Wellplate — always shown when experiments are loaded so
+               stocks can be pre-configured before running Suggest Next -->
+          <div v-if="dataset.experiments.length" class="wellplate-export">
             <div class="wellplate-export-header">
               <i class="fas fa-flask-vial"></i> Send to Wellplate
             </div>
             <p class="wellplate-export-hint">
-              Pick stocks from inventory or enter concentrations. DNA building blocks appear automatically when sequences in your CSV have a <strong>Name</strong> column (e.g. "Eβ" → A-side E, B-side β). Volume formula: <code>V = target × wellVol / stock</code>; MQ H₂O fills the rest.
+              Configure stocks here at any time. DNA building blocks appear automatically when sequences have a <strong>Name</strong> column (e.g. "Eβ"). Volume formula: <code>V = target × wellVol / stock</code>; MQ H₂O fills the rest. Run <strong>Suggest Next</strong> to unlock the Send button.
             </p>
 
             <div class="wellplate-stock-grid">
@@ -618,7 +619,8 @@
               </template>
             </div>
 
-            <div class="wellplate-export-row">
+            <!-- Send row — only active once METIS suggestions exist -->
+            <div v-if="aiSuggestions.length" class="wellplate-export-row">
               <div class="input-group" style="flex:1; min-width:120px;">
                 <label>Well volume (µL)</label>
                 <input type="number" step="any" min="1" v-model.number="exportWellVol" />
@@ -637,6 +639,9 @@
               <button class="compact-btn" style="background:#8b5cf6; box-shadow:0 2px 4px rgba(139,92,246,0.3); align-self:flex-end;" @click="exportSuggestionsToPlate" :disabled="!exportPlateId">
                 <i class="fas fa-arrow-down"></i> Send
               </button>
+            </div>
+            <div v-else class="section-warn" style="margin-top:8px;">
+              <i class="fas fa-circle-info"></i> Run <strong>Suggest Next</strong> to generate experiments, then use the Send button to write them to a plate.
             </div>
 
             <div v-if="exportError" class="section-error" style="margin-top:6px;">

@@ -1010,25 +1010,43 @@ async function saveSettings() {
   settingsError.value = ''
   savingSettings = true
   try {
-    const { error } = await db.from('time_settings').upsert({
+    // v2 columns added later via the migration in supabase/time_tracker.sql:
+    //   privacy_mode, vacation_carryover, custom_projects
+    // If the user's Supabase project hasn't been migrated, the upsert fails
+    // with "Could not find the 'X' column of 'time_settings' in the schema
+    // cache". Detect that and retry with the v1 column set so task/project
+    // edits still persist. We log the migration hint so the user can fix it.
+    const v1Payload = {
       owner_id:               store.user.id,
       weekly_hours:           settings.weekly_hours,
       vacation_days_per_year: settings.vacation_days_per_year,
-      vacation_carryover:     settings.vacation_carryover,
       timezone:               settings.timezone,
-      privacy_mode:           settings.privacy_mode,
       custom_tasks:           settings.custom_tasks,
-      custom_projects:        settings.custom_projects,
-    }, { onConflict: 'owner_id' })
+    }
+    const v2Payload = {
+      ...v1Payload,
+      vacation_carryover: settings.vacation_carryover,
+      privacy_mode:       settings.privacy_mode,
+      custom_projects:    settings.custom_projects,
+    }
+    let { error } = await db.from('time_settings').upsert(v2Payload, { onConflict: 'owner_id' })
+    if (error && /schema cache|column .+ does not exist/i.test(error.message || '')) {
+      console.warn(
+        'time_settings is missing v2 columns (privacy_mode / vacation_carryover / custom_projects).\n' +
+        'Run supabase/time_tracker.sql in your Supabase SQL editor to add them.\n' +
+        'Falling back to v1 columns so the current save still goes through.'
+      )
+      const retry = await db.from('time_settings').upsert(v1Payload, { onConflict: 'owner_id' })
+      error = retry.error
+    }
     if (error) {
       settingsError.value = `Settings save failed: ${error.message}`
       console.error('time_settings upsert failed:', error)
-      return  // don't bump — nothing was persisted
+      return
     }
-    ttProjectList.value = settings.custom_projects  // broadcast before bump
+    ttProjectList.value = settings.custom_projects
     bumpTT()
   } finally {
-    // Release after a tick so the bump-driven watcher sees the flag.
     await nextTick()
     savingSettings = false
   }

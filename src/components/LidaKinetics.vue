@@ -72,20 +72,29 @@
             <div class="input-group">
               <label>T4-Ligase</label>
               <select v-model="dataset.units.ligase">
-                <option value="µM">µM (micromolar)</option>
+                <option value="nM">nM</option>
+                <option value="µM">µM</option>
+                <option value="mM">mM</option>
+                <option value="M">M</option>
                 <option value="U/µL">U/µL (activity)</option>
               </select>
             </div>
             <div class="input-group">
               <label>ATP</label>
               <select v-model="dataset.units.atp">
-                <option value="µM">µM (micromolar)</option>
+                <option value="nM">nM</option>
+                <option value="µM">µM</option>
+                <option value="mM">mM</option>
+                <option value="M">M</option>
               </select>
             </div>
             <div class="input-group">
-              <label>Mg²⁺</label>
+              <label><span class="no-upper">Mg²⁺</span></label>
               <select v-model="dataset.units.mg2">
-                <option value="µM">µM (micromolar)</option>
+                <option value="nM">nM</option>
+                <option value="µM">µM</option>
+                <option value="mM">mM</option>
+                <option value="M">M</option>
               </select>
             </div>
           </div>
@@ -133,7 +142,7 @@
               </div>
             </div>
             <div class="input-group">
-              <label>Mg²⁺ ({{ dataset.units.mg2 }})</label>
+              <label><span class="no-upper">Mg²⁺</span> ({{ dataset.units.mg2 }})</label>
               <div class="range-inputs">
                 <input type="number" step="any" v-model.number="dataset.config.ranges.mg2Min" placeholder="Min" />
                 <input type="number" step="any" v-model.number="dataset.config.ranges.mg2Max" placeholder="Max" />
@@ -219,7 +228,7 @@
                   <th>T °C</th>
                   <th>Lig</th>
                   <th>ATP</th>
-                  <th>Mg²⁺</th>
+                  <th><span class="no-upper">Mg²⁺</span></th>
                   <th>Env</th>
                   <th>Pts</th>
                   <th>Rep</th>
@@ -970,9 +979,16 @@ function renderHeatmap() {
     colorbar: { title: { text: 'Max %', font: { size: 10 } }, thickness: 12 },
     hovertemplate: `${heatX.value}: %{x}<br>${heatY.value}: %{y}<br>Max conv: %{z:.1f}%<extra></extra>`,
   }
+  const axisLabel = (key) => {
+    if (key === 'temperature') return 'Temperature (°C)'
+    if (key === 'ligase') return `T4-Ligase (${dataset.units.ligase})`
+    if (key === 'atp') return `ATP (${dataset.units.atp})`
+    if (key === 'mg2') return `Mg²⁺ (${dataset.units.mg2})`
+    return key
+  }
   const layout = plotLayoutDark()
-  layout.xaxis.title = { text: heatX.value, font: { size: 9 } }
-  layout.yaxis.title = { text: heatY.value, font: { size: 9 } }
+  layout.xaxis.title = { text: axisLabel(heatX.value), font: { size: 9 } }
+  layout.yaxis.title = { text: axisLabel(heatY.value), font: { size: 9 } }
   layout.xaxis.type = 'category'
   layout.yaxis.type = 'category'
   layout.margin.r = 60   // extra room for the colorbar
@@ -1405,6 +1421,8 @@ onBeforeUnmount(() => {
   padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border-color, #e2e8f0);
   font-weight: 700; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.4px;
 }
+/* Disable uppercasing for chemical symbols (Mg, Cl, etc.) */
+.no-upper { text-transform: none !important; }
 .ledger-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-color, #f1f5f9); }
 .seq-cell { font-family: monospace; font-size: 0.75rem; }
 .env-cell { font-size: 0.75rem; opacity: 0.85; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

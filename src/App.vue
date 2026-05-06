@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, watch, ref, computed, markRaw } from 'vue'
+import { onMounted, onUnmounted, watch, ref, computed, markRaw, nextTick } from 'vue'
 import { db } from './services/supabase'
 import { useLabStore } from './stores/labStore'
 import { useDynamicIcon } from './composables/useDynamicIcon.js'
@@ -52,7 +52,13 @@ function toggleModule(id) {
   saveLayout()
 }
 function isMinimized(id) { return !!layout.value.minimized[id] }
-function resetLayout() { layout.value = store.getDefaultModuleLayout(); saveLayout() }
+function resetLayout() {
+  layout.value = store.getDefaultModuleLayout()
+  saveLayout()
+  // Also clear all sidebar groups
+  sidebarGroups.value = []
+  saveSidebarGroups()
+}
 
 // Track which columns have at least one visible module (drives v-show on column divs)
 const topHasVisible   = computed(() => layout.value.topOrder.some(id   => !isMinimized(id)))
@@ -153,6 +159,8 @@ function cyclePosition() {
 const showRedockPanel = ref(false)
 function removeFromSidebar(id) {
   layout.value.sidebarHidden = { ...layout.value.sidebarHidden, [id]: true }
+  // Also remove from any group
+  removeModuleFromGroups(id)
   saveLayout()
 }
 function redockModule(id) {
@@ -179,6 +187,243 @@ watch(
   { deep: true }
 )
 
+// ══════════════════════════════════════════════════════════════════════════
+// SIDEBAR GROUPS — purely cosmetic grouping of sidebar icons
+// ══════════════════════════════════════════════════════════════════════════
+
+const SB_GROUP_ICONS = [
+  'fa-flask', 'fa-vial', 'fa-microscope', 'fa-dna', 'fa-atom',
+  'fa-fire', 'fa-bolt', 'fa-snowflake', 'fa-temperature-high', 'fa-eye-dropper',
+  'fa-magnet', 'fa-chart-line', 'fa-calculator', 'fa-boxes-stacked', 'fa-clock',
+  'fa-brain', 'fa-star', 'fa-book', 'fa-layer-group', 'fa-wave-square',
+]
+
+// sidebarGroups: Array<{ id, name, icon, moduleIds[] }>
+const sidebarGroups = ref([])
+
+// Which groups are expanded (showing their member icons inline)
+const expandedGroups = ref(new Set())
+
+function sbGroupsKey() {
+  return store.user?.id ? 'sbg_' + store.user.id : null
+}
+
+function loadSidebarGroups() {
+  const key = sbGroupsKey()
+  if (!key) return
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw) sidebarGroups.value = JSON.parse(raw)
+  } catch { sidebarGroups.value = [] }
+}
+
+function saveSidebarGroups() {
+  const key = sbGroupsKey()
+  if (!key) return
+  localStorage.setItem(key, JSON.stringify(sidebarGroups.value))
+}
+
+function generateGroupId() {
+  return 'g_' + Math.random().toString(36).slice(2, 9)
+}
+
+// Helper: find the group containing a moduleId
+function findGroupForModule(moduleId) {
+  return sidebarGroups.value.find(g => g.moduleIds.includes(moduleId)) || null
+}
+
+// Helper: remove a module from whatever group it is in (and disband if only 1 left)
+function removeModuleFromGroups(moduleId) {
+  sidebarGroups.value = sidebarGroups.value
+    .map(g => ({ ...g, moduleIds: g.moduleIds.filter(m => m !== moduleId) }))
+    .filter(g => g.moduleIds.length >= 2)  // disband single-member groups
+  saveSidebarGroups()
+}
+
+function toggleGroupExpanded(groupId) {
+  const s = new Set(expandedGroups.value)
+  if (s.has(groupId)) s.delete(groupId)
+  else s.add(groupId)
+  expandedGroups.value = s
+}
+
+// Computed sidebar items: ordered mix of 'module' and 'group' items
+const sidebarItems = computed(() => {
+  const items = []
+  const groupedModuleIds = new Set(sidebarGroups.value.flatMap(g => g.moduleIds))
+  const emittedGroupIds = new Set()
+
+  for (const id of allModuleIds.value) {
+    if (groupedModuleIds.has(id)) {
+      // Find which group owns this id
+      const group = sidebarGroups.value.find(g => g.moduleIds.includes(id))
+      if (group && !emittedGroupIds.has(group.id)) {
+        emittedGroupIds.add(group.id)
+        items.push({ type: 'group', group })
+      }
+      // Module itself is hidden from flat list (represented by the group button)
+    } else {
+      items.push({ type: 'module', id })
+    }
+  }
+  return items
+})
+
+// ── Group editor modal ──
+const groupEditor = ref(null)  // { group, anchorEl } | null
+const groupEditorName = ref('')
+const groupEditorIcon = ref('')
+
+function openGroupEditor(group, event) {
+  event?.stopPropagation()
+  groupEditorName.value = group.name
+  groupEditorIcon.value = group.icon
+  groupEditor.value = { group: { ...group } }
+}
+
+function closeGroupEditor() {
+  groupEditor.value = null
+}
+
+function saveGroupEditor() {
+  if (!groupEditor.value) return
+  const idx = sidebarGroups.value.findIndex(g => g.id === groupEditor.value.group.id)
+  if (idx !== -1) {
+    sidebarGroups.value[idx] = {
+      ...sidebarGroups.value[idx],
+      name: groupEditorName.value.trim() || 'Group',
+      icon: groupEditorIcon.value,
+    }
+    saveSidebarGroups()
+  }
+  closeGroupEditor()
+}
+
+function disbandGroup(groupId) {
+  sidebarGroups.value = sidebarGroups.value.filter(g => g.id !== groupId)
+  expandedGroups.value.delete(groupId)
+  saveSidebarGroups()
+  closeGroupEditor()
+}
+
+// Close editor on Escape
+function onKeydown(e) {
+  if (e.key === 'Escape' && groupEditor.value) closeGroupEditor()
+}
+onMounted(() => document.addEventListener('keydown', onKeydown))
+onUnmounted(() => document.removeEventListener('keydown', onKeydown))
+
+// ── Sidebar drag-to-group ──
+const sidebarDragging   = ref(null)   // { moduleId }
+const sidebarDragOver   = ref(null)   // moduleId being hovered as drop target
+
+function sbDragStart(moduleId, e) {
+  e.stopPropagation()
+  sidebarDragging.value = { moduleId }
+  // Use a minimal drag image so it doesn't conflict with layout dragging
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', moduleId)
+  }
+}
+
+function sbDragEnd(e) {
+  e.stopPropagation()
+  sidebarDragging.value = null
+  sidebarDragOver.value = null
+}
+
+function sbDragOver(targetId, e) {
+  e.stopPropagation()
+  e.preventDefault()
+  if (!sidebarDragging.value) return
+  const srcId = sidebarDragging.value.moduleId
+  if (srcId === targetId) return
+  sidebarDragOver.value = targetId
+}
+
+function sbDrop(targetId, e) {
+  e.stopPropagation()
+  e.preventDefault()
+  if (!sidebarDragging.value) return
+  const srcId = sidebarDragging.value.moduleId
+  sidebarDragging.value = null
+  sidebarDragOver.value = null
+  if (srcId === targetId) return
+
+  const srcGroup = findGroupForModule(srcId)
+  const tgtGroup = findGroupForModule(targetId)
+
+  if (srcGroup && tgtGroup && srcGroup.id === tgtGroup.id) return // same group, no-op
+
+  if (!srcGroup && !tgtGroup) {
+    // Neither is in a group — create a new group with both
+    const newGroup = {
+      id: generateGroupId(),
+      name: 'Group',
+      icon: 'fa-layer-group',
+      moduleIds: [srcId, targetId],
+    }
+    sidebarGroups.value.push(newGroup)
+    saveSidebarGroups()
+    // Open editor so the user can name it
+    nextTick(() => openGroupEditor(newGroup, null))
+  } else if (tgtGroup && !srcGroup) {
+    // Target is in a group: add source to that group
+    const idx = sidebarGroups.value.findIndex(g => g.id === tgtGroup.id)
+    if (idx !== -1 && !sidebarGroups.value[idx].moduleIds.includes(srcId)) {
+      sidebarGroups.value[idx].moduleIds.push(srcId)
+      saveSidebarGroups()
+    }
+  } else if (srcGroup && !tgtGroup) {
+    // Source is in a group; move it out and create new group with target
+    removeModuleFromGroups(srcId)
+    const newGroup = {
+      id: generateGroupId(),
+      name: 'Group',
+      icon: 'fa-layer-group',
+      moduleIds: [srcId, targetId],
+    }
+    sidebarGroups.value.push(newGroup)
+    saveSidebarGroups()
+    nextTick(() => openGroupEditor(newGroup, null))
+  } else if (srcGroup && tgtGroup) {
+    // Both are in different groups: move src to target's group
+    const srcIdx = sidebarGroups.value.findIndex(g => g.id === srcGroup.id)
+    if (srcIdx !== -1) {
+      sidebarGroups.value[srcIdx].moduleIds = sidebarGroups.value[srcIdx].moduleIds.filter(m => m !== srcId)
+      if (sidebarGroups.value[srcIdx].moduleIds.length < 2) {
+        // Disband source group
+        sidebarGroups.value.splice(srcIdx, 1)
+      }
+    }
+    const tgtIdx = sidebarGroups.value.findIndex(g => g.id === tgtGroup.id)
+    if (tgtIdx !== -1 && !sidebarGroups.value[tgtIdx].moduleIds.includes(srcId)) {
+      sidebarGroups.value[tgtIdx].moduleIds.push(srcId)
+    }
+    saveSidebarGroups()
+  }
+}
+
+// Drag a module OUT of an expanded group onto the sidebar background
+function sbGroupMemberDragOver(e) {
+  e.stopPropagation()
+  e.preventDefault()
+  sidebarDragOver.value = null
+}
+
+function sbSidebarBackgroundDrop(e) {
+  e.stopPropagation()
+  e.preventDefault()
+  if (!sidebarDragging.value) return
+  const srcId = sidebarDragging.value.moduleId
+  sidebarDragging.value = null
+  sidebarDragOver.value = null
+  // If dragging from a group, remove from group (makes it standalone)
+  const srcGroup = findGroupForModule(srcId)
+  if (srcGroup) removeModuleFromGroups(srcId)
+}
+
 async function initSession(user) {
   store.user = user
   // loadCloudSettings fetches prefs + layout from Supabase and writes them into
@@ -187,6 +432,7 @@ async function initSession(user) {
   await store.loadCloudSettings()
   store.loadCloudInventory()
   loadLayout()
+  loadSidebarGroups()
 }
 
 onMounted(() => {
@@ -205,6 +451,16 @@ const signOut = async () => { await db.auth.signOut(); window.location.reload() 
 const _closeRedock = () => { showRedockPanel.value = false }
 onMounted(() => document.addEventListener('click', _closeRedock))
 onUnmounted(() => document.removeEventListener('click', _closeRedock))
+
+// Close group editor on outside click
+const groupEditorRef = ref(null)
+function onDocClick(e) {
+  if (groupEditor.value && groupEditorRef.value && !groupEditorRef.value.contains(e.target)) {
+    saveGroupEditor()
+  }
+}
+onMounted(() => document.addEventListener('mousedown', onDocClick))
+onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
 </script>
 
 <template>
@@ -215,24 +471,90 @@ onUnmounted(() => document.removeEventListener('click', _closeRedock))
     <template v-else>
 
       <!-- Auto-hide sidebar dock -->
-      <nav class="module-sidebar" :class="`pos-${sidebarPosition}`">
+      <nav class="module-sidebar" :class="`pos-${sidebarPosition}`"
+        @dragover.prevent="sbGroupMemberDragOver"
+        @drop.prevent="sbSidebarBackgroundDrop"
+      >
         <div class="sidebar-modules">
-          <button
-            v-for="id in allModuleIds"
-            :key="id"
-            class="sidebar-btn"
-            :class="{ 'is-active': !isMinimized(id), 'is-hidden': isMinimized(id) }"
-            :title="MODULE_META[id].label"
-            @click="toggleModule(id)"
-          >
-            <span class="sidebar-remove" @click.stop="removeFromSidebar(id)" title="Remove from sidebar">
-              <i class="fas fa-xmark"></i>
-            </span>
-            <div class="sidebar-icon">
-              <span v-if="MODULE_META[id].svgIcon" class="sidebar-svg" v-html="MODULE_META[id].svgIcon"></span>
-              <i v-else class="fas" :class="MODULE_META[id].icon"></i>
-            </div>
-          </button>
+
+          <template v-for="item in sidebarItems" :key="item.type === 'module' ? item.id : item.group.id">
+
+            <!-- ── Regular module button ── -->
+            <template v-if="item.type === 'module'">
+              <button
+                class="sidebar-btn"
+                :class="{
+                  'is-active': !isMinimized(item.id),
+                  'is-hidden': isMinimized(item.id),
+                  'sg-drop-target': sidebarDragOver === item.id && sidebarDragging?.moduleId !== item.id,
+                }"
+                :title="MODULE_META[item.id].label"
+                draggable="true"
+                @click="toggleModule(item.id)"
+                @dragstart.stop="sbDragStart(item.id, $event)"
+                @dragend.stop="sbDragEnd"
+                @dragover.stop.prevent="sbDragOver(item.id, $event)"
+                @drop.stop.prevent="sbDrop(item.id, $event)"
+              >
+                <span class="sidebar-remove" @click.stop="removeFromSidebar(item.id)" title="Remove from sidebar">
+                  <i class="fas fa-xmark"></i>
+                </span>
+                <div class="sidebar-icon">
+                  <span v-if="MODULE_META[item.id].svgIcon" class="sidebar-svg" v-html="MODULE_META[item.id].svgIcon"></span>
+                  <i v-else class="fas" :class="MODULE_META[item.id].icon"></i>
+                </div>
+              </button>
+            </template>
+
+            <!-- ── Group button ── -->
+            <template v-else-if="item.type === 'group'">
+              <div class="sg-group-wrapper">
+                <!-- Group icon button (collapsed state) -->
+                <button
+                  class="sidebar-btn sg-group-item"
+                  :title="item.group.name"
+                  @click="toggleGroupExpanded(item.group.id)"
+                  @contextmenu.prevent="openGroupEditor(item.group, $event)"
+                >
+                  <div class="sidebar-icon sg-group-icon">
+                    <i class="fas" :class="item.group.icon"></i>
+                  </div>
+                  <span class="sg-badge">{{ item.group.moduleIds.length }}</span>
+                </button>
+
+                <!-- Expanded inline container -->
+                <div
+                  v-if="expandedGroups.has(item.group.id)"
+                  class="sg-expanded"
+                  :class="`sg-expanded-${sidebarPosition}`"
+                >
+                  <button
+                    v-for="memberId in item.group.moduleIds.filter(mid => allModuleIds.includes(mid))"
+                    :key="memberId"
+                    class="sidebar-btn sg-member-btn"
+                    :class="{
+                      'is-active': !isMinimized(memberId),
+                      'is-hidden': isMinimized(memberId),
+                      'sg-drop-target': sidebarDragOver === memberId && sidebarDragging?.moduleId !== memberId,
+                    }"
+                    :title="MODULE_META[memberId]?.label"
+                    draggable="true"
+                    @click="toggleModule(memberId)"
+                    @dragstart.stop="sbDragStart(memberId, $event)"
+                    @dragend.stop="sbDragEnd"
+                    @dragover.stop.prevent="sbDragOver(memberId, $event)"
+                    @drop.stop.prevent="sbDrop(memberId, $event)"
+                  >
+                    <div class="sidebar-icon sg-member-icon">
+                      <span v-if="MODULE_META[memberId]?.svgIcon" class="sidebar-svg" v-html="MODULE_META[memberId].svgIcon"></span>
+                      <i v-else class="fas" :class="MODULE_META[memberId]?.icon"></i>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </template>
+
+          </template>
         </div>
 
         <div class="sidebar-footer">
@@ -264,6 +586,47 @@ onUnmounted(() => document.removeEventListener('click', _closeRedock))
               </div>
               <span class="redock-label">{{ MODULE_META[id].label }}</span>
             </button>
+          </div>
+        </div>
+
+        <!-- Group editor floating panel -->
+        <div
+          v-if="groupEditor"
+          ref="groupEditorRef"
+          class="sg-editor"
+          :class="[`sg-editor-${sidebarPosition}`, { 'dark-mode': store.isDarkMode }]"
+          @click.stop
+          @mousedown.stop
+        >
+          <p class="sg-editor-title">Edit Group</p>
+
+          <label class="sg-editor-label">Name</label>
+          <input
+            class="sg-editor-input"
+            v-model="groupEditorName"
+            placeholder="Group name"
+            maxlength="24"
+            @keydown.enter.prevent="saveGroupEditor"
+            @keydown.escape.prevent="closeGroupEditor"
+          />
+
+          <label class="sg-editor-label">Icon</label>
+          <div class="sg-icon-picker">
+            <button
+              v-for="ic in SB_GROUP_ICONS"
+              :key="ic"
+              class="sg-icon-option"
+              :class="{ 'sg-icon-selected': groupEditorIcon === ic }"
+              :title="ic.replace('fa-','')"
+              @click="groupEditorIcon = ic"
+            >
+              <i class="fas" :class="ic"></i>
+            </button>
+          </div>
+
+          <div class="sg-editor-actions">
+            <button class="sg-editor-save" @click="saveGroupEditor">Save</button>
+            <button class="sg-editor-disband" @click="disbandGroup(groupEditor.group.id)">Disband</button>
           </div>
         </div>
       </Teleport>
@@ -738,4 +1101,227 @@ body { padding: 0 !important; margin: 0 !important; }
   border-color: var(--primary);
   color: var(--primary);
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   SIDEBAR GROUPS
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Group wrapper — positions the expanded container relative to the group button */
+.sg-group-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Group icon button: same squircle style but with a coloured ring */
+.sg-group-item .sidebar-icon.sg-group-icon {
+  background: color-mix(in srgb, var(--primary) 38%, rgba(80, 120, 255, 0.18));
+  border: 2px solid color-mix(in srgb, var(--primary) 70%, rgba(255,255,255,0.4));
+  box-shadow:
+    0 2px 8px rgba(0,0,0,0.18),
+    0 0 0 1px color-mix(in srgb, var(--primary) 30%, transparent),
+    inset 0 1px 0 rgba(255,255,255,0.26);
+}
+
+/* Count badge — top-right corner of group button */
+.sg-badge {
+  position: absolute;
+  top: -3px; right: -3px;
+  min-width: 16px; height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary) 90%, rgba(0,0,0,0.2));
+  color: #fff;
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.28);
+  z-index: 12;
+  pointer-events: none;
+}
+
+/* Expanded inline module container */
+.sg-expanded {
+  display: flex;
+  gap: 4px;
+  padding: 5px 4px;
+  border-radius: 12px;
+  background: rgba(200, 200, 220, 0.26);
+  border: 1px solid rgba(180, 180, 200, 0.38);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.10);
+  margin-top: 3px;
+  z-index: 10;
+}
+.dark-mode .sg-expanded {
+  background: rgba(30, 30, 50, 0.52);
+  border-color: rgba(255,255,255,0.10);
+}
+
+/* Left/right sidebar: expanded container is a column */
+.sg-expanded-left,
+.sg-expanded-right {
+  flex-direction: column;
+}
+
+/* Bottom sidebar: expanded container is a row, positioned above */
+.sg-expanded-bottom {
+  flex-direction: row;
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 0;
+}
+
+/* Member icon size: slightly smaller than standard for compact appearance */
+.sg-member-btn .sidebar-icon.sg-member-icon {
+  width: 32px;
+  height: 32px;
+  font-size: 0.88rem;
+}
+.sg-member-btn .sidebar-icon.sg-member-icon i {
+  font-size: 0.88rem;
+}
+
+/* Drop-target glow: shown when a module is dragged over another to group them */
+.sg-drop-target .sidebar-icon {
+  box-shadow:
+    0 0 0 2px #22c55e,
+    0 0 14px 3px rgba(34, 197, 94, 0.55),
+    inset 0 1px 0 rgba(255,255,255,0.22);
+  border-color: #22c55e !important;
+  transform: scale(1.10);
+}
+
+/* ── Group editor floating panel ── */
+.sg-editor {
+  position: fixed;
+  z-index: 700;
+  width: 230px;
+  background: rgba(235,235,245,0.94);
+  backdrop-filter: blur(48px) saturate(180%);
+  -webkit-backdrop-filter: blur(48px) saturate(180%);
+  border: 1px solid rgba(255,255,255,0.52);
+  border-radius: 16px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.60);
+  padding: 14px 14px 12px;
+}
+.sg-editor.dark-mode {
+  background: rgba(16,16,30,0.94);
+  border-color: rgba(255,255,255,0.11);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* Position the editor near the relevant dock edge */
+.sg-editor-left   { left: 68px;  top: 50%; transform: translateY(-50%); }
+.sg-editor-right  { right: 68px; top: 50%; transform: translateY(-50%); }
+.sg-editor-bottom { bottom: 68px; left: 50%; transform: translateX(-50%); }
+
+.sg-editor-title {
+  font-size: 0.65rem; font-weight: 700;
+  color: var(--text); opacity: 0.50;
+  margin: 0 0 10px; text-transform: uppercase; letter-spacing: 0.07em;
+}
+
+.sg-editor-label {
+  display: block;
+  font-size: 0.62rem; font-weight: 600;
+  color: var(--text); opacity: 0.55;
+  margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.05em;
+}
+
+.sg-editor-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(120,120,140,0.28);
+  background: rgba(255,255,255,0.55);
+  color: var(--text);
+  font-size: 0.82rem;
+  margin-bottom: 12px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.sg-editor-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 24%, transparent);
+}
+.dark-mode .sg-editor-input {
+  background: rgba(30,30,50,0.60);
+  border-color: rgba(255,255,255,0.14);
+  color: var(--text);
+}
+
+/* Icon picker grid */
+.sg-icon-picker {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.sg-icon-option {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: rgba(120,120,140,0.08);
+  cursor: pointer;
+  font-size: 0.88rem;
+  color: var(--text);
+  opacity: 0.65;
+  transition: background 0.13s, opacity 0.13s, border-color 0.13s, transform 0.13s;
+}
+.sg-icon-option:hover {
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  opacity: 1;
+  transform: scale(1.10);
+}
+.sg-icon-option.sg-icon-selected {
+  background: color-mix(in srgb, var(--primary) 28%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 55%, transparent);
+  opacity: 1;
+  color: var(--primary);
+}
+
+/* Editor action buttons */
+.sg-editor-actions {
+  display: flex;
+  gap: 6px;
+}
+.sg-editor-save {
+  flex: 1;
+  padding: 6px 0;
+  border-radius: 8px;
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.sg-editor-save:hover { opacity: 0.88; transform: translateY(-1px); }
+
+.sg-editor-disband {
+  flex: 1;
+  padding: 6px 0;
+  border-radius: 8px;
+  border: 1px solid rgba(220,50,50,0.35);
+  background: rgba(220,50,50,0.10);
+  color: #e03535;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+.sg-editor-disband:hover { background: rgba(220,50,50,0.20); transform: translateY(-1px); }
+.dark-mode .sg-editor-disband { color: #f87171; border-color: rgba(248,113,113,0.30); background: rgba(248,113,113,0.08); }
+.dark-mode .sg-editor-disband:hover { background: rgba(248,113,113,0.18); }
 </style>

@@ -405,6 +405,30 @@ function sbDrop(targetId, e) {
   }
 }
 
+// Drop a module onto an existing group button (adds module to that group)
+function sbDropOnGroup(groupId, e) {
+  e.stopPropagation()
+  e.preventDefault()
+  if (!sidebarDragging.value) return
+  const srcId = sidebarDragging.value.moduleId
+  sidebarDragging.value = null
+  sidebarDragOver.value = null
+
+  const idx = sidebarGroups.value.findIndex(g => g.id === groupId)
+  if (idx === -1) return
+  if (sidebarGroups.value[idx].moduleIds.includes(srcId)) return  // already a member
+
+  // Remove from any other group (may disband that group if it shrinks to 1)
+  removeModuleFromGroups(srcId)
+
+  // Re-find after potential splice in removeModuleFromGroups
+  const idx2 = sidebarGroups.value.findIndex(g => g.id === groupId)
+  if (idx2 !== -1 && !sidebarGroups.value[idx2].moduleIds.includes(srcId)) {
+    sidebarGroups.value[idx2].moduleIds.push(srcId)
+    saveSidebarGroups()
+  }
+}
+
 // Drag a module OUT of an expanded group onto the sidebar background
 function sbGroupMemberDragOver(e) {
   e.stopPropagation()
@@ -512,9 +536,12 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                 <!-- Group icon button (collapsed state) -->
                 <button
                   class="sidebar-btn sg-group-item"
+                  :class="{ 'sg-drop-target': sidebarDragOver === item.group.id && sidebarDragging }"
                   :title="item.group.name"
                   @click="toggleGroupExpanded(item.group.id)"
                   @contextmenu.prevent="openGroupEditor(item.group, $event)"
+                  @dragover.stop.prevent="sbDragOver(item.group.id, $event)"
+                  @drop.stop.prevent="sbDropOnGroup(item.group.id, $event)"
                 >
                   <div class="sidebar-icon sg-group-icon">
                     <i class="fas" :class="item.group.icon"></i>

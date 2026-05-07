@@ -1,8 +1,9 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
 
 const store = useLabStore()
+const saveScope = ref('Global')
 
 // Computed Properties for the Calculator
 const stdConcUnitStr = computed(() => {
@@ -63,7 +64,7 @@ const saveStdToInventory = () => {
         sublocation: '', 
         catalogNum: '', 
         unitSize: '', 
-        scope: store.inventoryMode
+        scope: saveScope.value
     };
     store.inventory.unshift(newItem);
     store.saveItemToCloud(newItem);
@@ -161,6 +162,11 @@ const saveStdToInventory = () => {
                     <option v-for="cls in store.classOptions" :key="cls" :value="cls">{{ cls }}</option>
                 </select>
             </div>
+        </div>
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;padding:7px 10px;background:var(--input-bg);border-radius:6px;border:1px solid var(--border);">
+            <span style="font-size:0.73rem;opacity:0.6;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap;">Save to:</span>
+            <label class="checkbox-label"><input type="radio" value="Global" v-model="saveScope"> Global</label>
+            <label class="checkbox-label"><input type="radio" value="Personal" v-model="saveScope"> Personal</label>
         </div>
         <button style="width: 100%" @click="saveStdToInventory" :disabled="!store.stdCalc.conc || !store.stdCalc.saveName">
             <i class="fas fa-download"></i> Save As Stock

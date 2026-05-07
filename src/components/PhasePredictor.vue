@@ -112,6 +112,113 @@
               </div>
             </div>
           </div>
+
+          <!-- ── Advanced: Solvents, Background Salt & pH ── -->
+          <div style="margin-top: 10px;">
+            <button type="button"
+              @click="config.showMediumSettings = !config.showMediumSettings"
+              style="width:100%; text-align:left; background:transparent; border:1px dashed var(--border-color,#cbd5e1); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
+              <i class="fas" :class="config.showMediumSettings ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
+              Advanced: Component Solvents · Background Salt (Na⁺) · pH
+            </button>
+
+            <div v-if="config.showMediumSettings" style="margin-top:8px; padding:12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.8rem; display:flex; flex-direction:column; gap:10px;">
+              <p style="font-size:0.72rem; opacity:0.6; margin:0;">
+                Specify the solvent each stock is dissolved in. Background Na⁺ is subtracted from the Component C (salt) volume during well-plate export so the target final concentration is met exactly. Volume-weighted H⁺ mixing gives a per-well pH estimate.
+              </p>
+
+              <!-- Header row -->
+              <div style="display:grid; grid-template-columns:120px 100px 1fr 130px 80px; gap:6px; align-items:center; font-size:0.7rem; font-weight:700; opacity:0.55; text-transform:uppercase; letter-spacing:0.04em;">
+                <span>Component</span>
+                <span>Solvent</span>
+                <span>Buffer name</span>
+                <span>Na⁺ in solvent (mM)</span>
+                <span>Stock pH</span>
+              </div>
+
+              <!-- Component A -->
+              <div style="display:grid; grid-template-columns:120px 100px 1fr 130px 80px; gap:6px; align-items:center;">
+                <span style="font-size:0.78rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" :title="config.anionName">A: {{ config.anionName }}</span>
+                <select v-model="config.anionMedium.type" style="font-size:0.78rem; padding:3px 5px;">
+                  <option value="water">MQ Water</option>
+                  <option value="buffer">Buffer</option>
+                </select>
+                <input v-if="config.anionMedium.type === 'buffer'" type="text" v-model="config.anionMedium.bufName" placeholder="e.g. Tris-HCl 50 mM" style="font-size:0.78rem; padding:3px 5px;">
+                <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
+                <input v-if="config.anionMedium.type === 'buffer'" type="number" v-model.number="config.anionMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
+                <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
+                <input v-if="config.anionMedium.type === 'buffer'" type="number" v-model.number="config.anionMedium.pH" step="0.1" min="0" max="14" placeholder="7.0" style="font-size:0.78rem; padding:3px 5px;">
+                <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
+              </div>
+
+              <!-- Component B -->
+              <div style="display:grid; grid-template-columns:120px 100px 1fr 130px 80px; gap:6px; align-items:center;">
+                <span style="font-size:0.78rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" :title="config.cationName">B: {{ config.cationName }}</span>
+                <select v-model="config.cationMedium.type" style="font-size:0.78rem; padding:3px 5px;">
+                  <option value="water">MQ Water</option>
+                  <option value="buffer">Buffer</option>
+                </select>
+                <input v-if="config.cationMedium.type === 'buffer'" type="text" v-model="config.cationMedium.bufName" placeholder="e.g. PBS 1× pH 7.4" style="font-size:0.78rem; padding:3px 5px;">
+                <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
+                <input v-if="config.cationMedium.type === 'buffer'" type="number" v-model.number="config.cationMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
+                <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
+                <input v-if="config.cationMedium.type === 'buffer'" type="number" v-model.number="config.cationMedium.pH" step="0.1" min="0" max="14" placeholder="7.0" style="font-size:0.78rem; padding:3px 5px;">
+                <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
+              </div>
+
+              <!-- Component C (salt) -->
+              <div style="display:grid; grid-template-columns:120px 100px 1fr 130px 80px; gap:6px; align-items:center;">
+                <span style="font-size:0.78rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" :title="config.saltName">C: {{ config.saltName }}</span>
+                <select v-model="config.saltMedium.type" style="font-size:0.78rem; padding:3px 5px;">
+                  <option value="water">MQ Water</option>
+                  <option value="buffer">Buffer</option>
+                </select>
+                <input v-if="config.saltMedium.type === 'buffer'" type="text" v-model="config.saltMedium.bufName" placeholder="buffer name" style="font-size:0.78rem; padding:3px 5px;">
+                <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
+                <input v-if="config.saltMedium.type === 'buffer'" type="number" v-model.number="config.saltMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
+                <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
+                <input v-if="config.saltMedium.type === 'buffer'" type="number" v-model.number="config.saltMedium.pH" step="0.1" min="0" max="14" placeholder="7.0" style="font-size:0.78rem; padding:3px 5px;">
+                <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
+              </div>
+
+              <!-- Divider -->
+              <div style="border-top:1px dashed var(--border-color,#cbd5e1); padding-top:8px; font-size:0.72rem; font-weight:700; opacity:0.55; text-transform:uppercase; letter-spacing:0.04em;">Fill-up solution</div>
+
+              <!-- Fill-up -->
+              <div style="display:grid; grid-template-columns:120px 100px 1fr 130px 80px; gap:6px; align-items:center;">
+                <span style="font-size:0.78rem;">Remainder</span>
+                <select v-model="config.fillupMedium.type" style="font-size:0.78rem; padding:3px 5px;">
+                  <option value="water">MQ Water</option>
+                  <option value="buffer">Buffer</option>
+                </select>
+                <input v-if="config.fillupMedium.type === 'buffer'" type="text" v-model="config.fillupMedium.bufName" placeholder="e.g. 10 mM NaOH" style="font-size:0.78rem; padding:3px 5px;">
+                <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
+                <input v-if="config.fillupMedium.type === 'buffer'" type="number" v-model.number="config.fillupMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
+                <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
+                <input v-if="config.fillupMedium.type === 'buffer'" type="number" v-model.number="config.fillupMedium.pH" step="0.1" min="0" max="14" placeholder="7.0" style="font-size:0.78rem; padding:3px 5px;">
+                <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
+              </div>
+
+              <!-- Live preview for first suggestion -->
+              <template v-if="suggestions.length > 0">
+                <div style="border-top:1px solid var(--border-color,#e2e8f0); padding-top:8px;">
+                  <div style="font-size:0.7rem; font-weight:700; opacity:0.55; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Preview (first AI target)</div>
+                  <div style="font-size:0.78rem; display:flex; gap:16px; flex-wrap:wrap;">
+                    <span>A: <strong>{{ computeWellVolumes(suggestions[0]).vA.toFixed(2) }} µL</strong></span>
+                    <span>B: <strong>{{ computeWellVolumes(suggestions[0]).vB.toFixed(2) }} µL</strong></span>
+                    <span>C (adj.): <strong>{{ computeWellVolumes(suggestions[0]).vC.toFixed(2) }} µL</strong></span>
+                    <span>Fill: <strong>{{ computeWellVolumes(suggestions[0]).vFill.toFixed(2) }} µL</strong></span>
+                    <span v-if="computeWellVolumes(suggestions[0]).backgroundNa_mM > 0.001" style="color:#f59e0b;">
+                      Bg Na⁺: <strong>{{ computeWellVolumes(suggestions[0]).backgroundNa_mM.toFixed(2) }} mM</strong>
+                    </span>
+                    <span v-if="computeWellVolumes(suggestions[0]).mixedPH !== null" style="color:#8b5cf6;">
+                      Est. pH: <strong>{{ computeWellVolumes(suggestions[0]).mixedPH }}</strong>
+                    </span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
         </div>
 
         <div class="internal-section" style="flex-grow: 1;">
@@ -478,7 +585,13 @@ const config = ref({
   targetVolume: 100,
   strategy: 'safe',
   numSuggestions: 96,
-  minDistanceFactor: 0.05
+  minDistanceFactor: 0.05,
+  // Advanced medium / background salt / pH settings
+  showMediumSettings: false,
+  anionMedium:  { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
+  cationMedium: { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
+  saltMedium:   { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
+  fillupMedium: { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
 })
 
 // Detect when exactly one axis is collapsed (min === max) → show 2D slice alongside 3D
@@ -607,6 +720,67 @@ const filterBlockInventory = (query, scope) => {
     );
 }
 
+// Compute per-well volumes for a suggestion, accounting for background salt and pH.
+// Returns { vA, vB, vC, vFill, backgroundNa_mM, mixedPH, exceeds }
+const computeWellVolumes = (sug) => {
+  const V   = config.value.targetVolume
+  const cfg = config.value
+
+  const vA = cfg.stockAnion  > 0 ? (sug.anion  * V) / cfg.stockAnion  : 0
+  const vB = cfg.stockCation > 0 ? (sug.cation * V) / cfg.stockCation : 0
+
+  const medA    = cfg.anionMedium
+  const medB    = cfg.cationMedium
+  const medC    = cfg.saltMedium
+  const medFill = cfg.fillupMedium
+
+  const naA    = medA.type    === 'buffer' ? (medA.naMM    || 0) : 0
+  const naB    = medB.type    === 'buffer' ? (medB.naMM    || 0) : 0
+  const naC    = medC.type    === 'buffer' ? (medC.naMM    || 0) : 0
+  const naFill = medFill.type === 'buffer' ? (medFill.naMM || 0) : 0
+
+  const hasBackground = naA > 0 || naB > 0 || naC > 0 || naFill > 0
+
+  let vC
+  if (hasBackground && cfg.stockSalt > 0) {
+    // Solve for vC so that total Na+ in well equals target:
+    //   target_Na*V = vA*naA + vB*naB + vC*(stockSalt_mM + naC) + (V-vA-vB-vC)*naFill
+    const stockC_mM = getMM(cfg.stockSalt, cfg.saltUnit)
+    const targetNa  = getMM(sug.salt,      cfg.saltUnit)
+    const denom = stockC_mM + naC - naFill
+    if (denom !== 0) {
+      const numer = (targetNa - naFill) * V - vA * (naA - naFill) - vB * (naB - naFill)
+      vC = Math.max(0, numer / denom)
+    } else {
+      vC = cfg.stockSalt > 0 ? (sug.salt * V) / cfg.stockSalt : 0
+    }
+  } else {
+    vC = cfg.stockSalt > 0 ? (sug.salt * V) / cfg.stockSalt : 0
+  }
+
+  const vFill = V - vA - vB - vC
+
+  // Background Na already in well from component solvents + fill-up
+  const backgroundNa_mM = vFill > 0
+    ? (naA * vA + naB * vB + naC * vC + naFill * Math.max(0, vFill)) / V
+    : (naA * vA + naB * vB + naC * vC) / V
+
+  // Volume-weighted pH estimate (H+ mixing approximation)
+  const pHEnabled = medA.type === 'buffer' || medB.type === 'buffer' || medC.type === 'buffer' || medFill.type === 'buffer'
+  let mixedPH = null
+  if (pHEnabled && V > 0) {
+    const pHA    = medA.type    === 'buffer' ? (medA.pH    || 7) : 7
+    const pHB    = medB.type    === 'buffer' ? (medB.pH    || 7) : 7
+    const pHC    = medC.type    === 'buffer' ? (medC.pH    || 7) : 7
+    const pHFill = medFill.type === 'buffer' ? (medFill.pH || 7) : 7
+    const totalH = vA * Math.pow(10, -pHA) + vB * Math.pow(10, -pHB)
+                 + Math.max(0, vC) * Math.pow(10, -pHC) + Math.max(0, vFill) * Math.pow(10, -pHFill)
+    mixedPH = +((-Math.log10(totalH / V)).toFixed(2))
+  }
+
+  return { vA, vB, vC, vFill: Math.max(0, vFill), backgroundNa_mM, mixedPH, exceeds: vFill < 0 }
+}
+
 const existingPlateData = computed(() => {
   const map = new Map();
   experiments.value.forEach(item => map.set(item.sampleId, item));
@@ -648,31 +822,39 @@ const exportSuggestionsToPlate = () => {
         return `&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(inv.code)}] ${esc(inv.name)} (${esc(store.formatNum(inv.stock))} ${esc(inv.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(vol)} µL (${esc(targetConc)} mM)<br>`;
     };
     
+    const fmt = n => Number(n).toFixed(2)
     suggestions.value.forEach((sug, i) => {
         let rOffset = Math.floor((startCol + i) / 12);
         let cOffset = (startCol + i) % 12;
 
         let targetR = startRow + rOffset;
         let targetC = cOffset;
-        
+
         if (targetR < 8 && targetC < 12) {
             let wId = String.fromCharCode(65 + targetR) + (targetC + 1);
-            
-            let vA = config.value.stockAnion > 0 ? ((sug.anion * config.value.targetVolume) / config.value.stockAnion).toFixed(2) : 0;
-            let vB = config.value.stockCation > 0 ? ((sug.cation * config.value.targetVolume) / config.value.stockCation).toFixed(2) : 0;
-            let vC = config.value.stockSalt > 0 ? ((sug.salt * config.value.targetVolume) / config.value.stockSalt).toFixed(2) : 0;
-            
-            let vTotalStocks = parseFloat(vA) + parseFloat(vB) + parseFloat(vC);
-            let vWater = (config.value.targetVolume - vTotalStocks).toFixed(2);
-            
-            let warningHtml = vWater < 0 ? `<br><span style="color:#ef4444; font-size:0.7rem;">⚠️ Vol Exceeds Limit</span>` : '';
+
+            const { vA, vB, vC, vFill, backgroundNa_mM, mixedPH, exceeds } = computeWellVolumes(sug)
+
+            let warningHtml = exceeds ? `<br><span style="color:#ef4444; font-size:0.7rem;">⚠️ Vol Exceeds Limit</span>` : '';
+
+            let bgHtml = ''
+            if (backgroundNa_mM > 0.001) {
+              bgHtml += `<span style="font-size:0.68rem; color:#f59e0b;">⊕ Background Na⁺: ${fmt(backgroundNa_mM)} mM</span><br>`
+            }
+            if (mixedPH !== null) {
+              bgHtml += `<span style="font-size:0.68rem; color:#8b5cf6;">⊕ Est. pH: ${mixedPH}</span><br>`
+            }
+
+            const fillupLabel = config.value.fillupMedium.type === 'buffer'
+              ? (config.value.fillupMedium.bufName || 'Buffer')
+              : 'MQ H₂O'
 
             let cellHtml = `<strong style="color: var(--primary);">AI Target [${sug.sampleId}]</strong><br>
-                            ${getInventoryTag(config.value.anionInv, vA, sug.anion)}
-                            ${getInventoryTag(config.value.cationInv, vB, sug.cation)}
-                            ${getInventoryTag(config.value.saltInv, vC, sug.salt)}
-                            <strong>MQ H₂O:</strong> ${vWater} µL${warningHtml}`;
-                            
+                            ${getInventoryTag(config.value.anionInv, fmt(vA), sug.anion)}
+                            ${getInventoryTag(config.value.cationInv, fmt(vB), sug.cation)}
+                            ${getInventoryTag(config.value.saltInv, fmt(vC), sug.salt)}
+                            ${bgHtml}<strong>${esc(fillupLabel)}:</strong> ${fmt(vFill)} µL${warningHtml}`;
+
             plate.wells[wId] = cellHtml;
         }
     });

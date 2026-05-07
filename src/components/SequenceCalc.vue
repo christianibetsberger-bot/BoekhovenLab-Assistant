@@ -1,8 +1,9 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
 
 const store = useLabStore()
+const saveScope = ref('Global')
 
 // --- Core Math Functions ---
 const calcSeqExtinction = (rawSeq, type) => {
@@ -115,7 +116,7 @@ const saveDnaToInventory = () => {
         sequence: rawSeq.startsWith("5'") ? rawSeq : `5'-${rawSeq}-3'`, 
         length: calculatedLength.value, gc: calculatedGc.value, tm: calculatedTm.value, 
         mw: activeMw.value, extinction: calculatedExtinction.value, oligoType: store.dnaCalc.type, 
-        manualMw: store.dnaCalc.manualMw || null, scope: store.inventoryMode
+        manualMw: store.dnaCalc.manualMw || null, scope: saveScope.value
     };
     store.inventory.unshift(newItem);
     store.saveItemToCloud(newItem);
@@ -153,8 +154,18 @@ const saveDnaToInventory = () => {
             <input type="number" v-model.number="store.dnaCalc.manualMw" step="any" placeholder="Optional override">
         </div>
         <div class="input-group">
-            <label>Path Length (cm)</label>
-            <input type="number" v-model.number="store.dnaCalc.pathLength" step="any" placeholder="e.g. 0.05">
+            <label>Path Length</label>
+            <div style="display: flex; gap: 5px; align-items: center;">
+                <button type="button" @click="store.dnaCalc.pathLength = 1"
+                    :style="store.dnaCalc.pathLength === 1 ? 'background:var(--primary);color:#fff;border-color:var(--primary);' : 'background:var(--input-bg);color:var(--text);border:1px solid var(--border);'"
+                    style="padding:5px 8px;font-size:0.73rem;font-weight:600;border-radius:6px;cursor:pointer;flex-shrink:0;white-space:nowrap;"
+                    title="Nanodrop — 1 cm pathlength">Nanodrop</button>
+                <button type="button" @click="store.dnaCalc.pathLength = 0.05"
+                    :style="store.dnaCalc.pathLength === 0.05 ? 'background:var(--primary);color:#fff;border-color:var(--primary);' : 'background:var(--input-bg);color:var(--text);border:1px solid var(--border);'"
+                    style="padding:5px 8px;font-size:0.73rem;font-weight:600;border-radius:6px;cursor:pointer;flex-shrink:0;white-space:nowrap;"
+                    title="Microdrop — 0.05 cm pathlength">Microdrop</button>
+                <input type="number" v-model.number="store.dnaCalc.pathLength" step="any" placeholder="cm" style="flex:1;min-width:0;">
+            </div>
         </div>
     </div>
     
@@ -190,8 +201,13 @@ const saveDnaToInventory = () => {
                 </select>
             </div>
         </div>
-        <div class="input-group" style="margin-bottom: 15px;">
+        <div class="input-group" style="margin-bottom: 10px;">
             <input type="text" v-model="store.dnaCalc.saveName" placeholder="Oligo Name">
+        </div>
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;padding:7px 10px;background:var(--input-bg);border-radius:6px;border:1px solid var(--border);">
+            <span style="font-size:0.73rem;opacity:0.6;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap;">Save to:</span>
+            <label class="checkbox-label"><input type="radio" value="Global" v-model="saveScope"> Global</label>
+            <label class="checkbox-label"><input type="radio" value="Personal" v-model="saveScope"> Personal</label>
         </div>
         <button style="width: 100%" @click="saveDnaToInventory" :disabled="!dnaConcentration || !store.dnaCalc.saveName">
             <i class="fas fa-download"></i> Save to Inventory

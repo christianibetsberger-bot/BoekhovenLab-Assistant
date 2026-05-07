@@ -42,177 +42,187 @@ const MODULE_META = {
   timeTracker:      { label: 'Time Tracker', icon: 'fa-clock',             component: markRaw(TimeTracker) },
 }
 
-const layout = ref({ topOrder: [], leftOrder: [], rightOrder: [], minimized: {} })
+// ── Free-placement grid layout — 12-column absolute grid ───────────────────
+const ROW_HEIGHT = 60
+const COL_COUNT  = 12
+const gridLayout     = ref([])   // [{i, x, y, w, h}] one entry per visible module
+const savedPositions = ref({})   // last position for modules that were hidden
+const dragState      = ref(null) // live drag preview  {id, x, y}
+const resizeState    = ref(null) // live resize preview {id, w, h}
+const gridContainer  = ref(null)
+const containerWidth = ref(1200)
 
-function loadLayout() { layout.value = store.loadModuleLayout() }
-function saveLayout()  { store.saveModuleLayout(layout.value) }
+function cw() { return containerWidth.value / COL_COUNT }
+
+const containerHeight = computed(() => {
+  if (!gridLayout.value.length) return 400
+  return Math.max(...gridLayout.value.map(item => {
+    const h = resizeState.value?.id === item.i ? resizeState.value.h : item.h
+    const y = dragState.value?.id  === item.i ? dragState.value.y  : item.y
+    return (y + h) * ROW_HEIGHT
+  })) + 60
+})
+
+function getModuleStyle(item) {
+  const x = dragState.value?.id  === item.i ? dragState.value.x  : item.x
+  const y = dragState.value?.id  === item.i ? dragState.value.y  : item.y
+  const w = resizeState.value?.id === item.i ? resizeState.value.w : item.w
+  const h = resizeState.value?.id === item.i ? resizeState.value.h : item.h
+  const active = dragState.value?.id === item.i || resizeState.value?.id === item.i
+  return {
+    position: 'absolute',
+    left: `${x * cw()}px`,
+    top:  `${y * ROW_HEIGHT}px`,
+    width: `${w * cw()}px`,
+    height:`${h * ROW_HEIGHT}px`,
+    zIndex: active ? 100 : 1,
+    transition: active ? 'none' : 'left 0.12s ease, top 0.12s ease',
+  }
+}
+
+function getDefaultGridLayout() {
+  return [
+    { i: 'inventoryManager',  x: 0,  y: 0,   w: 6,  h: 14 },
+    { i: 'labJournal',        x: 6,  y: 0,   w: 6,  h: 14 },
+    { i: 'reactionPlan',      x: 0,  y: 14,  w: 6,  h: 12 },
+    { i: 'matrixPlanner',     x: 6,  y: 14,  w: 6,  h: 12 },
+    { i: 'standardStock',     x: 0,  y: 26,  w: 4,  h: 10 },
+    { i: 'sequenceCalc',      x: 4,  y: 26,  w: 4,  h: 10 },
+    { i: 'screeningPlanner',  x: 8,  y: 26,  w: 4,  h: 10 },
+    { i: 'phasePredictor',    x: 0,  y: 36,  w: 12, h: 20 },
+    { i: 'lidaKinetics',      x: 0,  y: 56,  w: 12, h: 18 },
+    { i: 'wellPlateEditor',   x: 0,  y: 74,  w: 12, h: 14 },
+    { i: 'timeTracker',       x: 0,  y: 88,  w: 6,  h: 12 },
+    { i: 'archiveManager',    x: 6,  y: 88,  w: 6,  h: 12 },
+    { i: 'globalSettings',    x: 0,  y: 100, w: 12, h: 10 },
+  ]
+}
+
+const GL_KEY    = computed(() => store.user?.id ? `gl2_${store.user.id}`   : null)
+const LMETA_KEY = computed(() => store.user?.id ? `lmeta_${store.user.id}` : null)
+
+function loadGridLayout() {
+  if (!GL_KEY.value) return
+  const raw = localStorage.getItem(GL_KEY.value)
+  try { if (raw) { gridLayout.value = JSON.parse(raw); return } } catch {}
+  gridLayout.value = getDefaultGridLayout().filter(i => !isModuleHiddenForUser(i.i))
+}
+function saveGridLayout() {
+  if (GL_KEY.value) localStorage.setItem(GL_KEY.value, JSON.stringify(gridLayout.value))
+}
+
+// Layout meta stores sidebar-hidden flags + sidebar position
+const layoutMeta = ref({ sidebarHidden: {}, sidebarPosition: 'left' })
+function loadLayoutMeta() {
+  if (!LMETA_KEY.value) return
+  const raw = localStorage.getItem(LMETA_KEY.value)
+  if (raw) { try { layoutMeta.value = { ...layoutMeta.value, ...JSON.parse(raw) } } catch {} }
+  else {
+    // Migrate from old layout key
+    const oldKey = store.user?.id ? `layout_${store.user.id}` : null
+    if (oldKey) { const or = localStorage.getItem(oldKey); if (or) try {
+      const old = JSON.parse(or)
+      if (old.sidebarHidden)   layoutMeta.value.sidebarHidden   = old.sidebarHidden
+      if (old.sidebarPosition) layoutMeta.value.sidebarPosition = old.sidebarPosition
+    } catch {} }
+  }
+}
+function saveLayoutMeta() {
+  if (LMETA_KEY.value) localStorage.setItem(LMETA_KEY.value, JSON.stringify(layoutMeta.value))
+}
+
+function isInGrid(id)  { return gridLayout.value.some(item => item.i === id) }
 
 function toggleModule(id) {
-  layout.value.minimized = { ...layout.value.minimized, [id]: !layout.value.minimized[id] }
-  saveLayout()
+  if (isInGrid(id)) {
+    const item = gridLayout.value.find(i => i.i === id)
+    if (item) savedPositions.value[id] = { x: item.x, y: item.y, w: item.w, h: item.h }
+    gridLayout.value = gridLayout.value.filter(i => i.i !== id)
+  } else {
+    const saved = savedPositions.value[id]
+    const def   = getDefaultGridLayout().find(i => i.i === id) || { x: 0, y: 0, w: 6, h: 10 }
+    gridLayout.value = [...gridLayout.value, { i: id, ...(saved || def) }]
+  }
+  saveGridLayout()
 }
-function isMinimized(id) { return !!layout.value.minimized[id] }
+
 function resetLayout() {
-  layout.value = store.getDefaultModuleLayout()
-  saveLayout()
+  gridLayout.value = getDefaultGridLayout().filter(i => !isModuleHiddenForUser(i.i))
+  savedPositions.value = {}
   sidebarGroups.value = []
   saveSidebarGroups()
-  moduleSizes.value = {}
-  saveModuleSizes()
-  colSplit.value = 460
-  saveColSplit()
+  saveGridLayout()
 }
 
-// ── Per-module height resize + column-width split (2D) ────────────────────
-const moduleSizes = ref({})
-
-function loadModuleSizes() {
-  const key = store.user?.id ? `msizes_${store.user.id}` : null
-  if (!key) return
-  try { const raw = localStorage.getItem(key); if (raw) moduleSizes.value = JSON.parse(raw) }
-  catch { moduleSizes.value = {} }
+// ── Collision resolution: push overlapping modules down ──
+function overlaps(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
 }
-function saveModuleSizes() {
-  const key = store.user?.id ? `msizes_${store.user.id}` : null
-  if (key) localStorage.setItem(key, JSON.stringify(moduleSizes.value))
-}
-function moduleHeight(id) { const h = moduleSizes.value[id]; return h ? `${h}px` : undefined }
-
-// Left-column width (px) — right column takes remaining space via flex:1
-const colSplit = ref(460)
-function loadColSplit() {
-  const key = store.user?.id ? `csplit_${store.user.id}` : null
-  if (!key) return
-  const raw = localStorage.getItem(key); if (raw) colSplit.value = Number(raw) || 460
-}
-function saveColSplit() {
-  const key = store.user?.id ? `csplit_${store.user.id}` : null
-  if (key) localStorage.setItem(key, String(colSplit.value))
-}
-
-// Find the next visible module below `id` within a specific column order
-function moduleBelowInColumn(id, order) {
-  const visible = order.filter(i => !isMinimized(i) && !isModuleHiddenForUser(i))
-  const idx = visible.indexOf(id)
-  if (idx !== -1 && idx < visible.length - 1) return visible[idx + 1]
-  return null
-}
-
-// Search all columns for a visible module directly below `id`
-function moduleBelow(id) {
-  for (const order of [layout.value.leftOrder, layout.value.rightOrder, layout.value.topOrder]) {
-    const result = moduleBelowInColumn(id, order)
-    if (result) return result
+function resolveCollisions(layout, movedId) {
+  const result = layout.map(i => ({ ...i }))
+  let changed = true; let iter = 0
+  while (changed && iter++ < 50) {
+    changed = false
+    const moved = result.find(i => i.i === movedId)
+    if (!moved) break
+    for (const item of result) {
+      if (item.i === movedId) continue
+      if (overlaps(moved, item)) { item.y = moved.y + moved.h; changed = true }
+    }
+    const rest = result.filter(i => i.i !== movedId).sort((a,b) => a.y - b.y)
+    for (let i = 0; i < rest.length; i++)
+      for (let j = i+1; j < rest.length; j++)
+        if (overlaps(rest[i], rest[j])) { rest[j].y = rest[i].y + rest[i].h; changed = true }
   }
-  return null
+  return result
 }
 
-// Active resize state
-const resizing = ref(null)
-
-function startResize(id, e) {
-  e.preventDefault(); e.stopPropagation()
-  const belowId = moduleBelow(id)
-  if (!belowId) return
-  const wrapperA = document.querySelector(`[data-module-id="${id}"]`)
-  const wrapperB = document.querySelector(`[data-module-id="${belowId}"]`)
-  if (!wrapperA || !wrapperB) return
-  const startHA = wrapperA.getBoundingClientRect().height
-  const startHB = wrapperB.getBoundingClientRect().height
-  resizing.value = { id, startY: e.clientY, startHA, belowId, startHB }
-
+// ── Drag to move ──
+function startDrag(id, e) {
+  e.preventDefault()
+  const item = gridLayout.value.find(i => i.i === id)
+  if (!item) return
+  const smx = e.clientX, smy = e.clientY, sx = item.x, sy = item.y, scw = cw()
+  dragState.value = { id, x: sx, y: sy }
   const onMove = (me) => {
-    if (!resizing.value) return
-    const delta = me.clientY - resizing.value.startY
-    const total = resizing.value.startHA + resizing.value.startHB
-    // Clamp delta so neither module drops below 120px; total height stays constant
-    const clampedDelta = Math.max(
-      -(resizing.value.startHA - 120),
-      Math.min(delta, resizing.value.startHB - 120)
-    )
-    const newHA = resizing.value.startHA + clampedDelta
-    const newHB = total - newHA
-    moduleSizes.value = { ...moduleSizes.value, [id]: newHA, [resizing.value.belowId]: newHB }
+    dragState.value = {
+      id,
+      x: Math.max(0, Math.min(COL_COUNT - item.w, Math.round(sx + (me.clientX - smx) / scw))),
+      y: Math.max(0, Math.round(sy + (me.clientY - smy) / ROW_HEIGHT)),
+    }
   }
   const onUp = () => {
-    resizing.value = null; saveModuleSizes()
+    if (!dragState.value) return
+    const { x, y } = dragState.value; dragState.value = null
+    gridLayout.value = resolveCollisions(gridLayout.value.map(i => i.i === id ? {...i, x, y} : {...i}), id)
+    saveGridLayout()
     window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp)
   }
   window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp)
 }
 
-function resetModuleSize(id) {
-  const belowId = moduleBelow(id)
-  const s = { ...moduleSizes.value }; delete s[id]; if (belowId) delete s[belowId]
-  moduleSizes.value = s; saveModuleSizes()
-}
-
-// Column-width drag (left/right split)
-function startColSplit(e) {
-  e.preventDefault()
-  const startX = e.clientX, startW = colSplit.value
+// ── Resize from bottom-right corner ──
+function startGridResize(id, e) {
+  e.preventDefault(); e.stopPropagation()
+  const item = gridLayout.value.find(i => i.i === id)
+  if (!item) return
+  const smx = e.clientX, smy = e.clientY, sw = item.w, sh = item.h, scw = cw()
+  resizeState.value = { id, w: sw, h: sh }
   const onMove = (me) => {
-    colSplit.value = Math.max(180, Math.min(startW + me.clientX - startX, window.innerWidth - 240))
+    resizeState.value = {
+      id,
+      w: Math.max(2, Math.min(COL_COUNT - item.x, Math.round(sw + (me.clientX - smx) / scw))),
+      h: Math.max(4, Math.round(sh + (me.clientY - smy) / ROW_HEIGHT)),
+    }
   }
   const onUp = () => {
-    saveColSplit()
+    if (!resizeState.value) return
+    const { w, h } = resizeState.value; resizeState.value = null
+    gridLayout.value = resolveCollisions(gridLayout.value.map(i => i.i === id ? {...i, w, h} : {...i}), id)
+    saveGridLayout()
     window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp)
   }
   window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp)
-}
-
-// Track which columns have at least one visible module (drives v-show on column divs)
-const topHasVisible   = computed(() => layout.value.topOrder.some(id   => !isMinimized(id)))
-const leftHasVisible  = computed(() => layout.value.leftOrder.some(id  => !isMinimized(id)))
-const rightHasVisible = computed(() => layout.value.rightOrder.some(id => !isMinimized(id)))
-
-// Drag & drop via handle strip
-const dragging      = ref(null)
-const dragOverId    = ref(null)
-const dragOverCol   = ref(null)
-const isDragging    = ref(false)
-const dragOverEmpty = ref(null)   // 'top' | 'left' | 'right' | null
-
-const getList = c => c === 'left' ? layout.value.leftOrder : c === 'right' ? layout.value.rightOrder : layout.value.topOrder
-
-function clearDragState() {
-  dragging.value = null; dragOverId.value = null; dragOverCol.value = null
-  isDragging.value = false; dragOverEmpty.value = null
-}
-
-// Set isDragging on mousedown so columns expand BEFORE the browser initialises
-// the native drag (dragstart fires after the drag ghost is captured).
-function onHandleMouseDown()    { isDragging.value = true }
-function onHandleMouseUp()      { if (!dragging.value) isDragging.value = false }
-
-function onDragStart(id, col)   { dragging.value = { id, col }; isDragging.value = true }
-function onDragEnd()            { clearDragState() }
-function onDragOver(e, id, col) { e.preventDefault(); e.stopPropagation(); dragOverId.value = id; dragOverCol.value = col; dragOverEmpty.value = null }
-function onDrop(e, targetId, targetCol) {
-  e.preventDefault(); e.stopPropagation()
-  if (!dragging.value) return
-  const { id: srcId, col: srcCol } = dragging.value
-  const srcList = getList(srcCol), tgtList = getList(targetCol)
-  const srcIdx  = srcList.indexOf(srcId), tgtIdx = tgtList.indexOf(targetId)
-  if (srcCol === targetCol) {
-    srcList.splice(srcIdx, 1); srcList.splice(tgtIdx, 0, srcId)
-  } else {
-    srcList.splice(srcIdx, 1); tgtList.splice(tgtIdx, 0, srcId)
-  }
-  clearDragState(); saveLayout()
-}
-
-// Column-level drop: fires when dropping on empty column background (not on a module)
-function onColDragOver(e, col) { e.preventDefault(); dragOverEmpty.value = col; dragOverId.value = null; dragOverCol.value = null }
-function onColDrop(e, col) {
-  e.preventDefault()
-  if (!dragging.value) return
-  const { id: srcId, col: srcCol } = dragging.value
-  const srcList = getList(srcCol), tgtList = getList(col)
-  const srcIdx = srcList.indexOf(srcId)
-  if (srcIdx !== -1) srcList.splice(srcIdx, 1)
-  if (!tgtList.includes(srcId)) tgtList.push(srcId)
-  clearDragState(); saveLayout()
 }
 
 // Per-user module visibility overrides — listed users never see these modules
@@ -227,49 +237,40 @@ function isModuleHiddenForUser(id) {
 }
 const visibleTimeTracker = computed(() => !isModuleHiddenForUser('timeTracker'))
 
-// All module ids visible in the sidebar (excludes sidebarHidden); top → left → right order
-const allModuleIds = computed(() => {
-  const seen = new Set(); const result = []
-  const hidden = layout.value.sidebarHidden || {}
-  for (const id of [...layout.value.topOrder, ...layout.value.leftOrder, ...layout.value.rightOrder]) {
-    if (seen.has(id)) continue
-    if (hidden[id])  continue
-    if (isModuleHiddenForUser(id)) continue
-    seen.add(id); result.push(id)
-  }
-  return result
-})
+// All module ids visible in the sidebar (all MODULE_META keys, minus sidebarHidden + per-user hidden)
+const allModuleIds = computed(() =>
+  Object.keys(MODULE_META).filter(id => !layoutMeta.value.sidebarHidden?.[id] && !isModuleHiddenForUser(id))
+)
 
 // Modules removed from sidebar (can be re-added via redock panel)
 const removedModuleIds = computed(() =>
-  Object.keys(layout.value.sidebarHidden || {}).filter(id => layout.value.sidebarHidden[id])
+  Object.keys(layoutMeta.value.sidebarHidden || {}).filter(id => layoutMeta.value.sidebarHidden[id])
 )
 
 // Sidebar position and dock utilities
 const POSITION_CYCLE = ['left', 'bottom', 'right']
-const sidebarPosition = computed(() => layout.value.sidebarPosition || 'left')
+const sidebarPosition = computed(() => layoutMeta.value.sidebarPosition || 'left')
 const positionIconMap  = { left: 'fa-align-left', bottom: 'fa-align-center', right: 'fa-align-right' }
 const positionIcon     = computed(() => positionIconMap[sidebarPosition.value])
 function cyclePosition() {
-  const cur = layout.value.sidebarPosition || 'left'
-  layout.value.sidebarPosition = POSITION_CYCLE[(POSITION_CYCLE.indexOf(cur) + 1) % 3]
-  saveLayout()
+  const cur = layoutMeta.value.sidebarPosition || 'left'
+  layoutMeta.value.sidebarPosition = POSITION_CYCLE[(POSITION_CYCLE.indexOf(cur) + 1) % 3]
+  saveLayoutMeta()
 }
 
 // Sidebar remove / redock
 const showRedockPanel = ref(false)
 function removeFromSidebar(id) {
-  layout.value.sidebarHidden = { ...layout.value.sidebarHidden, [id]: true }
-  // Also remove from any group
+  layoutMeta.value.sidebarHidden = { ...layoutMeta.value.sidebarHidden, [id]: true }
   removeModuleFromGroups(id)
-  saveLayout()
+  saveLayoutMeta()
 }
 function redockModule(id) {
-  const h = { ...layout.value.sidebarHidden }
+  const h = { ...layoutMeta.value.sidebarHidden }
   delete h[id]
-  layout.value.sidebarHidden = h
+  layoutMeta.value.sidebarHidden = h
   if (!Object.values(h).some(Boolean)) showRedockPanel.value = false
-  saveLayout()
+  saveLayoutMeta()
 }
 
 let draftSaveTimeout
@@ -564,15 +565,11 @@ function sbSidebarBackgroundDrop(e) {
 
 async function initSession(user) {
   store.user = user
-  // loadCloudSettings fetches prefs + layout from Supabase and writes them into
-  // localStorage, so the subsequent loadLayout() call reads cloud-sourced data
-  // regardless of whether this is a browser tab or an isolated PWA context.
   await store.loadCloudSettings()
   store.loadCloudInventory()
-  loadLayout()
+  loadLayoutMeta()
+  loadGridLayout()
   loadSidebarGroups()
-  loadModuleSizes()
-  loadColSplit()
 }
 
 onMounted(() => {
@@ -583,6 +580,11 @@ onMounted(() => {
     if (session?.user) initSession(session.user)
     else store.user = null
   })
+  // Keep containerWidth in sync so column widths are always accurate
+  const onResize = () => { containerWidth.value = (gridContainer.value?.offsetWidth || window.innerWidth) - 4 }
+  onResize()
+  window.addEventListener('resize', onResize)
+  onUnmounted(() => window.removeEventListener('resize', onResize))
 })
 
 const signOut = async () => { await db.auth.signOut(); window.location.reload() }
@@ -624,8 +626,8 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
               <button
                 class="sidebar-btn"
                 :class="{
-                  'is-active': !isMinimized(item.id),
-                  'is-hidden': isMinimized(item.id),
+                  'is-active': isInGrid(item.id),
+                  'is-hidden': !isInGrid(item.id),
                   'sg-drop-target': sidebarDragOver === item.id && sidebarDragging?.moduleId !== item.id,
                 }"
                 :title="MODULE_META[item.id].label"
@@ -676,8 +678,8 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                     :key="memberId"
                     class="sidebar-btn sg-member-btn"
                     :class="{
-                      'is-active': !isMinimized(memberId),
-                      'is-hidden': isMinimized(memberId),
+                      'is-active': isInGrid(memberId),
+                      'is-hidden': !isInGrid(memberId),
                       'sg-drop-target': sidebarDragOver === memberId && sidebarDragging?.moduleId !== memberId,
                     }"
                     :title="MODULE_META[memberId]?.label"
@@ -801,135 +803,25 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
           <button class="small danger" @click="signOut"><i class="fas fa-sign-out-alt"></i> Log Out</button>
         </div>
 
-        <!-- Full-width top zone (Lab Journal etc.) — always rendered so it can receive drops -->
-        <div
-          class="top-zone"
-          :class="{ 'drop-zone-hover': dragOverEmpty === 'top' }"
-          @dragover="onColDragOver($event, 'top')"
-          @drop="onColDrop($event, 'top')"
-        >
-          <template v-for="id in layout.topOrder" :key="id">
+        <!-- Free-placement 12-column grid workspace -->
+        <div ref="gridContainer" class="grid-workspace" :style="{ height: containerHeight + 'px' }">
+          <template v-for="item in gridLayout" :key="item.i">
             <div
-              v-if="!isModuleHiddenForUser(id)"
-              v-show="!isMinimized(id)"
-              class="module-wrapper top-module"
-              :class="{ 'drag-over': dragOverId === id && dragOverCol === 'top' }"
-              :data-module-id="id"
-              :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden' } : {}"
-              @dragover="onDragOver($event, id, 'top')"
-              @drop="onDrop($event, id, 'top')"
+              v-if="!isModuleHiddenForUser(item.i)"
+              class="grid-module"
+              :class="{ 'grid-module--active': dragState?.id === item.i || resizeState?.id === item.i }"
+              :data-grid-id="item.i"
+              :style="getModuleStyle(item)"
             >
-              <div class="drag-handle" draggable="true"
-                @mousedown="onHandleMouseDown" @mouseup="onHandleMouseUp"
-                @dragstart="onDragStart(id, 'top')" @dragend="onDragEnd" title="Drag to reorder">
+              <div class="drag-handle" @mousedown.prevent="startDrag(item.i, $event)" title="Drag to move">
                 <i class="fas fa-grip-lines"></i>
               </div>
-              <div class="module-scroll" :style="moduleHeight(id) ? { overflowY: 'auto', overflowX: 'hidden' } : {}"><component :is="MODULE_META[id].component" /></div>
-            </div>
-            <div v-if="!isModuleHiddenForUser(id) && !isMinimized(id) && moduleBelowInColumn(id, layout.topOrder)"
-              class="module-split-bar"
-              @mousedown.prevent="startResize(id, $event)"
-              @dblclick="resetModuleSize(id)"
-              title="Drag to resize · Double-click to reset">
+              <div class="grid-module-content">
+                <component :is="MODULE_META[item.i].component" />
+              </div>
+              <div class="grid-resize-handle" @mousedown.prevent="startGridResize(item.i, $event)" title="Drag to resize"></div>
             </div>
           </template>
-          <div v-show="isDragging && !topHasVisible" class="empty-drop-hint"
-            @dragover.prevent="onColDragOver($event, 'top')"
-            @drop.prevent="onColDrop($event, 'top')">
-            <i class="fas fa-arrows-left-right"></i> Drop here — full width
-          </div>
-        </div>
-
-        <!-- Two-column workspace — flexbox so v-show:none removes column from flow -->
-        <div class="workspace-row">
-
-          <!-- Left column: always in DOM; CSS collapses when empty + not dragging -->
-          <div
-            class="ws-col ws-left"
-            :class="{ 'col-has-content': leftHasVisible, 'col-drag-open': isDragging, 'drop-zone-hover': dragOverEmpty === 'left' }"
-            :style="leftHasVisible ? { flex: `0 0 ${colSplit}px` } : {}"
-            @dragover="onColDragOver($event, 'left')"
-            @drop="onColDrop($event, 'left')"
-          >
-            <template v-for="id in layout.leftOrder" :key="id">
-              <div
-                v-if="!isModuleHiddenForUser(id)"
-                v-show="!isMinimized(id)"
-                class="module-wrapper"
-                :class="{ 'drag-over': dragOverId === id && dragOverCol === 'left' }"
-                :data-module-id="id"
-                :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden' } : {}"
-                @dragover="onDragOver($event, id, 'left')"
-                @drop="onDrop($event, id, 'left')"
-              >
-                <div class="drag-handle" draggable="true"
-                  @mousedown="onHandleMouseDown" @mouseup="onHandleMouseUp"
-                  @dragstart="onDragStart(id, 'left')" @dragend="onDragEnd" title="Drag to reorder">
-                  <i class="fas fa-grip-lines"></i>
-                </div>
-                <div class="module-scroll" :style="moduleHeight(id) ? { overflowY: 'auto', overflowX: 'hidden' } : {}"><component :is="MODULE_META[id].component" /></div>
-              </div>
-              <div v-if="!isModuleHiddenForUser(id) && !isMinimized(id) && moduleBelowInColumn(id, layout.leftOrder)"
-                class="module-split-bar"
-                @mousedown.prevent="startResize(id, $event)"
-                @dblclick="resetModuleSize(id)"
-                title="Drag to resize · Double-click to reset">
-              </div>
-            </template>
-            <div v-show="isDragging && !leftHasVisible" class="empty-drop-hint"
-              @dragover.prevent="onColDragOver($event, 'left')"
-              @drop.prevent="onColDrop($event, 'left')">
-              <i class="fas fa-compress-alt"></i> Drop here — narrow column
-            </div>
-          </div>
-
-          <!-- Column-split drag divider -->
-          <div
-            v-if="leftHasVisible && rightHasVisible"
-            class="col-split-divider"
-            @mousedown.prevent="startColSplit"
-            title="Drag to resize columns"
-          ></div>
-
-          <!-- Right column: always in DOM; CSS collapses when empty + not dragging -->
-          <div
-            class="ws-col ws-right"
-            :class="{ 'col-has-content': rightHasVisible, 'col-drag-open': isDragging, 'drop-zone-hover': dragOverEmpty === 'right' }"
-            @dragover="onColDragOver($event, 'right')"
-            @drop="onColDrop($event, 'right')"
-          >
-            <template v-for="id in layout.rightOrder" :key="id">
-              <div
-                v-if="!isModuleHiddenForUser(id)"
-                v-show="!isMinimized(id)"
-                class="module-wrapper"
-                :class="{ 'drag-over': dragOverId === id && dragOverCol === 'right' }"
-                :data-module-id="id"
-                :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden' } : {}"
-                @dragover="onDragOver($event, id, 'right')"
-                @drop="onDrop($event, id, 'right')"
-              >
-                <div class="drag-handle" draggable="true"
-                  @mousedown="onHandleMouseDown" @mouseup="onHandleMouseUp"
-                  @dragstart="onDragStart(id, 'right')" @dragend="onDragEnd" title="Drag to reorder">
-                  <i class="fas fa-grip-lines"></i>
-                </div>
-                <div class="module-scroll" :style="moduleHeight(id) ? { overflowY: 'auto', overflowX: 'hidden' } : {}"><component :is="MODULE_META[id].component" /></div>
-              </div>
-              <div v-if="!isModuleHiddenForUser(id) && !isMinimized(id) && moduleBelowInColumn(id, layout.rightOrder)"
-                class="module-split-bar"
-                @mousedown.prevent="startResize(id, $event)"
-                @dblclick="resetModuleSize(id)"
-                title="Drag to resize · Double-click to reset">
-              </div>
-            </template>
-            <div v-show="isDragging && !rightHasVisible" class="empty-drop-hint"
-              @dragover.prevent="onColDragOver($event, 'right')"
-              @drop.prevent="onColDrop($event, 'right')">
-              <i class="fas fa-expand-alt"></i> Drop here — wide column
-            </div>
-          </div>
-
         </div>
       </div>
 
@@ -1181,57 +1073,47 @@ body { padding: 0 !important; margin: 0 !important; }
 .top-bar .user-info { margin-left: auto; }
 .user-info { font-size: 0.9rem; opacity: 0.8; display: flex; align-items: center; gap: 6px; }
 
-/* ══ Workspace — flexbox so v-show:display:none removes a column from layout ══ */
-.workspace-row {
-  display: flex;
-  gap: 20px;
-  align-items: flex-start;
+/* ══ Free-placement grid workspace ══ */
+.grid-workspace {
+  position: relative;
   width: 100%;
 }
 
-.ws-col {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  min-width: 0;
-}
-
-/* ── Column visibility: CSS-class driven so elements stay in DOM ──
-   Columns without content and not in a drag collapse to nothing.
-   col-has-content / col-drag-open are set by Vue bindings. */
-.ws-left.col-has-content,
-.ws-left.col-drag-open  { flex: 0 0 460px; }
-
-.ws-right.col-has-content,
-.ws-right.col-drag-open  { flex: 1; min-width: 0; }
-
-/* Collapse when neither class is present */
-.ws-col:not(.col-has-content):not(.col-drag-open) {
-  flex: 0 0 0 !important;
-  min-width: 0 !important;
+.grid-module {
+  position: absolute;
+  box-sizing: border-box;
   overflow: hidden;
-  gap: 0 !important;
-}
-
-/* ══ Module wrappers ══ */
-.module-wrapper {
   border-radius: var(--radius);
-  transition: box-shadow 0.15s;
   container-type: inline-size;
-  /* Always a flex column so drag-handle stays at top and module-scroll fills remaining space.
-     overflow: hidden is applied via inline :style only when an explicit height is set,
-     so unresized modules never clip their dropdown menus. */
   display: flex;
   flex-direction: column;
 }
-.module-wrapper.drag-over { box-shadow: 0 0 0 2px var(--primary); }
 
-/* Scrollable content area — flex: 1 so it fills all space between drag-handle and
-   the wrapper's bottom.  Overflow is applied via inline style only when height is set. */
-.module-scroll {
+.grid-module--active { z-index: 100; }
+
+.grid-module-content {
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
+
+.grid-resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 18px;
+  height: 18px;
+  cursor: se-resize;
+  background: linear-gradient(135deg, transparent 50%, color-mix(in srgb, var(--primary) 40%, transparent) 50%);
+  border-radius: 0 0 var(--radius) 0;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+  user-select: none;
+  z-index: 2;
+}
+.grid-resize-handle:hover { opacity: 1; }
 
 /* ── Responsive card headers at narrow widths ──
    Targets .flex-between pattern used in all module card headers.
@@ -1261,92 +1143,11 @@ body { padding: 0 !important; margin: 0 !important; }
   cursor: grab; opacity: 0.35;
   transition: opacity 0.15s;
   font-size: 0.65rem; color: var(--text);
+  z-index: 2;
+  position: relative;
 }
 .drag-handle:hover  { opacity: 0.9; }
 .drag-handle:active { cursor: grabbing; }
-
-/* Column split drag divider */
-.col-split-divider {
-  width: 6px;
-  flex-shrink: 0;
-  cursor: col-resize;
-  border-radius: 3px;
-  background: var(--border);
-  opacity: 0.3;
-  align-self: stretch;
-  transition: opacity 0.15s, background 0.15s;
-}
-.col-split-divider:hover { opacity: 0.85; background: var(--primary); }
-
-/* Split bar — sits BETWEEN adjacent modules so it is never clipped by a module wrapper */
-.module-split-bar {
-  height: 12px;
-  margin: 4px 0;
-  cursor: ns-resize;
-  border-radius: 4px;
-  background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0.35;
-  transition: opacity 0.15s, background 0.15s;
-  flex-shrink: 0;
-  user-select: none;
-}
-.module-split-bar::after {
-  content: '⋯';
-  font-size: 0.55rem;
-  letter-spacing: 3px;
-  opacity: 0.7;
-  pointer-events: none;
-}
-.module-split-bar:hover {
-  opacity: 1;
-  background: color-mix(in srgb, var(--primary) 12%, var(--panel-bg));
-}
-
-@media (max-width: 1200px) {
-  .workspace-row { flex-direction: column; }
-  .ws-left.col-has-content,
-  .ws-left.col-drag-open { flex: 1 1 auto; }
-}
-
-/* ══ Top zone wrapper ══ */
-.top-zone {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-/* ══ Empty-column drop hints ══ */
-.empty-drop-hint {
-  border: 2px dashed var(--border);
-  border-radius: var(--radius);
-  padding: 28px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 80px;
-  color: var(--text);
-  font-size: 0.82rem;
-  opacity: 0.4;
-  transition: opacity 0.15s, border-color 0.15s, color 0.15s;
-  cursor: copy;
-}
-
-.ws-col.drop-zone-hover,
-.top-zone.drop-zone-hover {
-  background: color-mix(in srgb, var(--primary) 6%, transparent);
-  border-radius: var(--radius);
-}
-
-.ws-col.drop-zone-hover .empty-drop-hint,
-.top-zone.drop-zone-hover .empty-drop-hint {
-  opacity: 0.9;
-  border-color: var(--primary);
-  color: var(--primary);
-}
 
 /* ══════════════════════════════════════════════════════════════════════
    SIDEBAR GROUPS

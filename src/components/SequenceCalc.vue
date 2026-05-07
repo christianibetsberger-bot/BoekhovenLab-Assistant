@@ -155,16 +155,16 @@ const saveDnaToInventory = () => {
         </div>
         <div class="input-group">
             <label>Path Length</label>
-            <div style="display: flex; gap: 5px; align-items: center;">
+            <div style="display:flex; flex-wrap:wrap; gap:4px; align-items:center;">
                 <button type="button" @click="store.dnaCalc.pathLength = 1"
                     :style="store.dnaCalc.pathLength === 1 ? 'background:var(--primary);color:#fff;border-color:var(--primary);' : 'background:var(--input-bg);color:var(--text);border:1px solid var(--border);'"
-                    style="padding:5px 8px;font-size:0.73rem;font-weight:600;border-radius:6px;cursor:pointer;flex-shrink:0;white-space:nowrap;"
-                    title="Nanodrop — 1 cm pathlength">Nanodrop</button>
+                    style="padding:4px 7px;font-size:0.7rem;font-weight:600;border-radius:6px;cursor:pointer;"
+                    title="Nanodrop — 1 cm pathlength">ND 1 cm</button>
                 <button type="button" @click="store.dnaCalc.pathLength = 0.05"
                     :style="store.dnaCalc.pathLength === 0.05 ? 'background:var(--primary);color:#fff;border-color:var(--primary);' : 'background:var(--input-bg);color:var(--text);border:1px solid var(--border);'"
-                    style="padding:5px 8px;font-size:0.73rem;font-weight:600;border-radius:6px;cursor:pointer;flex-shrink:0;white-space:nowrap;"
-                    title="Microdrop — 0.05 cm pathlength">Microdrop</button>
-                <input type="number" v-model.number="store.dnaCalc.pathLength" step="any" placeholder="cm" style="flex:1;min-width:0;">
+                    style="padding:4px 7px;font-size:0.7rem;font-weight:600;border-radius:6px;cursor:pointer;"
+                    title="Microdrop — 0.05 cm pathlength">µD 0.05 cm</button>
+                <input type="number" v-model.number="store.dnaCalc.pathLength" step="any" placeholder="cm" style="flex:1;min-width:50px;">
             </div>
         </div>
     </div>

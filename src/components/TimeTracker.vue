@@ -508,11 +508,35 @@
             </div>
             <div class="input-group">
               <label>Projects</label>
-              <textarea
-                :value="settings.custom_projects.join('\n')"
-                @change="e => { settings.custom_projects = e.target.value.split('\n').map(s => s.trim()).filter(Boolean); saveSettings() }"
-                rows="7" style="font-size:0.78rem; font-family:monospace;"
-              ></textarea>
+              <div class="tt-chip-list">
+                <span v-for="proj in settings.custom_projects" :key="proj" class="tt-chip">
+                  <span class="tt-chip-text">{{ proj }}</span>
+                  <button
+                    type="button"
+                    class="tt-chip-x"
+                    @click="removeProjectFromSettings(proj)"
+                    :title="`Remove ${proj}`"
+                  >×</button>
+                </span>
+                <span v-if="!settings.custom_projects.length" class="tt-chip-empty">No projects yet — add one below.</span>
+              </div>
+              <div class="tt-chip-add">
+                <input
+                  type="text"
+                  v-model="newSettingsProjectName"
+                  placeholder="Add new project…"
+                  @keyup.enter="addProjectFromSettings"
+                />
+                <button
+                  type="button"
+                  class="small"
+                  @click="addProjectFromSettings"
+                  :disabled="!newSettingsProjectName.trim()"
+                >
+                  <i class="fas fa-plus"></i> Add
+                </button>
+              </div>
+              <p class="tt-chip-hint">Changes apply to every project selector instantly.</p>
             </div>
           </div>
         </section>
@@ -634,11 +658,6 @@ async function ensureTaskSaved(name) {
 }
 
 // ── Settings: manage tasks list ──────────────────────────────────────────
-// Adds/removes flow through saveSettings() → Supabase upsert + bumpTT(),
-// so every task selector (the four in this module + the two in TopBarClock)
-// picks up the change automatically. Both helpers roll back the optimistic
-// local update if the upsert fails, so the UI never claims something is
-// saved when it isn't.
 const newSettingsTaskName = ref('')
 async function addTaskFromSettings() {
   const name = newSettingsTaskName.value.trim()
@@ -654,6 +673,26 @@ async function removeTaskFromSettings(name) {
   settings.custom_tasks = settings.custom_tasks.filter(t => t !== name)
   await saveSettings()
   if (settingsError.value) settings.custom_tasks = prev
+}
+
+// ── Settings: manage projects list (same pattern as tasks) ───────────────
+const newSettingsProjectName = ref('')
+async function addProjectFromSettings() {
+  const name = newSettingsProjectName.value.trim()
+  newSettingsProjectName.value = ''
+  if (!name || settings.custom_projects.includes(name)) return
+  const prev = settings.custom_projects
+  settings.custom_projects = [...settings.custom_projects, name].sort()
+  ttProjectList.value = settings.custom_projects
+  await saveSettings()
+  if (settingsError.value) settings.custom_projects = prev
+}
+async function removeProjectFromSettings(name) {
+  const prev = settings.custom_projects
+  settings.custom_projects = settings.custom_projects.filter(p => p !== name)
+  ttProjectList.value = settings.custom_projects
+  await saveSettings()
+  if (settingsError.value) settings.custom_projects = prev
 }
 function onTaskChange(field, val) {
   if (val === '__new__') {

@@ -60,6 +60,60 @@ function resetLayout() {
   saveSidebarGroups()
 }
 
+// ── Per-module height resize ───────────────────────────────────────────────
+// Stores explicit pixel heights; undefined = natural height (CSS auto).
+const moduleSizes = ref({})
+
+function loadModuleSizes() {
+  const key = store.user?.id ? `msizes_${store.user.id}` : null
+  if (!key) return
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw) moduleSizes.value = JSON.parse(raw)
+  } catch { moduleSizes.value = {} }
+}
+function saveModuleSizes() {
+  const key = store.user?.id ? `msizes_${store.user.id}` : null
+  if (key) localStorage.setItem(key, JSON.stringify(moduleSizes.value))
+}
+function moduleHeight(id) {
+  const h = moduleSizes.value[id]
+  return h ? `${h}px` : undefined
+}
+
+// Active resize state
+const resizing = ref(null)   // { id, startY, startH }
+
+function startResize(id, e) {
+  e.preventDefault()
+  e.stopPropagation()
+  const wrapper = e.currentTarget.parentElement
+  const startH = wrapper.getBoundingClientRect().height
+  resizing.value = { id, startY: e.clientY, startH }
+
+  const onMove = (me) => {
+    if (!resizing.value) return
+    const delta = me.clientY - resizing.value.startY
+    const newH = Math.max(120, resizing.value.startH + delta)
+    moduleSizes.value = { ...moduleSizes.value, [id]: newH }
+  }
+  const onUp = () => {
+    resizing.value = null
+    saveModuleSizes()
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
+
+function resetModuleSize(id) {
+  const s = { ...moduleSizes.value }
+  delete s[id]
+  moduleSizes.value = s
+  saveModuleSizes()
+}
+
 // Track which columns have at least one visible module (drives v-show on column divs)
 const topHasVisible   = computed(() => layout.value.topOrder.some(id   => !isMinimized(id)))
 const leftHasVisible  = computed(() => layout.value.leftOrder.some(id  => !isMinimized(id)))
@@ -306,6 +360,19 @@ function disbandGroup(groupId) {
   closeGroupEditor()
 }
 
+function removeMemberFromGroup(groupId, moduleId) {
+  const idx = sidebarGroups.value.findIndex(g => g.id === groupId)
+  if (idx === -1) return
+  const newIds = sidebarGroups.value[idx].moduleIds.filter(m => m !== moduleId)
+  if (newIds.length < 2) {
+    // Group would have 0 or 1 member — disband it
+    disbandGroup(groupId)
+  } else {
+    sidebarGroups.value[idx] = { ...sidebarGroups.value[idx], moduleIds: newIds }
+    saveSidebarGroups()
+  }
+}
+
 // Close editor on Escape
 function onKeydown(e) {
   if (e.key === 'Escape' && groupEditor.value) closeGroupEditor()
@@ -457,6 +524,7 @@ async function initSession(user) {
   store.loadCloudInventory()
   loadLayout()
   loadSidebarGroups()
+  loadModuleSizes()
 }
 
 onMounted(() => {
@@ -651,6 +719,24 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
             </button>
           </div>
 
+          <label class="sg-editor-label">Members</label>
+          <div class="sg-member-chips">
+            <span
+              v-for="mid in (sidebarGroups.find(g => g.id === groupEditor.group.id)?.moduleIds ?? [])"
+              :key="mid"
+              class="sg-member-chip"
+              :title="MODULE_META[mid]?.label"
+            >
+              <i class="fas" :class="MODULE_META[mid]?.icon" style="font-size:0.7rem;"></i>
+              {{ MODULE_META[mid]?.label ?? mid }}
+              <button
+                class="sg-chip-remove"
+                @click="removeMemberFromGroup(groupEditor.group.id, mid)"
+                title="Remove from group"
+              >×</button>
+            </span>
+          </div>
+
           <div class="sg-editor-actions">
             <button class="sg-editor-save" @click="saveGroupEditor">Save</button>
             <button class="sg-editor-disband" @click="disbandGroup(groupEditor.group.id)">Disband</button>
@@ -680,6 +766,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
               v-show="!isMinimized(id)"
               class="module-wrapper top-module"
               :class="{ 'drag-over': dragOverId === id && dragOverCol === 'top' }"
+              :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden' } : {}"
               @dragover="onDragOver($event, id, 'top')"
               @drop="onDrop($event, id, 'top')"
             >
@@ -689,6 +776,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                 <i class="fas fa-grip-lines"></i>
               </div>
               <component :is="MODULE_META[id].component" />
+              <div class="resize-handle" @mousedown="startResize(id, $event)" @dblclick="resetModuleSize(id)" title="Drag to resize · Double-click to reset"></div>
             </div>
           </template>
           <div v-show="isDragging && !topHasVisible" class="empty-drop-hint"
@@ -714,6 +802,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                 v-show="!isMinimized(id)"
                 class="module-wrapper"
                 :class="{ 'drag-over': dragOverId === id && dragOverCol === 'left' }"
+                :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden' } : {}"
                 @dragover="onDragOver($event, id, 'left')"
                 @drop="onDrop($event, id, 'left')"
               >
@@ -723,6 +812,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                   <i class="fas fa-grip-lines"></i>
                 </div>
                 <component :is="MODULE_META[id].component" />
+                <div class="resize-handle" @mousedown="startResize(id, $event)" @dblclick="resetModuleSize(id)" title="Drag to resize · Double-click to reset"></div>
               </div>
             </template>
             <div v-show="isDragging && !leftHasVisible" class="empty-drop-hint"
@@ -745,6 +835,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                 v-show="!isMinimized(id)"
                 class="module-wrapper"
                 :class="{ 'drag-over': dragOverId === id && dragOverCol === 'right' }"
+                :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden' } : {}"
                 @dragover="onDragOver($event, id, 'right')"
                 @drop="onDrop($event, id, 'right')"
               >
@@ -754,6 +845,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                   <i class="fas fa-grip-lines"></i>
                 </div>
                 <component :is="MODULE_META[id].component" />
+                <div class="resize-handle" @mousedown="startResize(id, $event)" @dblclick="resetModuleSize(id)" title="Drag to resize · Double-click to reset"></div>
               </div>
             </template>
             <div v-show="isDragging && !rightHasVisible" class="empty-drop-hint"
@@ -1086,6 +1178,30 @@ body { padding: 0 !important; margin: 0 !important; }
 .drag-handle:hover  { opacity: 0.9; }
 .drag-handle:active { cursor: grabbing; }
 
+/* Resize handle — bottom edge of each module */
+.resize-handle {
+  height: 6px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  cursor: ns-resize;
+  opacity: 0.28;
+  transition: opacity 0.15s, background 0.15s;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.resize-handle::after {
+  content: '⋯';
+  font-size: 0.5rem;
+  letter-spacing: 2px;
+  opacity: 0.6;
+  pointer-events: none;
+}
+.resize-handle:hover { opacity: 0.85; background: color-mix(in srgb, var(--primary) 10%, var(--panel-bg)); }
+
 @media (max-width: 1200px) {
   .workspace-row { flex-direction: column; }
   .ws-left.col-has-content,
@@ -1351,4 +1467,38 @@ body { padding: 0 !important; margin: 0 !important; }
 .sg-editor-disband:hover { background: rgba(220,50,50,0.20); transform: translateY(-1px); }
 .dark-mode .sg-editor-disband { color: #f87171; border-color: rgba(248,113,113,0.30); background: rgba(248,113,113,0.08); }
 .dark-mode .sg-editor-disband:hover { background: rgba(248,113,113,0.18); }
+
+/* Member chips inside group editor */
+.sg-member-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 12px;
+  min-height: 28px;
+}
+.sg-member-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 7px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+.sg-chip-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0 1px;
+  color: inherit;
+  opacity: 0.5;
+  transition: opacity 0.12s;
+}
+.sg-chip-remove:hover { opacity: 1; color: #e03535; }
 </style>

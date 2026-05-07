@@ -247,16 +247,18 @@ function startGridResize(id, e) {
   const smx = e.clientX, smy = e.clientY, sw = item.w, sh = item.h, scw = cw()
   resizeState.value = { id, w: sw, h: sh }
   const onMove = (me) => {
-    resizeState.value = {
-      id,
-      w: Math.max(2, Math.min(COL_COUNT - item.x, Math.round(sw + (me.clientX - smx) / scw))),
-      h: Math.max(4, Math.round(sh + (me.clientY - smy) / ROW_HEIGHT)),
-    }
+    const nw = Math.max(2, Math.min(COL_COUNT - item.x, Math.round(sw + (me.clientX - smx) / scw)))
+    const nh = Math.max(4, Math.round(sh + (me.clientY - smy) / ROW_HEIGHT))
+    resizeState.value = { id, w: nw, h: nh }
+    const preview = gridLayout.value.map(i => i.i === id ? {...i, w: nw, h: nh} : {...i})
+    bumpedLayout.value = resolveCollisions(preview, id)
   }
   const onUp = () => {
     if (!resizeState.value) return
     const { w, h } = resizeState.value; resizeState.value = null
-    gridLayout.value = applyGravity(gridLayout.value.map(i => i.i === id ? {...i, w, h} : {...i}))
+    const base = bumpedLayout.value ?? gridLayout.value.map(i => i.i === id ? {...i, w, h} : {...i})
+    bumpedLayout.value = null
+    gridLayout.value = applyGravity(base)
     saveGridLayout()
     window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp)
   }

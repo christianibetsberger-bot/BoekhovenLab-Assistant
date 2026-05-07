@@ -90,12 +90,19 @@ function saveColSplit() {
   if (key) localStorage.setItem(key, String(colSplit.value))
 }
 
-// Find the next visible module below `id` in the same column (for paired resize)
+// Find the next visible module below `id` within a specific column order
+function moduleBelowInColumn(id, order) {
+  const visible = order.filter(i => !isMinimized(i) && !isModuleHiddenForUser(i))
+  const idx = visible.indexOf(id)
+  if (idx !== -1 && idx < visible.length - 1) return visible[idx + 1]
+  return null
+}
+
+// Search all columns for a visible module directly below `id`
 function moduleBelow(id) {
   for (const order of [layout.value.leftOrder, layout.value.rightOrder, layout.value.topOrder]) {
-    const visible = order.filter(i => !isMinimized(i) && !isModuleHiddenForUser(i))
-    const idx = visible.indexOf(id)
-    if (idx !== -1 && idx < visible.length - 1) return visible[idx + 1]
+    const result = moduleBelowInColumn(id, order)
+    if (result) return result
   }
   return null
 }
@@ -105,27 +112,27 @@ const resizing = ref(null)
 
 function startResize(id, e) {
   e.preventDefault(); e.stopPropagation()
-  const wrapperA = document.querySelector(`[data-module-id="${id}"]`)
-  if (!wrapperA) return
-  const startHA = wrapperA.getBoundingClientRect().height
   const belowId = moduleBelow(id)
-  let startHB = null
-  if (belowId) {
-    const wB = document.querySelector(`[data-module-id="${belowId}"]`)
-    if (wB) startHB = wB.getBoundingClientRect().height
-  }
+  if (!belowId) return
+  const wrapperA = document.querySelector(`[data-module-id="${id}"]`)
+  const wrapperB = document.querySelector(`[data-module-id="${belowId}"]`)
+  if (!wrapperA || !wrapperB) return
+  const startHA = wrapperA.getBoundingClientRect().height
+  const startHB = wrapperB.getBoundingClientRect().height
   resizing.value = { id, startY: e.clientY, startHA, belowId, startHB }
 
   const onMove = (me) => {
     if (!resizing.value) return
     const delta = me.clientY - resizing.value.startY
-    const newHA = Math.max(120, resizing.value.startHA + delta)
-    if (resizing.value.belowId && resizing.value.startHB !== null) {
-      const newHB = Math.max(120, resizing.value.startHB - delta)
-      moduleSizes.value = { ...moduleSizes.value, [id]: newHA, [resizing.value.belowId]: newHB }
-    } else {
-      moduleSizes.value = { ...moduleSizes.value, [id]: newHA }
-    }
+    const total = resizing.value.startHA + resizing.value.startHB
+    // Clamp delta so neither module drops below 120px; total height stays constant
+    const clampedDelta = Math.max(
+      -(resizing.value.startHA - 120),
+      Math.min(delta, resizing.value.startHB - 120)
+    )
+    const newHA = resizing.value.startHA + clampedDelta
+    const newHB = total - newHA
+    moduleSizes.value = { ...moduleSizes.value, [id]: newHA, [resizing.value.belowId]: newHB }
   }
   const onUp = () => {
     resizing.value = null; saveModuleSizes()
@@ -808,7 +815,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
               class="module-wrapper top-module"
               :class="{ 'drag-over': dragOverId === id && dragOverCol === 'top' }"
               :data-module-id="id"
-              :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden', display: 'flex', flexDirection: 'column' } : {}"
+              :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden' } : {}"
               @dragover="onDragOver($event, id, 'top')"
               @drop="onDrop($event, id, 'top')"
             >
@@ -817,8 +824,13 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                 @dragstart="onDragStart(id, 'top')" @dragend="onDragEnd" title="Drag to reorder">
                 <i class="fas fa-grip-lines"></i>
               </div>
-              <component :is="MODULE_META[id].component" />
-              <div class="resize-handle" @mousedown="startResize(id, $event)" @dblclick="resetModuleSize(id)" title="Drag to resize · Double-click to reset"></div>
+              <div class="module-scroll" :style="moduleHeight(id) ? { overflowY: 'auto', overflowX: 'hidden' } : {}"><component :is="MODULE_META[id].component" /></div>
+            </div>
+            <div v-if="!isModuleHiddenForUser(id) && !isMinimized(id) && moduleBelowInColumn(id, layout.topOrder)"
+              class="module-split-bar"
+              @mousedown.prevent="startResize(id, $event)"
+              @dblclick="resetModuleSize(id)"
+              title="Drag to resize · Double-click to reset">
             </div>
           </template>
           <div v-show="isDragging && !topHasVisible" class="empty-drop-hint"
@@ -846,7 +858,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                 class="module-wrapper"
                 :class="{ 'drag-over': dragOverId === id && dragOverCol === 'left' }"
                 :data-module-id="id"
-                :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden', display: 'flex', flexDirection: 'column' } : {}"
+                :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden' } : {}"
                 @dragover="onDragOver($event, id, 'left')"
                 @drop="onDrop($event, id, 'left')"
               >
@@ -855,8 +867,13 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                   @dragstart="onDragStart(id, 'left')" @dragend="onDragEnd" title="Drag to reorder">
                   <i class="fas fa-grip-lines"></i>
                 </div>
-                <component :is="MODULE_META[id].component" />
-                <div class="resize-handle" @mousedown="startResize(id, $event)" @dblclick="resetModuleSize(id)" title="Drag to resize · Double-click to reset"></div>
+                <div class="module-scroll" :style="moduleHeight(id) ? { overflowY: 'auto', overflowX: 'hidden' } : {}"><component :is="MODULE_META[id].component" /></div>
+              </div>
+              <div v-if="!isModuleHiddenForUser(id) && !isMinimized(id) && moduleBelowInColumn(id, layout.leftOrder)"
+                class="module-split-bar"
+                @mousedown.prevent="startResize(id, $event)"
+                @dblclick="resetModuleSize(id)"
+                title="Drag to resize · Double-click to reset">
               </div>
             </template>
             <div v-show="isDragging && !leftHasVisible" class="empty-drop-hint"
@@ -888,7 +905,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                 class="module-wrapper"
                 :class="{ 'drag-over': dragOverId === id && dragOverCol === 'right' }"
                 :data-module-id="id"
-                :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden', display: 'flex', flexDirection: 'column' } : {}"
+                :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden' } : {}"
                 @dragover="onDragOver($event, id, 'right')"
                 @drop="onDrop($event, id, 'right')"
               >
@@ -897,8 +914,13 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                   @dragstart="onDragStart(id, 'right')" @dragend="onDragEnd" title="Drag to reorder">
                   <i class="fas fa-grip-lines"></i>
                 </div>
-                <component :is="MODULE_META[id].component" />
-                <div class="resize-handle" @mousedown="startResize(id, $event)" @dblclick="resetModuleSize(id)" title="Drag to resize · Double-click to reset"></div>
+                <div class="module-scroll" :style="moduleHeight(id) ? { overflowY: 'auto', overflowX: 'hidden' } : {}"><component :is="MODULE_META[id].component" /></div>
+              </div>
+              <div v-if="!isModuleHiddenForUser(id) && !isMinimized(id) && moduleBelowInColumn(id, layout.rightOrder)"
+                class="module-split-bar"
+                @mousedown.prevent="startResize(id, $event)"
+                @dblclick="resetModuleSize(id)"
+                title="Drag to resize · Double-click to reset">
               </div>
             </template>
             <div v-show="isDragging && !rightHasVisible" class="empty-drop-hint"
@@ -1170,7 +1192,7 @@ body { padding: 0 !important; margin: 0 !important; }
 .ws-col {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 0;
   min-width: 0;
 }
 
@@ -1195,10 +1217,21 @@ body { padding: 0 !important; margin: 0 !important; }
 .module-wrapper {
   border-radius: var(--radius);
   transition: box-shadow 0.15s;
-  /* Container context so child elements can respond to the module's own width */
   container-type: inline-size;
+  /* Always a flex column so drag-handle stays at top and module-scroll fills remaining space.
+     overflow: hidden is applied via inline :style only when an explicit height is set,
+     so unresized modules never clip their dropdown menus. */
+  display: flex;
+  flex-direction: column;
 }
 .module-wrapper.drag-over { box-shadow: 0 0 0 2px var(--primary); }
+
+/* Scrollable content area — flex: 1 so it fills all space between drag-handle and
+   the wrapper's bottom.  Overflow is applied via inline style only when height is set. */
+.module-scroll {
+  flex: 1;
+  min-height: 0;
+}
 
 /* ── Responsive card headers at narrow widths ──
    Targets .flex-between pattern used in all module card headers.
@@ -1221,6 +1254,7 @@ body { padding: 0 !important; margin: 0 !important; }
 .drag-handle {
   display: flex; align-items: center; justify-content: center;
   height: 14px;
+  flex-shrink: 0;
   background: var(--panel-bg);
   border: 1px solid var(--border); border-bottom: none;
   border-radius: var(--radius) var(--radius) 0 0;
@@ -1244,29 +1278,32 @@ body { padding: 0 !important; margin: 0 !important; }
 }
 .col-split-divider:hover { opacity: 0.85; background: var(--primary); }
 
-/* Resize handle — bottom edge of each module */
-.resize-handle {
-  height: 6px;
-  background: var(--panel-bg);
-  border: 1px solid var(--border);
-  border-top: none;
-  border-radius: 0 0 var(--radius) var(--radius);
+/* Split bar — sits BETWEEN adjacent modules so it is never clipped by a module wrapper */
+.module-split-bar {
+  height: 12px;
+  margin: 4px 0;
   cursor: ns-resize;
-  opacity: 0.28;
-  transition: opacity 0.15s, background 0.15s;
-  flex-shrink: 0;
+  border-radius: 4px;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
+  opacity: 0.35;
+  transition: opacity 0.15s, background 0.15s;
+  flex-shrink: 0;
+  user-select: none;
 }
-.resize-handle::after {
+.module-split-bar::after {
   content: '⋯';
-  font-size: 0.5rem;
-  letter-spacing: 2px;
-  opacity: 0.6;
+  font-size: 0.55rem;
+  letter-spacing: 3px;
+  opacity: 0.7;
   pointer-events: none;
 }
-.resize-handle:hover { opacity: 0.85; background: color-mix(in srgb, var(--primary) 10%, var(--panel-bg)); }
+.module-split-bar:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--primary) 12%, var(--panel-bg));
+}
 
 @media (max-width: 1200px) {
   .workspace-row { flex-direction: column; }
@@ -1278,7 +1315,7 @@ body { padding: 0 !important; margin: 0 !important; }
 .top-zone {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 0;
 }
 
 /* ══ Empty-column drop hints ══ */

@@ -49,6 +49,7 @@ const gridLayout     = ref([])   // [{i, x, y, w, h}] one entry per visible modu
 const savedPositions = ref({})   // last position for modules that were hidden
 const dragState      = ref(null) // live drag preview  {id, x, y}
 const resizeState    = ref(null) // live resize preview {id, w, h}
+const bumpedLayout   = ref(null) // collision-resolved layout computed during drag
 const gridContainer  = ref(null)
 const containerWidth = ref(1200)
 
@@ -58,24 +59,34 @@ const containerHeight = computed(() => {
   if (!gridLayout.value.length) return 400
   return Math.max(...gridLayout.value.map(item => {
     const h = resizeState.value?.id === item.i ? resizeState.value.h : item.h
-    const y = dragState.value?.id  === item.i ? dragState.value.y  : item.y
+    let y
+    if (dragState.value?.id === item.i) y = dragState.value.y
+    else if (bumpedLayout.value) y = bumpedLayout.value.find(i => i.i === item.i)?.y ?? item.y
+    else y = item.y
     return (y + h) * ROW_HEIGHT
   })) + 60
 })
 
 function getModuleStyle(item) {
-  const x = dragState.value?.id  === item.i ? dragState.value.x  : item.x
-  const y = dragState.value?.id  === item.i ? dragState.value.y  : item.y
-  const w = resizeState.value?.id === item.i ? resizeState.value.w : item.w
-  const h = resizeState.value?.id === item.i ? resizeState.value.h : item.h
-  const active = dragState.value?.id === item.i || resizeState.value?.id === item.i
+  const isDragged = dragState.value?.id === item.i
+  const isResized = resizeState.value?.id === item.i
+  let x = item.x, y = item.y, w = item.w, h = item.h
+  if (isDragged) {
+    x = dragState.value.x; y = dragState.value.y
+  } else if (isResized) {
+    w = resizeState.value.w; h = resizeState.value.h
+  } else if (bumpedLayout.value) {
+    const bumped = bumpedLayout.value.find(i => i.i === item.i)
+    if (bumped) { x = bumped.x; y = bumped.y }
+  }
+  const active = isDragged || isResized
   return {
     position: 'absolute',
     left: `${x * cw()}px`,
     top:  `${y * ROW_HEIGHT}px`,
     width: `${w * cw()}px`,
     height:`${h * ROW_HEIGHT}px`,
-    zIndex: active ? 100 : 1,
+    zIndex: isDragged ? 100 : 1,
     transition: active ? 'none' : 'left 0.12s ease, top 0.12s ease',
   }
 }
@@ -173,6 +184,35 @@ function applyGravity(layout) {
   return result
 }
 
+// ── Collision detection & resolution ──
+function overlaps(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x &&
+         a.y < b.y + b.h && a.y + a.h > b.y
+}
+
+// Push all non-moved modules downward to resolve overlaps with the moved module
+// and with each other. The moved module is absolute authority.
+function resolveCollisions(layout, movedId) {
+  const result = layout.map(i => ({...i}))
+  let changed = true
+  for (let iter = 0; iter < 50 && changed; iter++) {
+    changed = false
+    for (const b of result) {
+      if (b.i === movedId) continue
+      for (const a of result) {
+        if (a.i === b.i) continue
+        if (!overlaps(a, b)) continue
+        // a has priority over b when a is the dragged module or sits higher (lower y)
+        if (a.i === movedId || a.y <= b.y) {
+          const newY = a.y + a.h
+          if (b.y < newY) { b.y = newY; changed = true }
+        }
+      }
+    }
+  }
+  return result
+}
+
 // ── Drag to move ──
 function startDrag(id, e) {
   e.preventDefault()
@@ -181,16 +221,18 @@ function startDrag(id, e) {
   const smx = e.clientX, smy = e.clientY, sx = item.x, sy = item.y, scw = cw()
   dragState.value = { id, x: sx, y: sy }
   const onMove = (me) => {
-    dragState.value = {
-      id,
-      x: Math.max(0, Math.min(COL_COUNT - item.w, Math.round(sx + (me.clientX - smx) / scw))),
-      y: Math.max(0, Math.round(sy + (me.clientY - smy) / ROW_HEIGHT)),
-    }
+    const nx = Math.max(0, Math.min(COL_COUNT - item.w, Math.round(sx + (me.clientX - smx) / scw)))
+    const ny = Math.max(0, Math.round(sy + (me.clientY - smy) / ROW_HEIGHT))
+    dragState.value = { id, x: nx, y: ny }
+    const preview = gridLayout.value.map(i => i.i === id ? {...i, x: nx, y: ny} : {...i})
+    bumpedLayout.value = resolveCollisions(preview, id)
   }
   const onUp = () => {
     if (!dragState.value) return
     const { x, y } = dragState.value; dragState.value = null
-    gridLayout.value = applyGravity(gridLayout.value.map(i => i.i === id ? {...i, x, y} : {...i}))
+    const base = bumpedLayout.value ?? gridLayout.value.map(i => i.i === id ? {...i, x, y} : {...i})
+    bumpedLayout.value = null
+    gridLayout.value = applyGravity(base)
     saveGridLayout()
     window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp)
   }

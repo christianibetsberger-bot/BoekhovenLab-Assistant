@@ -367,3 +367,18 @@ onMounted(async () => {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Make the card fill the full module height so the journal container can grow with it */
+.card {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+/* Let the journal container grow to fill remaining card space instead of being fixed at 500px */
+.journal-container {
+  flex: 1;
+}
+</style>

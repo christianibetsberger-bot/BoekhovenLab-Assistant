@@ -7,6 +7,19 @@
         <span class="tt-live-dot"></span>
         CHECKED IN · {{ formatDuration(currentDuration) }}
       </div>
+      <div v-if="settings.custom_projects.length" class="tt-header-project">
+        <i class="fas fa-folder-open tt-header-project-icon"></i>
+        <select
+          :value="activeEntry ? (activeEntry.project || '') : pendingProject"
+          @change="e => activeEntry ? switchActiveProject(e.target.value) : (pendingProject = e.target.value)"
+          class="tt-active-select"
+          :disabled="isSaving"
+          title="Select project"
+        >
+          <option value="">— No project —</option>
+          <option v-for="p in settings.custom_projects" :key="p" :value="p">{{ p }}</option>
+        </select>
+      </div>
       <div style="margin-left:auto; display:flex; gap:6px;">
         <button class="small" @click="exportXlsx" title="Export to Excel">
           <i class="fas fa-file-excel"></i> Export .xlsx
@@ -1806,6 +1819,8 @@ onBeforeUnmount(() => {
   border-bottom: 2px solid var(--bg); padding-bottom: 12px; margin-bottom: 15px;
 }
 .tt-header h2 { margin: 0; border: none; padding: 0; display: flex; align-items: center; gap: 10px; }
+.tt-header-project { display: flex; align-items: center; gap: 5px; }
+.tt-header-project-icon { font-size: 0.75rem; opacity: 0.55; }
 
 .tt-live-badge {
   display: flex; align-items: center; gap: 8px; padding: 5px 12px;

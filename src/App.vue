@@ -139,9 +139,11 @@ function toggleModule(id) {
     if (item) savedPositions.value[id] = { x: item.x, y: item.y, w: item.w, h: item.h }
     gridLayout.value = gridLayout.value.filter(i => i.i !== id)
   } else {
-    const saved = savedPositions.value[id]
-    const def   = getDefaultGridLayout().find(i => i.i === id) || { x: 0, y: 0, w: 6, h: 10 }
-    gridLayout.value = [...gridLayout.value, { i: id, ...(saved || def) }]
+    const def = getDefaultGridLayout().find(i => i.i === id) || { x: 0, y: 0, w: 6, h: 10 }
+    const w   = savedPositions.value[id]?.w ?? def.w
+    const h   = savedPositions.value[id]?.h ?? def.h
+    // Always re-add at the very top of the page (y=0, full width)
+    gridLayout.value = [...gridLayout.value, { i: id, x: 0, y: 0, w, h }]
   }
   saveGridLayout()
 }
@@ -154,25 +156,19 @@ function resetLayout() {
   saveGridLayout()
 }
 
-// ── Collision resolution: push overlapping modules down ──
-function overlaps(a, b) {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
-}
-function resolveCollisions(layout, movedId) {
-  const result = layout.map(i => ({ ...i }))
+// ── Gravity: each module floats up to fill vertical gaps above it ──
+function applyGravity(layout) {
+  const result = layout.map(i => ({...i}))
   let changed = true; let iter = 0
-  while (changed && iter++ < 50) {
+  while (changed && iter++ < 100) {
     changed = false
-    const moved = result.find(i => i.i === movedId)
-    if (!moved) break
     for (const item of result) {
-      if (item.i === movedId) continue
-      if (overlaps(moved, item)) { item.y = moved.y + moved.h; changed = true }
+      // highest bottom-edge of any module that shares x-space and sits above this one
+      const ceiling = result
+        .filter(o => o.i !== item.i && o.x < item.x + item.w && o.x + o.w > item.x && o.y + o.h <= item.y)
+        .reduce((max, o) => Math.max(max, o.y + o.h), 0)
+      if (item.y > ceiling) { item.y = ceiling; changed = true }
     }
-    const rest = result.filter(i => i.i !== movedId).sort((a,b) => a.y - b.y)
-    for (let i = 0; i < rest.length; i++)
-      for (let j = i+1; j < rest.length; j++)
-        if (overlaps(rest[i], rest[j])) { rest[j].y = rest[i].y + rest[i].h; changed = true }
   }
   return result
 }
@@ -194,7 +190,7 @@ function startDrag(id, e) {
   const onUp = () => {
     if (!dragState.value) return
     const { x, y } = dragState.value; dragState.value = null
-    gridLayout.value = resolveCollisions(gridLayout.value.map(i => i.i === id ? {...i, x, y} : {...i}), id)
+    gridLayout.value = applyGravity(gridLayout.value.map(i => i.i === id ? {...i, x, y} : {...i}))
     saveGridLayout()
     window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp)
   }
@@ -218,7 +214,7 @@ function startGridResize(id, e) {
   const onUp = () => {
     if (!resizeState.value) return
     const { w, h } = resizeState.value; resizeState.value = null
-    gridLayout.value = resolveCollisions(gridLayout.value.map(i => i.i === id ? {...i, w, h} : {...i}), id)
+    gridLayout.value = applyGravity(gridLayout.value.map(i => i.i === id ? {...i, w, h} : {...i}))
     saveGridLayout()
     window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp)
   }

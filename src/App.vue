@@ -55,63 +55,103 @@ function isMinimized(id) { return !!layout.value.minimized[id] }
 function resetLayout() {
   layout.value = store.getDefaultModuleLayout()
   saveLayout()
-  // Also clear all sidebar groups
   sidebarGroups.value = []
   saveSidebarGroups()
+  moduleSizes.value = {}
+  saveModuleSizes()
+  colSplit.value = 460
+  saveColSplit()
 }
 
-// ── Per-module height resize ───────────────────────────────────────────────
-// Stores explicit pixel heights; undefined = natural height (CSS auto).
+// ── Per-module height resize + column-width split (2D) ────────────────────
 const moduleSizes = ref({})
 
 function loadModuleSizes() {
   const key = store.user?.id ? `msizes_${store.user.id}` : null
   if (!key) return
-  try {
-    const raw = localStorage.getItem(key)
-    if (raw) moduleSizes.value = JSON.parse(raw)
-  } catch { moduleSizes.value = {} }
+  try { const raw = localStorage.getItem(key); if (raw) moduleSizes.value = JSON.parse(raw) }
+  catch { moduleSizes.value = {} }
 }
 function saveModuleSizes() {
   const key = store.user?.id ? `msizes_${store.user.id}` : null
   if (key) localStorage.setItem(key, JSON.stringify(moduleSizes.value))
 }
-function moduleHeight(id) {
-  const h = moduleSizes.value[id]
-  return h ? `${h}px` : undefined
+function moduleHeight(id) { const h = moduleSizes.value[id]; return h ? `${h}px` : undefined }
+
+// Left-column width (px) — right column takes remaining space via flex:1
+const colSplit = ref(460)
+function loadColSplit() {
+  const key = store.user?.id ? `csplit_${store.user.id}` : null
+  if (!key) return
+  const raw = localStorage.getItem(key); if (raw) colSplit.value = Number(raw) || 460
+}
+function saveColSplit() {
+  const key = store.user?.id ? `csplit_${store.user.id}` : null
+  if (key) localStorage.setItem(key, String(colSplit.value))
+}
+
+// Find the next visible module below `id` in the same column (for paired resize)
+function moduleBelow(id) {
+  for (const order of [layout.value.leftOrder, layout.value.rightOrder, layout.value.topOrder]) {
+    const visible = order.filter(i => !isMinimized(i) && !isModuleHiddenForUser(i))
+    const idx = visible.indexOf(id)
+    if (idx !== -1 && idx < visible.length - 1) return visible[idx + 1]
+  }
+  return null
 }
 
 // Active resize state
-const resizing = ref(null)   // { id, startY, startH }
+const resizing = ref(null)
 
 function startResize(id, e) {
-  e.preventDefault()
-  e.stopPropagation()
-  const wrapper = e.currentTarget.parentElement
-  const startH = wrapper.getBoundingClientRect().height
-  resizing.value = { id, startY: e.clientY, startH }
+  e.preventDefault(); e.stopPropagation()
+  const wrapperA = document.querySelector(`[data-module-id="${id}"]`)
+  if (!wrapperA) return
+  const startHA = wrapperA.getBoundingClientRect().height
+  const belowId = moduleBelow(id)
+  let startHB = null
+  if (belowId) {
+    const wB = document.querySelector(`[data-module-id="${belowId}"]`)
+    if (wB) startHB = wB.getBoundingClientRect().height
+  }
+  resizing.value = { id, startY: e.clientY, startHA, belowId, startHB }
 
   const onMove = (me) => {
     if (!resizing.value) return
     const delta = me.clientY - resizing.value.startY
-    const newH = Math.max(120, resizing.value.startH + delta)
-    moduleSizes.value = { ...moduleSizes.value, [id]: newH }
+    const newHA = Math.max(120, resizing.value.startHA + delta)
+    if (resizing.value.belowId && resizing.value.startHB !== null) {
+      const newHB = Math.max(120, resizing.value.startHB - delta)
+      moduleSizes.value = { ...moduleSizes.value, [id]: newHA, [resizing.value.belowId]: newHB }
+    } else {
+      moduleSizes.value = { ...moduleSizes.value, [id]: newHA }
+    }
   }
   const onUp = () => {
-    resizing.value = null
-    saveModuleSizes()
-    window.removeEventListener('mousemove', onMove)
-    window.removeEventListener('mouseup', onUp)
+    resizing.value = null; saveModuleSizes()
+    window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp)
   }
-  window.addEventListener('mousemove', onMove)
-  window.addEventListener('mouseup', onUp)
+  window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp)
 }
 
 function resetModuleSize(id) {
-  const s = { ...moduleSizes.value }
-  delete s[id]
-  moduleSizes.value = s
-  saveModuleSizes()
+  const belowId = moduleBelow(id)
+  const s = { ...moduleSizes.value }; delete s[id]; if (belowId) delete s[belowId]
+  moduleSizes.value = s; saveModuleSizes()
+}
+
+// Column-width drag (left/right split)
+function startColSplit(e) {
+  e.preventDefault()
+  const startX = e.clientX, startW = colSplit.value
+  const onMove = (me) => {
+    colSplit.value = Math.max(180, Math.min(startW + me.clientX - startX, window.innerWidth - 240))
+  }
+  const onUp = () => {
+    saveColSplit()
+    window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp)
+  }
+  window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp)
 }
 
 // Track which columns have at least one visible module (drives v-show on column divs)
@@ -525,6 +565,7 @@ async function initSession(user) {
   loadLayout()
   loadSidebarGroups()
   loadModuleSizes()
+  loadColSplit()
 }
 
 onMounted(() => {
@@ -766,7 +807,8 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
               v-show="!isMinimized(id)"
               class="module-wrapper top-module"
               :class="{ 'drag-over': dragOverId === id && dragOverCol === 'top' }"
-              :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden' } : {}"
+              :data-module-id="id"
+              :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden', display: 'flex', flexDirection: 'column' } : {}"
               @dragover="onDragOver($event, id, 'top')"
               @drop="onDrop($event, id, 'top')"
             >
@@ -793,6 +835,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
           <div
             class="ws-col ws-left"
             :class="{ 'col-has-content': leftHasVisible, 'col-drag-open': isDragging, 'drop-zone-hover': dragOverEmpty === 'left' }"
+            :style="leftHasVisible ? { flex: `0 0 ${colSplit}px` } : {}"
             @dragover="onColDragOver($event, 'left')"
             @drop="onColDrop($event, 'left')"
           >
@@ -802,7 +845,8 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                 v-show="!isMinimized(id)"
                 class="module-wrapper"
                 :class="{ 'drag-over': dragOverId === id && dragOverCol === 'left' }"
-                :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden' } : {}"
+                :data-module-id="id"
+                :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden', display: 'flex', flexDirection: 'column' } : {}"
                 @dragover="onDragOver($event, id, 'left')"
                 @drop="onDrop($event, id, 'left')"
               >
@@ -822,6 +866,14 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
             </div>
           </div>
 
+          <!-- Column-split drag divider -->
+          <div
+            v-if="leftHasVisible && rightHasVisible"
+            class="col-split-divider"
+            @mousedown.prevent="startColSplit"
+            title="Drag to resize columns"
+          ></div>
+
           <!-- Right column: always in DOM; CSS collapses when empty + not dragging -->
           <div
             class="ws-col ws-right"
@@ -835,7 +887,8 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                 v-show="!isMinimized(id)"
                 class="module-wrapper"
                 :class="{ 'drag-over': dragOverId === id && dragOverCol === 'right' }"
-                :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden' } : {}"
+                :data-module-id="id"
+                :style="moduleHeight(id) ? { height: moduleHeight(id), overflow: 'hidden', display: 'flex', flexDirection: 'column' } : {}"
                 @dragover="onDragOver($event, id, 'right')"
                 @drop="onDrop($event, id, 'right')"
               >
@@ -1177,6 +1230,19 @@ body { padding: 0 !important; margin: 0 !important; }
 }
 .drag-handle:hover  { opacity: 0.9; }
 .drag-handle:active { cursor: grabbing; }
+
+/* Column split drag divider */
+.col-split-divider {
+  width: 6px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  border-radius: 3px;
+  background: var(--border);
+  opacity: 0.3;
+  align-self: stretch;
+  transition: opacity 0.15s, background 0.15s;
+}
+.col-split-divider:hover { opacity: 0.85; background: var(--primary); }
 
 /* Resize handle — bottom edge of each module */
 .resize-handle {

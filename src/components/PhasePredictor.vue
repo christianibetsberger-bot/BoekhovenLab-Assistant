@@ -191,7 +191,35 @@
                   <option value="water">MQ Water</option>
                   <option value="buffer">Buffer</option>
                 </select>
-                <input v-if="config.fillupMedium.type === 'buffer'" type="text" v-model="config.fillupMedium.bufName" placeholder="e.g. 10 mM NaOH" style="font-size:0.78rem; padding:3px 5px;">
+                <template v-if="config.fillupMedium.type === 'buffer'">
+                  <div style="position:relative; display:flex; flex-direction:column; gap:3px;" @click.stop>
+                    <input type="text" v-model="config.fillupMedium.bufName" placeholder="Buffer name" style="font-size:0.78rem; padding:3px 5px;">
+                    <!-- Inventory link for fill-up buffer -->
+                    <div @click="activeDropdown = activeDropdown === 'fillup' ? null : 'fillup'" class="inventory-select-box" style="font-size:0.72rem; padding:2px 5px;">
+                      <span class="truncate-text">{{ config.fillupMedium.inv ? `[${config.fillupMedium.inv.code}] ${config.fillupMedium.inv.name}` : 'Link inventory…' }}</span>
+                      <i class="fas fa-search" style="font-size:0.65rem; opacity:0.5;"></i>
+                    </div>
+                    <div v-if="activeDropdown === 'fillup'" class="inventory-dropdown">
+                      <div class="dropdown-scope-selector">
+                        <label class="checkbox-label"><input type="radio" value="Global" v-model="config.fillupMedium.searchScope"> Global</label>
+                        <label class="checkbox-label"><input type="radio" value="Personal" v-model="config.fillupMedium.searchScope"> Personal</label>
+                      </div>
+                      <div class="dropdown-search">
+                        <input type="text" v-model="config.fillupMedium.searchQuery" placeholder="Filter inventory..." @click.stop>
+                      </div>
+                      <div class="dropdown-results">
+                        <div
+                          v-for="inv in filterBlockInventory(config.fillupMedium.searchQuery, config.fillupMedium.searchScope)"
+                          :key="inv.id" class="dropdown-item"
+                          @mousedown.prevent="config.fillupMedium.inv = inv; activeDropdown = null"
+                        >
+                          [{{ inv.code }}] {{ inv.name }} ({{ inv.stock }} {{ inv.stockUnit || 'µM' }})
+                        </div>
+                      </div>
+                    </div>
+                    <button v-if="config.fillupMedium.inv" @click="config.fillupMedium.inv = null" style="font-size:0.65rem; background:none; border:none; cursor:pointer; color:#ef4444; text-align:left; padding:0;">✕ Clear link</button>
+                  </div>
+                </template>
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
                 <input v-if="config.fillupMedium.type === 'buffer'" type="number" v-model.number="config.fillupMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
@@ -591,7 +619,7 @@ const config = ref({
   anionMedium:  { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
   cationMedium: { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
   saltMedium:   { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
-  fillupMedium: { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
+  fillupMedium: { type: 'water', bufName: '', naMM: 0, pH: 7.0, inv: null, searchQuery: '', searchScope: 'Global' },
 })
 
 // Detect when exactly one axis is collapsed (min === max) → show 2D slice alongside 3D
@@ -845,15 +873,22 @@ const exportSuggestionsToPlate = () => {
               bgHtml += `<span style="font-size:0.68rem; color:#8b5cf6;">⊕ Est. pH: ${mixedPH}</span><br>`
             }
 
-            const fillupLabel = config.value.fillupMedium.type === 'buffer'
-              ? (config.value.fillupMedium.bufName || 'Buffer')
-              : 'MQ H₂O'
+            const fillupInv = config.value.fillupMedium.inv
+            let fillupHtml
+            if (fillupInv) {
+              fillupHtml = `&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(fillupInv.code)}] ${esc(fillupInv.name)} (${esc(store.formatNum(fillupInv.stock))} ${esc(fillupInv.stockUnit || 'mM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${fmt(vFill)} µL<br>`
+            } else {
+              const fillupLabel = config.value.fillupMedium.type === 'buffer'
+                ? (config.value.fillupMedium.bufName || 'Buffer')
+                : 'MQ H₂O'
+              fillupHtml = `<strong>${esc(fillupLabel)}:</strong> ${fmt(vFill)} µL<br>`
+            }
 
             let cellHtml = `<strong style="color: var(--primary);">AI Target [${sug.sampleId}]</strong><br>
                             ${getInventoryTag(config.value.anionInv, fmt(vA), sug.anion)}
                             ${getInventoryTag(config.value.cationInv, fmt(vB), sug.cation)}
                             ${getInventoryTag(config.value.saltInv, fmt(vC), sug.salt)}
-                            ${bgHtml}<strong>${esc(fillupLabel)}:</strong> ${fmt(vFill)} µL${warningHtml}`;
+                            ${bgHtml}${fillupHtml}${warningHtml}`;
 
             plate.wells[wId] = cellHtml;
         }

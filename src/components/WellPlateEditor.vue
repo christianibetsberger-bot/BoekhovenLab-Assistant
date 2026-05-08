@@ -139,20 +139,17 @@ onBeforeUnmount(() => document.removeEventListener('click', onWellEditorClick))
 
 // --- Integrations ---
 const savePlateToJournal = (plate) => {
-    const activeJournalEntry = store.journal.entries.find(e => e.id === store.journal.activeId);
-    if (!activeJournalEntry) { alert("Please select an active journal entry first."); return; }
-    
     let html = `<br><br><div style="border: 1px solid var(--border); padding: 15px; border-radius: var(--radius); background: var(--surface);">`;
     html += `<h3 style="margin-top: 0; color: var(--primary);"><i class="fas fa-border-all"></i> Plate Map: ${esc(plate.name)} (${esc(plate.format)}-Well)</h3>`;
     html += `<div class="table-responsive"><table style="width: 100%; border-collapse: collapse; font-size: 0.75rem; text-align: left; border: 1px solid var(--border);">`;
-    
+
     const rows = getPlateRows(plate.format);
     const cols = getPlateCols(plate.format);
-    
+
     html += `<tr><th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 4px; text-align: center;"></th>`;
     for (let c = 0; c < cols; c++) html += `<th style="border: 1px solid var(--border); background: var(--summary-bg); padding: 4px; text-align: center; min-width: 80px;">${c + 1}</th>`;
     html += `</tr>`;
-    
+
     let filledWells = 0;
     for (let r = 0; r < rows; r++) {
         const rowLabel = String.fromCharCode(65 + r);
@@ -168,9 +165,12 @@ const savePlateToJournal = (plate) => {
     html += `</table></div>`;
     if (filledWells === 0) html += `<p style="opacity: 0.7; font-style: italic; margin-top: 10px;">Plate is completely empty.</p>`;
     html += `</div><br>`;
-    
-    activeJournalEntry.content += html;
-    alert(`Successfully appended Plate Map to Lab Journal!`);
+
+    if (!store.appendToActiveJournal(html)) {
+        alert('Please select an active journal entry first.');
+        return;
+    }
+    alert('Successfully appended Plate Map to Lab Journal!');
 }
 
 // --- Robot Protocol (.onp) Export Engine ---

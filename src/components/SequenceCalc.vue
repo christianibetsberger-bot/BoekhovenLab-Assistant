@@ -5,6 +5,8 @@ import { calcSeqExtinction, calcSeqMw, calcSeqTm, calcSeqGc } from '../utils/seq
 
 const store = useLabStore()
 const saveScope = ref('Global')
+const useBlank = ref(false)
+const a260Blank = ref(null)
 
 // --- Computed Properties ---
 const calculatedLength = computed(() => store.dnaCalc.sequence.replace(/\[.*?\]/g, '').replace(/[^a-zA-Z]/g, '').length)
@@ -14,11 +16,17 @@ const calculatedExtinction = computed(() => calcSeqExtinction(store.dnaCalc.sequ
 const calculatedMw = computed(() => calcSeqMw(store.dnaCalc.sequence, store.dnaCalc.type))
 const activeMw = computed(() => store.dnaCalc.manualMw ? store.dnaCalc.manualMw : calculatedMw.value)
 
+const correctedA260 = computed(() => {
+    const raw = store.dnaCalc.a260 || 0
+    if (!useBlank.value || !a260Blank.value) return raw
+    return Math.max(0, raw - a260Blank.value)
+})
+
 const dnaConcentration = computed(() => {
-    if (!store.dnaCalc.a260) return 0;
+    if (!correctedA260.value) return 0;
     const l = store.dnaCalc.pathLength || 0.05;
-    if (calculatedExtinction.value) return (store.dnaCalc.a260 / (calculatedExtinction.value * l)) * 1000000;
-    if (store.dnaCalc.manualMw) return ((store.dnaCalc.a260 * 33 * (1/l)) * 1000) / store.dnaCalc.manualMw;
+    if (calculatedExtinction.value) return (correctedA260.value / (calculatedExtinction.value * l)) * 1000000;
+    if (store.dnaCalc.manualMw) return ((correctedA260.value * 33 * (1/l)) * 1000) / store.dnaCalc.manualMw;
     return 0;
 })
 
@@ -62,6 +70,15 @@ const saveDnaToInventory = () => {
         <div class="input-group">
             <label>A260 Measurement</label>
             <input type="number" v-model.number="store.dnaCalc.a260" step="any" placeholder="e.g. 0.5">
+            <div style="margin-top: 6px; display: flex; align-items: center; gap: 8px;">
+                <label class="checkbox-label" style="font-size: 0.78rem; font-weight: normal; opacity: 0.85;">
+                    <input type="checkbox" v-model="useBlank" style="width: auto; appearance: auto; -webkit-appearance: auto;">
+                    Blank subtraction
+                </label>
+                <input v-if="useBlank" type="number" v-model.number="a260Blank" step="any"
+                    placeholder="blank A260"
+                    style="flex: 1; min-width: 0; padding: 5px 8px; font-size: 0.82rem;">
+            </div>
         </div>
     </div>
     
@@ -98,6 +115,9 @@ const saveDnaToInventory = () => {
             <div><i class="fas fa-calculator icon-muted"></i> Ext. Coeff: <strong>{{ store.formatNum(calculatedExtinction) }}</strong> L/(mol·cm)</div>
             <div><i class="fas fa-weight-scale icon-muted"></i> Active Mw: <strong>{{ store.formatNum(activeMw) }}</strong> Da <span v-if="store.dnaCalc.manualMw" style="color: var(--primary);">(Manual)</span><span v-else>(Auto)</span></div>
             <div><i class="fas fa-temperature-half icon-muted"></i> Tm: <strong>{{ store.formatNum(calculatedTm) }}</strong> °C</div>
+            <div v-if="useBlank && a260Blank" style="color: var(--primary);">
+                <i class="fas fa-circle-minus icon-muted"></i> Corrected A260: <strong>{{ store.formatNum(correctedA260) }}</strong>
+            </div>
         </div>
     </div>
     

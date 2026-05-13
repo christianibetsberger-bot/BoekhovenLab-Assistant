@@ -289,9 +289,33 @@
         <div class="internal-section" style="flex-grow: 1;">
           <div class="flex-between" style="margin-bottom: 6px;">
             <h3 style="margin: 0; border: none; padding: 0;">2. Experiment Ledger</h3>
-            <button class="small success-btn" @click="saveAllDataPoints" :disabled="isSavingData || unsavedCount === 0" :title="unsavedCount === 0 ? 'No unsaved data points' : `Save ${unsavedCount} unsaved data point(s) to your account`">
-              <i class="fas" :class="isSavingData ? 'fa-spinner fa-spin' : 'fa-cloud-upload-alt'"></i>
-              {{ isSavingData ? 'Saving...' : `Save All Data${unsavedCount ? ' (' + unsavedCount + ')' : ''}` }}
+            <span v-if="activeDatasetId" style="font-size: 0.72rem; opacity: 0.65;">
+              <i class="fas fa-database"></i> Loaded:
+              <strong>{{ datasets.find(d => d.id === activeDatasetId)?.name || '—' }}</strong>
+            </span>
+            <span v-else style="font-size: 0.72rem; opacity: 0.55;">
+              <i class="fas fa-circle-dot"></i> Unsaved workspace
+            </span>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px; padding:6px 8px; background:var(--summary-bg,#f1f5f9); border:1px solid var(--border-color,#e2e8f0); border-radius:6px; flex-wrap:wrap;">
+            <input type="text" v-model="datasetNameInput" placeholder="Dataset name…"
+              style="flex:1 1 160px; min-width:120px; padding:5px 8px; font-size:0.82rem; border:1px solid var(--border-color,#cbd5e1); border-radius:4px; background:transparent; color:inherit;" />
+            <button class="small success-btn" @click="saveCurrentDataset" :disabled="isSavingData || !datasetNameInput.trim()" style="padding:5px 10px;">
+              <i class="fas" :class="isSavingData ? 'fa-spinner fa-spin' : 'fa-save'"></i>
+              {{ isSavingData ? 'Saving…' : 'Save' }}
+            </button>
+            <select :value="activeDatasetId || ''" @change="loadDataset($event.target.value)"
+              style="flex:0 0 auto; padding:5px 8px; font-size:0.82rem; border:1px solid var(--border-color,#cbd5e1); border-radius:4px; background:transparent; color:inherit;">
+              <option value="" disabled>Load dataset…</option>
+              <option v-for="d in datasets" :key="d.id" :value="d.id">
+                {{ d.name }}{{ d.experiments ? ` (${d.experiments.length} pts)` : '' }}
+              </option>
+            </select>
+            <button class="small" @click="newDataset" title="Clear workspace for a new dataset" style="padding:5px 10px;">
+              <i class="fas fa-file-circle-plus"></i> New
+            </button>
+            <button class="small danger-btn" @click="deleteDataset" :disabled="!activeDatasetId" title="Delete the currently-loaded dataset" style="padding:5px 10px;">
+              <i class="fas fa-trash"></i>
             </button>
           </div>
           <div class="ledger-table-container">
@@ -690,7 +714,6 @@ const config = ref({
 // Current D-slice value for the 4th-component slider in the 3D scatter plot.
 // Points whose |compD − currentDSlice| ≤ compDStep/2 are shown in the scatter.
 const currentDSlice = ref(0)
-const isSavingData = ref(false)
 
 // Detect when exactly one axis is collapsed (min === max) → show 2D slice alongside 3D
 const fixedAxis = computed(() => {
@@ -1194,114 +1217,150 @@ watch(() => config.value.enableCompD, (on) => {
   if (on) currentDSlice.value = (config.value.compDMin + config.value.compDMax) / 2
 })
 
-const fetchExperiments = async () => {
-  if (!store.user?.id) return;
-  const { data, error } = await db.from('phase_data').select('*').eq('owner_id', store.user.id);
-  if (!error && data) {
-      experiments.value = data.map(row => ({
-          ...row,
-          sampleId: row.sampleId ?? row.sampleid,
-          compD: row.compD ?? row.compd ?? 0,
-      }));
-      renderPlot()
-  }
+// ─── Named-dataset persistence ────────────────────────────────────────────
+// All workspace state (experiments + suggestions + config) is saved as one
+// JSONB blob in the `phase_datasets` table. The user clicks Save to persist
+// a named snapshot, Load to switch to another snapshot, New to clear.
+
+const datasets = ref([])              // [{ id, name, savedAt, experiments, suggestions, config }]
+const activeDatasetId = ref(null)
+const datasetNameInput = ref('')
+const isSavingData = ref(false)
+
+const fetchDatasets = async () => {
+  if (!store.user?.id) return
+  const { data, error } = await db.from('phase_datasets').select('*').eq('owner_id', store.user.id)
+  if (error) { console.error(error); return }
+  datasets.value = (data || []).map(row => row.data).sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))
 }
 
-const updateExperiment = async (exp) => {
-  if(!exp.id) { renderPlot(); return }
-  const payload = { phase: exp.phase, anion: exp.anion, cation: exp.cation, salt: exp.salt }
-  if (config.value.enableCompD) payload.compd = exp.compD || 0
-  await db.from('phase_data').update(payload).eq('id', exp.id); renderPlot()
+// Bootstrap from legacy `phase_data` table if the user has no datasets yet.
+// This lets existing users see their old data and save it as their first dataset.
+const bootstrapLegacy = async () => {
+  if (!store.user?.id) return
+  const { data, error } = await db.from('phase_data').select('*').eq('owner_id', store.user.id)
+  if (error || !data || data.length === 0) return
+  experiments.value = data.map(row => ({
+    sampleId: row.sampleId ?? row.sampleid,
+    anion: row.anion, cation: row.cation, salt: row.salt,
+    compD: row.compD ?? row.compd ?? 0,
+    phase: row.phase,
+  }))
+  datasetNameInput.value = 'Legacy Data'
 }
+
+const updateExperiment = () => { renderPlot() }
 
 const addManualRow = () => {
   experiments.value.push({ sampleId: Math.floor(Math.random() * 9000), anion: 0, cation: 0, salt: 0, compD: 0, phase: -1 })
 }
 
-// Count of locally-added datapoints that have not yet been persisted to Supabase.
-const unsavedCount = computed(() => experiments.value.filter(e => !e.id).length)
+const removeRow = (index) => {
+  experiments.value.splice(index, 1)
+  renderPlot()
+}
 
-const saveAllDataPoints = async () => {
-  if (!store.user?.id) { alert('You must be signed in to save data.'); return }
-  const toInsert = experiments.value.filter(e => !e.id)
-  if (!toInsert.length) { alert('All data points are already saved.'); return }
+const clearLedger = () => {
+  if (!confirm('Clear all data points from the workspace? Saved datasets are not affected.')) return
+  experiments.value = []
+  suggestions.value = []
+  boundaryData.value = null
+  renderPlot()
+}
+
+const importSuggestion = (sug) => {
+  experiments.value.push({ ...sug })
+  suggestions.value = suggestions.value.filter(s => s.sampleId !== sug.sampleId)
+  renderPlot()
+}
+
+const importAllSuggestions = () => {
+  experiments.value.push(...suggestions.value.map(s => ({ ...s })))
+  suggestions.value = []
+  renderPlot()
+}
+
+// Build a serializable snapshot of the current workspace.
+const buildSnapshot = (id, name) => ({
+  id,
+  name,
+  savedAt: Date.now(),
+  config: JSON.parse(JSON.stringify(config.value)),
+  experiments: JSON.parse(JSON.stringify(experiments.value)),
+  suggestions: JSON.parse(JSON.stringify(suggestions.value)),
+})
+
+const persistDataset = async (snapshot) => {
+  if (!store.user?.id) { alert('You must be signed in to save.'); return false }
+  const payload = {
+    item_id: snapshot.id,
+    owner_id: store.user.id,
+    scope: 'Personal',
+    data: snapshot,
+  }
+  const { error } = await db.from('phase_datasets').upsert(payload, { onConflict: 'item_id' })
+  if (error) { console.error(error); alert(`Save failed: ${error.message}`); return false }
+  return true
+}
+
+const saveCurrentDataset = async () => {
+  const name = (datasetNameInput.value || '').trim()
+  if (!name) { alert('Please enter a name for this dataset.'); return }
   isSavingData.value = true
   try {
-    const payload = toInsert.map(e => {
-      const row = {
-        sampleId: e.sampleId,
-        anion: Number(e.anion) || 0,
-        cation: Number(e.cation) || 0,
-        salt: Number(e.salt) || 0,
-        phase: Number(e.phase),
-        owner_id: store.user.id,
-      }
-      if (config.value.enableCompD) row.compd = Number(e.compD) || 0
-      return row
-    })
-    const { error } = await db.from('phase_data').insert(payload)
-    if (error) { console.error(error); alert(`Save failed: ${error.message}`); return }
-    await fetchExperiments()
-    alert(`Saved ${payload.length} data point${payload.length === 1 ? '' : 's'} to your account.`)
+    // Reuse the loaded dataset's id only if its name is unchanged — renaming
+    // a loaded dataset creates a new entry, per the requested workflow.
+    const existing = datasets.value.find(d => d.id === activeDatasetId.value)
+    const reuseId = existing && existing.name === name
+    const id = reuseId ? existing.id : `phds_${crypto.randomUUID()}`
+    const snapshot = buildSnapshot(id, name)
+    const ok = await persistDataset(snapshot)
+    if (!ok) return
+    activeDatasetId.value = id
+    await fetchDatasets()
+    alert(reuseId ? `Updated dataset "${name}".` : `Saved as new dataset "${name}".`)
   } finally {
     isSavingData.value = false
   }
 }
 
-const removeRow = async (index, exp) => {
-  experiments.value.splice(index, 1);
-  if (exp.id) {
-    await db.from('phase_data').delete().eq('id', exp.id);
-  }
-  renderPlot();
+const loadDataset = (id) => {
+  const ds = datasets.value.find(d => d.id === id)
+  if (!ds) return
+  // Merge saved config into current config so any new fields keep defaults.
+  config.value = { ...config.value, ...(ds.config || {}) }
+  experiments.value = (ds.experiments || []).map(e => ({ ...e }))
+  suggestions.value = (ds.suggestions || []).map(s => ({ ...s }))
+  activeDatasetId.value = id
+  datasetNameInput.value = ds.name || ''
+  boundaryData.value = null
+  renderPlot()
 }
 
-const clearLedger = async () => {
-  if (!confirm("Are you sure you want to wipe all known data for this predictor? This will permanently delete this module's memory.")) return;
-  
-  const idsToDelete = experiments.value.map(e => e.id).filter(id => id);
-  if (idsToDelete.length > 0) {
-     const { error } = await db.from('phase_data').delete().in('id', idsToDelete);
-     if (!error) {
-         experiments.value = [];
-         boundaryData.value = null;
-         renderPlot();
-     } else {
-         alert("Failed to clear database.");
-     }
-  } else {
-     experiments.value = [];
-     boundaryData.value = null;
-     renderPlot();
+const newDataset = () => {
+  if (experiments.value.length || suggestions.value.length) {
+    if (!confirm('Start a new dataset? Any unsaved changes in the current workspace will be lost.')) return
   }
+  experiments.value = []
+  suggestions.value = []
+  boundaryData.value = null
+  activeDatasetId.value = null
+  datasetNameInput.value = ''
+  renderPlot()
 }
 
-const importSuggestion = async (sug) => {
-  if (!store.user?.id) return;
-  const payload = { sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase, owner_id: store.user.id };
-  if (config.value.enableCompD) payload.compd = sug.compD || 0;
-  const { error } = await db.from('phase_data').insert([payload]);
-  if (!error) {
-    await fetchExperiments();
-    suggestions.value = suggestions.value.filter(s => s.sampleId !== sug.sampleId);
-  }
+const deleteDataset = async () => {
+  const id = activeDatasetId.value
+  if (!id) { alert('No dataset is currently loaded.'); return }
+  const ds = datasets.value.find(d => d.id === id)
+  if (!confirm(`Permanently delete dataset "${ds?.name || id}"?`)) return
+  const { error } = await db.from('phase_datasets').delete().eq('item_id', id)
+  if (error) { alert(`Delete failed: ${error.message}`); return }
+  await fetchDatasets()
+  newDataset()
 }
 
-const importAllSuggestions = async () => {
-  if (!store.user?.id) return;
-  const payload = suggestions.value.map(sug => {
-    const row = { sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase, owner_id: store.user.id };
-    if (config.value.enableCompD) row.compd = sug.compD || 0;
-    return row;
-  });
-  const { error } = await db.from('phase_data').insert(payload);
-  if (!error) {
-    await fetchExperiments();
-    suggestions.value = [];
-  } else {
-    alert("Error logging AI targets to Supabase.");
-  }
-}
+// ──────────────────────────────────────────────────────────────────────────
 
 const csvInputRef = ref(null)
 
@@ -1528,39 +1587,31 @@ const prStatsText = computed(() => {
   return `${phaseStr}  ·  ${actionStr}`
 })
 
-const importPlatereaderResults = async () => {
+const importPlatereaderResults = () => {
   const items = prPreviewItems.value
   if (!items.length) return
   let updated = 0, created = 0
 
-  const toInsert = []
-  for (const { exp, wd, odData, newPhase } of items) {
-    if (exp?.id) {
-      // Experiment already in ledger — just update its phase.
-      const { error } = await db.from('phase_data').update({ phase: newPhase }).eq('id', exp.id)
-      if (!error) updated++
+  for (const { exp, wd, newPhase } of items) {
+    if (exp) {
+      // Experiment already in the workspace — update its phase in-place.
+      const target = experiments.value.find(e => e === exp || e.sampleId === exp.sampleId)
+      if (target) { target.phase = newPhase; updated++ }
     } else if (wd) {
       // Experiment was never logged — create it now from wellplate concentrations.
-      toInsert.push({
+      experiments.value.push({
         sampleId: wd.sampleId,
-        anion: wd.anion,
-        cation: wd.cation,
-        salt: wd.salt,
-        phase: newPhase,
-        owner_id: store.user?.id,
+        anion: wd.anion, cation: wd.cation, salt: wd.salt,
+        compD: 0, phase: newPhase,
       })
+      created++
     }
   }
 
-  if (toInsert.length) {
-    const { error } = await db.from('phase_data').insert(toInsert)
-    if (!error) created = toInsert.length
-  }
-
-  await fetchExperiments(); renderPlot()
+  renderPlot()
   prODMap.value = null
-  const msg = [updated && `${updated} updated`, created && `${created} created`].filter(Boolean).join(', ')
-  alert(`Platereader import complete: ${msg}.`)
+  const msg = [updated && `${updated} updated`, created && `${created} created`].filter(Boolean).join(', ') || 'no changes'
+  alert(`Platereader import complete: ${msg}. Click Save to persist to the active dataset.`)
 }
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -1635,14 +1686,18 @@ const onCsvFileSelected = async (event) => {
     return;
   }
 
-  const { error } = await db.from('phase_data').insert(uniqueToInsert);
-  if (!error) {
-    await fetchExperiments();
-    alert(`Successfully imported ${uniqueToInsert.length} data points into the Ledger!`);
-  } else {
-    console.error('Supabase insert error:', error);
-    alert(`Import failed: ${error.message}`);
+  // CSV rows are added to the in-memory workspace; click Save to persist
+  // them to the active dataset.
+  for (const row of uniqueToInsert) {
+    experiments.value.push({
+      sampleId: row.sampleId,
+      anion: row.anion, cation: row.cation, salt: row.salt,
+      compD: row.compd ?? 0,
+      phase: row.phase,
+    });
   }
+  renderPlot();
+  alert(`Imported ${uniqueToInsert.length} data points into the workspace. Click Save to persist to the active dataset.`);
 }
 
 const calculateBoundary = async () => {
@@ -1754,8 +1809,14 @@ const calculateNextExperiments = async () => {
   }
 }
 
-onMounted(() => {
-  fetchExperiments()
+onMounted(async () => {
+  if (store.user?.id) {
+    await fetchDatasets()
+    // If the user has saved datasets, leave the workspace empty until they Load one.
+    // Otherwise, bootstrap from the legacy `phase_data` table so old data is visible
+    // and can be saved as the user's first dataset.
+    if (datasets.value.length === 0) await bootstrapLegacy()
+  }
   nextTick(() => { renderPlot() })
 })
 </script>

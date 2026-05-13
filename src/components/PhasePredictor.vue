@@ -289,9 +289,15 @@
         <div class="internal-section" style="flex-grow: 1;">
           <div class="flex-between" style="margin-bottom: 6px;">
             <h3 style="margin: 0; border: none; padding: 0;">2. Experiment Ledger</h3>
-            <span v-if="activeDatasetId" style="font-size: 0.72rem; opacity: 0.65;">
+            <span v-if="activeDataset" style="font-size: 0.72rem; opacity: 0.65;">
               <i class="fas fa-database"></i> Loaded:
-              <strong>{{ datasets.find(d => d.id === activeDatasetId)?.name || '—' }}</strong>
+              <strong>{{ activeDataset.name || '—' }}</strong>
+              <span :style="{ marginLeft: '4px', padding: '1px 5px', borderRadius: '3px', fontSize: '0.65rem',
+                background: activeDataset.scope === 'Global' ? 'rgba(59,130,246,0.18)' : 'rgba(148,163,184,0.18)',
+                color: activeDataset.scope === 'Global' ? '#3b82f6' : 'inherit' }">
+                {{ activeDataset.scope || 'Personal' }}
+              </span>
+              <span v-if="!canMutateActive" style="margin-left:4px; opacity:0.7;" title="You don't own this dataset — Save will create a new copy under your account.">(read-only)</span>
             </span>
             <span v-else style="font-size: 0.72rem; opacity: 0.55;">
               <i class="fas fa-circle-dot"></i> Unsaved workspace
@@ -300,6 +306,10 @@
           <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px; padding:6px 8px; background:var(--summary-bg,#f1f5f9); border:1px solid var(--border-color,#e2e8f0); border-radius:6px; flex-wrap:wrap;">
             <input type="text" v-model="datasetNameInput" placeholder="Dataset name…"
               style="flex:1 1 160px; min-width:120px; padding:5px 8px; font-size:0.82rem; border:1px solid var(--border-color,#cbd5e1); border-radius:4px; background:transparent; color:inherit;" />
+            <div style="display:flex; gap:6px; align-items:center; padding:0 4px; font-size:0.72rem;">
+              <label class="checkbox-label" style="margin:0;"><input type="radio" value="Personal" v-model="datasetScope"> Personal</label>
+              <label class="checkbox-label" style="margin:0;"><input type="radio" value="Global" v-model="datasetScope"> Global</label>
+            </div>
             <button class="small success-btn" @click="saveCurrentDataset" :disabled="isSavingData || !datasetNameInput.trim()" style="padding:5px 10px;">
               <i class="fas" :class="isSavingData ? 'fa-spinner fa-spin' : 'fa-save'"></i>
               {{ isSavingData ? 'Saving…' : 'Save' }}
@@ -307,14 +317,21 @@
             <select :value="activeDatasetId || ''" @change="loadDataset($event.target.value)"
               style="flex:0 0 auto; padding:5px 8px; font-size:0.82rem; border:1px solid var(--border-color,#cbd5e1); border-radius:4px; background:transparent; color:inherit;">
               <option value="" disabled>Load dataset…</option>
-              <option v-for="d in datasets" :key="d.id" :value="d.id">
-                {{ d.name }}{{ d.experiments ? ` (${d.experiments.length} pts)` : '' }}
-              </option>
+              <optgroup label="Personal">
+                <option v-for="d in datasets.filter(x => (x.scope || 'Personal') === 'Personal' && x.ownerId === store.user?.id)" :key="d.id" :value="d.id">
+                  {{ d.name }}{{ d.experiments ? ` (${d.experiments.length} pts)` : '' }}
+                </option>
+              </optgroup>
+              <optgroup label="Global">
+                <option v-for="d in datasets.filter(x => x.scope === 'Global')" :key="d.id" :value="d.id">
+                  {{ d.name }}{{ d.experiments ? ` (${d.experiments.length} pts)` : '' }}{{ d.ownerId !== store.user?.id ? ' • shared' : '' }}
+                </option>
+              </optgroup>
             </select>
             <button class="small" @click="newDataset" title="Clear workspace for a new dataset" style="padding:5px 10px;">
               <i class="fas fa-file-circle-plus"></i> New
             </button>
-            <button class="small danger-btn" @click="deleteDataset" :disabled="!activeDatasetId" title="Delete the currently-loaded dataset" style="padding:5px 10px;">
+            <button class="small danger-btn" @click="deleteDataset" :disabled="!activeDatasetId || !canMutateActive" title="Delete the currently-loaded dataset (owner only)" style="padding:5px 10px;">
               <i class="fas fa-trash"></i>
             </button>
           </div>
@@ -1222,16 +1239,28 @@ watch(() => config.value.enableCompD, (on) => {
 // JSONB blob in the `phase_datasets` table. The user clicks Save to persist
 // a named snapshot, Load to switch to another snapshot, New to clear.
 
-const datasets = ref([])              // [{ id, name, savedAt, experiments, suggestions, config }]
+const datasets = ref([])              // [{ id, name, scope, ownerId, savedAt, experiments, suggestions, config }]
 const activeDatasetId = ref(null)
 const datasetNameInput = ref('')
+const datasetScope = ref('Personal')  // 'Personal' | 'Global' — chosen scope for the next save
 const isSavingData = ref(false)
+
+// Only the owner of a Global dataset can overwrite or delete it.
+const activeDataset = computed(() => datasets.value.find(d => d.id === activeDatasetId.value) || null)
+const canMutateActive = computed(() => {
+  const ds = activeDataset.value
+  if (!ds) return true
+  return ds.ownerId === store.user?.id
+})
 
 const fetchDatasets = async () => {
   if (!store.user?.id) return
-  const { data, error } = await db.from('phase_datasets').select('*').eq('owner_id', store.user.id)
+  // Pull everything the RLS policy will let through (own rows + Global rows).
+  const { data, error } = await db.from('phase_datasets').select('*')
   if (error) { console.error(error); return }
-  datasets.value = (data || []).map(row => row.data).sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))
+  datasets.value = (data || [])
+    .map(row => ({ ...row.data, scope: row.scope || 'Personal', ownerId: row.owner_id }))
+    .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))
 }
 
 // Bootstrap from legacy `phase_data` table if the user has no datasets yet.
@@ -1290,13 +1319,13 @@ const buildSnapshot = (id, name) => ({
   suggestions: JSON.parse(JSON.stringify(suggestions.value)),
 })
 
-const persistDataset = async (snapshot) => {
+const persistDataset = async (snapshot, scope) => {
   if (!store.user?.id) { alert('You must be signed in to save.'); return false }
   const payload = {
     item_id: snapshot.id,
     owner_id: store.user.id,
-    scope: 'Personal',
-    data: snapshot,
+    scope: scope || 'Personal',
+    data: { ...snapshot, scope: scope || 'Personal' },
   }
   const { error } = await db.from('phase_datasets').upsert(payload, { onConflict: 'item_id' })
   if (error) { console.error(error); alert(`Save failed: ${error.message}`); return false }
@@ -1306,19 +1335,24 @@ const persistDataset = async (snapshot) => {
 const saveCurrentDataset = async () => {
   const name = (datasetNameInput.value || '').trim()
   if (!name) { alert('Please enter a name for this dataset.'); return }
+  const scope = datasetScope.value === 'Global' ? 'Global' : 'Personal'
   isSavingData.value = true
   try {
-    // Reuse the loaded dataset's id only if its name is unchanged — renaming
-    // a loaded dataset creates a new entry, per the requested workflow.
-    const existing = datasets.value.find(d => d.id === activeDatasetId.value)
-    const reuseId = existing && existing.name === name
+    // Reuse the loaded dataset's id only if its name AND scope are unchanged.
+    // Renaming or changing scope branches into a new dataset, matching the
+    // "save creates a new dataset when you change something distinguishing" workflow.
+    const existing = activeDataset.value
+    const reuseId = existing
+      && existing.name === name
+      && (existing.scope || 'Personal') === scope
+      && existing.ownerId === store.user.id
     const id = reuseId ? existing.id : `phds_${crypto.randomUUID()}`
     const snapshot = buildSnapshot(id, name)
-    const ok = await persistDataset(snapshot)
+    const ok = await persistDataset(snapshot, scope)
     if (!ok) return
     activeDatasetId.value = id
     await fetchDatasets()
-    alert(reuseId ? `Updated dataset "${name}".` : `Saved as new dataset "${name}".`)
+    alert(reuseId ? `Updated dataset "${name}" (${scope}).` : `Saved as new ${scope} dataset "${name}".`)
   } finally {
     isSavingData.value = false
   }
@@ -1333,6 +1367,7 @@ const loadDataset = (id) => {
   suggestions.value = (ds.suggestions || []).map(s => ({ ...s }))
   activeDatasetId.value = id
   datasetNameInput.value = ds.name || ''
+  datasetScope.value = ds.scope || 'Personal'
   boundaryData.value = null
   renderPlot()
 }
@@ -1346,13 +1381,18 @@ const newDataset = () => {
   boundaryData.value = null
   activeDatasetId.value = null
   datasetNameInput.value = ''
+  datasetScope.value = 'Personal'
   renderPlot()
 }
 
 const deleteDataset = async () => {
   const id = activeDatasetId.value
   if (!id) { alert('No dataset is currently loaded.'); return }
-  const ds = datasets.value.find(d => d.id === id)
+  const ds = activeDataset.value
+  if (ds && ds.ownerId && ds.ownerId !== store.user?.id) {
+    alert('You can only delete datasets you own.')
+    return
+  }
   if (!confirm(`Permanently delete dataset "${ds?.name || id}"?`)) return
   const { error } = await db.from('phase_datasets').delete().eq('item_id', id)
   if (error) { alert(`Delete failed: ${error.message}`); return }

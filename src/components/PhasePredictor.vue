@@ -218,6 +218,21 @@
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
               </div>
 
+              <!-- Component D (optional) -->
+              <div v-if="config.enableCompD" style="display:grid; grid-template-columns:120px 100px 1fr 130px 80px; gap:6px; align-items:center;">
+                <span style="font-size:0.78rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" :title="config.compDName">D: {{ config.compDName }}</span>
+                <select v-model="config.compDMedium.type" style="font-size:0.78rem; padding:3px 5px;">
+                  <option value="water">MQ Water</option>
+                  <option value="buffer">Buffer</option>
+                </select>
+                <input v-if="config.compDMedium.type === 'buffer'" type="text" v-model="config.compDMedium.bufName" placeholder="buffer name" style="font-size:0.78rem; padding:3px 5px;">
+                <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
+                <input v-if="config.compDMedium.type === 'buffer'" type="number" v-model.number="config.compDMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
+                <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
+                <input v-if="config.compDMedium.type === 'buffer'" type="number" v-model.number="config.compDMedium.pH" step="0.1" min="0" max="14" placeholder="7.0" style="font-size:0.78rem; padding:3px 5px;">
+                <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
+              </div>
+
               <!-- Divider -->
               <div style="border-top:1px dashed var(--border-color,#cbd5e1); padding-top:8px; font-size:0.72rem; font-weight:700; opacity:0.55; text-transform:uppercase; letter-spacing:0.04em;">Fill-up solution</div>
 
@@ -920,15 +935,19 @@ const computeWellVolumes = (sug) => {
     : (naA * vA + naB * vB + naC * vC + naD * vD) / V
 
   // Volume-weighted pH estimate (H+ mixing approximation)
-  const pHEnabled = medA.type === 'buffer' || medB.type === 'buffer' || medC.type === 'buffer' || medFill.type === 'buffer'
+  const dActive = cfg.enableCompD && medD
+  const pHEnabled = medA.type === 'buffer' || medB.type === 'buffer' || medC.type === 'buffer' || medFill.type === 'buffer' || (dActive && medD.type === 'buffer')
   let mixedPH = null
   if (pHEnabled && V > 0) {
     const pHA    = medA.type    === 'buffer' ? (medA.pH    || 7) : 7
     const pHB    = medB.type    === 'buffer' ? (medB.pH    || 7) : 7
     const pHC    = medC.type    === 'buffer' ? (medC.pH    || 7) : 7
+    const pHD    = dActive && medD.type === 'buffer' ? (medD.pH || 7) : 7
     const pHFill = medFill.type === 'buffer' ? (medFill.pH || 7) : 7
     const totalH = vA * Math.pow(10, -pHA) + vB * Math.pow(10, -pHB)
-                 + Math.max(0, vC) * Math.pow(10, -pHC) + Math.max(0, vFill) * Math.pow(10, -pHFill)
+                 + Math.max(0, vC) * Math.pow(10, -pHC)
+                 + (dActive ? Math.max(0, vD) * Math.pow(10, -pHD) : 0)
+                 + Math.max(0, vFill) * Math.pow(10, -pHFill)
     mixedPH = +((-Math.log10(totalH / V)).toFixed(2))
   }
 

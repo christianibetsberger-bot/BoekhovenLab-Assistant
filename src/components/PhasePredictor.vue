@@ -111,6 +111,43 @@
                 <input type="number" v-model="config.stockSalt" style="flex: 0.6;" :title="`Stock (${config.saltUnit})`" :placeholder="`Stock ${config.saltUnit}`" />
               </div>
             </div>
+
+            <div class="input-group" v-if="config.enableCompD">
+              <label>Component D <select :value="config.compDUnit" @change="changeUnit('compD', config.compDUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
+              <div style="display: flex; gap: 5px; align-items: flex-end;">
+                <div style="flex: 2; position: relative;" @click.stop>
+                  <div @click="activeDropdown = activeDropdown === 'compD' ? null : 'compD'" class="inventory-select-box">
+                    <span class="truncate-text">{{ config.compDName || 'Search inventory...' }}</span>
+                    <i class="fas fa-search" style="font-size: 0.7rem; opacity: 0.5;"></i>
+                  </div>
+                  <div v-if="activeDropdown === 'compD'" class="inventory-dropdown">
+                    <div class="dropdown-scope-selector">
+                      <label class="checkbox-label"><input type="radio" value="Global" v-model="config.compDSearchScope"> Global</label>
+                      <label class="checkbox-label"><input type="radio" value="Personal" v-model="config.compDSearchScope"> Personal</label>
+                    </div>
+                    <div class="dropdown-search">
+                      <input type="text" v-model="config.compDSearchQuery" placeholder="Filter inventory..." @click.stop>
+                    </div>
+                    <div class="dropdown-results">
+                      <div v-for="inv in filterBlockInventory(config.compDSearchQuery, config.compDSearchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="selectInventory('compD', inv)">
+                        [{{ inv.code }}] {{ inv.name }} ({{inv.stock}} {{inv.stockUnit || 'µM'}})
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <input type="number" v-model="config.compDMin" @change="renderPlot" style="flex: 0.4;" :title="`Min (${config.compDUnit})`" placeholder="Min" />
+                <input type="number" v-model="config.compDMax" @change="renderPlot" style="flex: 0.4;" :title="`Max (${config.compDUnit})`" placeholder="Max" />
+                <input type="number" v-model="config.compDStep" @change="renderPlot" style="flex: 0.4;" :title="`Step (${config.compDUnit})`" placeholder="Step" />
+                <input type="number" v-model="config.stockCompD" style="flex: 0.6;" :title="`Stock (${config.compDUnit})`" :placeholder="`Stock ${config.compDUnit}`" />
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 8px;">
+            <label class="checkbox-label" style="font-size: 0.78rem;">
+              <input type="checkbox" v-model="config.enableCompD" @change="renderPlot">
+              Enable 4th component (Component D) — adds a slider sweep through D in the 3D scatter
+            </label>
           </div>
 
           <!-- ── Advanced: Solvents, Background Salt & pH ── -->
@@ -250,7 +287,13 @@
         </div>
 
         <div class="internal-section" style="flex-grow: 1;">
-          <h3>2. Experiment Ledger</h3>
+          <div class="flex-between" style="margin-bottom: 6px;">
+            <h3 style="margin: 0; border: none; padding: 0;">2. Experiment Ledger</h3>
+            <button class="small success-btn" @click="saveAllDataPoints" :disabled="isSavingData || unsavedCount === 0" :title="unsavedCount === 0 ? 'No unsaved data points' : `Save ${unsavedCount} unsaved data point(s) to your account`">
+              <i class="fas" :class="isSavingData ? 'fa-spinner fa-spin' : 'fa-cloud-upload-alt'"></i>
+              {{ isSavingData ? 'Saving...' : `Save All Data${unsavedCount ? ' (' + unsavedCount + ')' : ''}` }}
+            </button>
+          </div>
           <div class="ledger-table-container">
             <table class="ledger-table">
               <thead>
@@ -258,6 +301,7 @@
                   <th>A (<span class="unit-text">{{ config.anionUnit }}</span>)</th>
                   <th>B (<span class="unit-text">{{ config.cationUnit }}</span>)</th>
                   <th>C (<span class="unit-text">{{ config.saltUnit }}</span>)</th>
+                  <th v-if="config.enableCompD">D (<span class="unit-text">{{ config.compDUnit }}</span>)</th>
                   <th>Observed Phase</th>
                   <th></th>
                 </tr>
@@ -267,6 +311,7 @@
                   <td><input type="number" v-model="exp.anion" @change="updateExperiment(exp)" class="small-input" /></td>
                   <td><input type="number" v-model="exp.cation" @change="updateExperiment(exp)" class="small-input" /></td>
                   <td><input type="number" v-model="exp.salt" @change="updateExperiment(exp)" class="small-input" /></td>
+                  <td v-if="config.enableCompD"><input type="number" v-model="exp.compD" @change="updateExperiment(exp)" class="small-input" /></td>
                   <td>
                     <select v-model="exp.phase" @change="updateExperiment(exp)" class="small-select" :style="{ backgroundColor: getPhaseColor(exp.phase, 0.2), borderColor: getPhaseColor(exp.phase, 1) }">
                       <option :value="-1">Untested</option>
@@ -458,6 +503,22 @@
             <div v-if="fixedAxis" id="phase-2d-plot" style="height:100%; min-width:0; overflow:hidden;"></div>
             <div id="phase-ternary-plot" :style="fixedAxis ? 'height:100%; min-width:0; overflow:hidden;' : 'width:100%; height:100%;'"></div>
           </div>
+          <div v-if="config.enableCompD" style="display:flex; align-items:center; gap:10px; margin-top:8px; padding:6px 10px; background:var(--summary-bg,#f1f5f9); border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.78rem;">
+            <span style="font-weight:600; white-space:nowrap;">
+              <i class="fas fa-sliders-h" style="opacity:0.6;"></i>
+              {{ config.compDName || 'Component D' }} slice
+            </span>
+            <input type="range"
+              :min="config.compDMin"
+              :max="config.compDMax"
+              :step="config.compDStep || 0.01"
+              v-model.number="currentDSlice"
+              style="flex:1; min-width:0;" />
+            <span style="font-variant-numeric: tabular-nums; min-width:90px; text-align:right;">
+              <strong>{{ currentDSlice }}</strong> {{ config.compDUnit }}
+              <span style="opacity:0.55;">± {{ ((config.compDStep || 0) / 2).toFixed(3) }}</span>
+            </span>
+          </div>
         </div>
 
         <div class="internal-section">
@@ -502,7 +563,7 @@
                 <div class="flex-between">
                   <div>
                     <span class="sug-id" v-if="sug.sampleId">ID: {{ sug.sampleId }}</span>
-                    A: {{ sug.anion }} | B: {{ sug.cation }} | C: {{ sug.salt }}
+                    A: {{ sug.anion }} | B: {{ sug.cation }} | C: {{ sug.salt }}<span v-if="config.enableCompD"> | D: {{ sug.compD ?? 0 }}</span>
                   </div>
                   <button class="small success-btn" @click="importSuggestion(sug)" style="width: auto; margin:0; padding: 4px 8px;">Log</button>
                 </div>
@@ -610,6 +671,9 @@ const config = ref({
   anionName: 'Compound A', anionMin: 0, anionMax: 6, anionStep: 0.5, stockAnion: 100, anionUnit: 'mM', anionInv: null, anionSearchQuery: '', anionSearchScope: 'Global',
   cationName: 'Compound B', cationMin: 0, cationMax: 6, cationStep: 0.5, stockCation: 100, cationUnit: 'mM', cationInv: null, cationSearchQuery: '', cationSearchScope: 'Global',
   saltName: 'Compound C', saltMin: 0, saltMax: 200, saltStep: 10, stockSalt: 1000, saltUnit: 'mM', saltInv: null, saltSearchQuery: '', saltSearchScope: 'Global',
+  // Optional 4th component
+  enableCompD: false,
+  compDName: 'Compound D', compDMin: 0, compDMax: 1, compDStep: 0.1, stockCompD: 100, compDUnit: 'mM', compDInv: null, compDSearchQuery: '', compDSearchScope: 'Global',
   targetVolume: 100,
   strategy: 'safe',
   numSuggestions: 96,
@@ -619,8 +683,14 @@ const config = ref({
   anionMedium:  { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
   cationMedium: { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
   saltMedium:   { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
+  compDMedium:  { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
   fillupMedium: { type: 'water', bufName: '', naMM: 0, pH: 7.0, inv: null, searchQuery: '', searchScope: 'Global' },
 })
+
+// Current D-slice value for the 4th-component slider in the 3D scatter plot.
+// Points whose |compD − currentDSlice| ≤ compDStep/2 are shown in the scatter.
+const currentDSlice = ref(0)
+const isSavingData = ref(false)
 
 // Detect when exactly one axis is collapsed (min === max) → show 2D slice alongside 3D
 const fixedAxis = computed(() => {
@@ -704,6 +774,11 @@ const changeUnit = (type, oldUnit, newUnit) => {
         if (range) { config.value.saltMin = range.min; config.value.saltMax = range.max; config.value.saltStep = range.step; }
         config.value.stockSalt = newStock;
         config.value.saltUnit = newUnit;
+    } else if (type === 'compD') {
+        const { range, newStock } = rescale(config.value.compDMin, config.value.compDMax, config.value.compDStep, config.value.stockCompD);
+        if (range) { config.value.compDMin = range.min; config.value.compDMax = range.max; config.value.compDStep = range.step; }
+        config.value.stockCompD = newStock;
+        config.value.compDUnit = newUnit;
     }
     renderPlot();
 }
@@ -731,6 +806,13 @@ const selectInventory = (type, inv) => {
         config.value.stockSalt = inv.stock;
         config.value.saltUnit = newUnit;
         config.value.saltInv = inv;
+    } else if (type === 'compD') {
+        const scaled = rescaleRange(config.value.compDMin, config.value.compDMax, config.value.compDStep, config.value.compDUnit, newUnit);
+        if (scaled) { config.value.compDMin = scaled.min; config.value.compDMax = scaled.max; config.value.compDStep = scaled.step; }
+        config.value.compDName = `[${inv.code}] ${inv.name}`;
+        config.value.stockCompD = inv.stock;
+        config.value.compDUnit = newUnit;
+        config.value.compDInv = inv;
     }
     activeDropdown.value = null;
     renderPlot();
@@ -756,6 +838,7 @@ const computeWellVolumes = (sug) => {
 
   const vA = cfg.stockAnion  > 0 ? (sug.anion  * V) / cfg.stockAnion  : 0
   const vB = cfg.stockCation > 0 ? (sug.cation * V) / cfg.stockCation : 0
+  const vD = (cfg.enableCompD && cfg.stockCompD > 0) ? ((sug.compD || 0) * V) / cfg.stockCompD : 0
 
   const medA    = cfg.anionMedium
   const medB    = cfg.cationMedium
@@ -786,12 +869,15 @@ const computeWellVolumes = (sug) => {
     vC = cfg.stockSalt > 0 ? (sug.salt * V) / cfg.stockSalt : 0
   }
 
-  const vFill = V - vA - vB - vC
+  const vFill = V - vA - vB - vC - vD
+
+  const medD = cfg.compDMedium || { type: 'water', naMM: 0, pH: 7.0 }
+  const naD = (cfg.enableCompD && medD.type === 'buffer') ? (medD.naMM || 0) : 0
 
   // Background Na already in well from component solvents + fill-up
   const backgroundNa_mM = vFill > 0
-    ? (naA * vA + naB * vB + naC * vC + naFill * Math.max(0, vFill)) / V
-    : (naA * vA + naB * vB + naC * vC) / V
+    ? (naA * vA + naB * vB + naC * vC + naD * vD + naFill * Math.max(0, vFill)) / V
+    : (naA * vA + naB * vB + naC * vC + naD * vD) / V
 
   // Volume-weighted pH estimate (H+ mixing approximation)
   const pHEnabled = medA.type === 'buffer' || medB.type === 'buffer' || medC.type === 'buffer' || medFill.type === 'buffer'
@@ -806,7 +892,7 @@ const computeWellVolumes = (sug) => {
     mixedPH = +((-Math.log10(totalH / V)).toFixed(2))
   }
 
-  return { vA, vB, vC, vFill: Math.max(0, vFill), backgroundNa_mM, mixedPH, exceeds: vFill < 0 }
+  return { vA, vB, vC, vD, vFill: Math.max(0, vFill), backgroundNa_mM, mixedPH, exceeds: vFill < 0 }
 }
 
 const existingPlateData = computed(() => {
@@ -861,7 +947,7 @@ const exportSuggestionsToPlate = () => {
         if (targetR < 8 && targetC < 12) {
             let wId = String.fromCharCode(65 + targetR) + (targetC + 1);
 
-            const { vA, vB, vC, vFill, backgroundNa_mM, mixedPH, exceeds } = computeWellVolumes(sug)
+            const { vA, vB, vC, vD, vFill, backgroundNa_mM, mixedPH, exceeds } = computeWellVolumes(sug)
 
             let warningHtml = exceeds ? `<br><span style="color:#ef4444; font-size:0.7rem;">⚠️ Vol Exceeds Limit</span>` : '';
 
@@ -884,11 +970,15 @@ const exportSuggestionsToPlate = () => {
               fillupHtml = `<strong>${esc(fillupLabel)}:</strong> ${fmt(vFill)} µL<br>`
             }
 
+            const dRowHtml = config.value.enableCompD
+                ? getInventoryTag(config.value.compDInv, fmt(vD), sug.compD || 0)
+                : '';
+
             let cellHtml = `<strong style="color: var(--primary);">AI Target [${sug.sampleId}]</strong><br>
                             ${getInventoryTag(config.value.anionInv, fmt(vA), sug.anion)}
                             ${getInventoryTag(config.value.cationInv, fmt(vB), sug.cation)}
                             ${getInventoryTag(config.value.saltInv, fmt(vC), sug.salt)}
-                            ${bgHtml}${fillupHtml}${warningHtml}`;
+                            ${dRowHtml}${bgHtml}${fillupHtml}${warningHtml}`;
 
             plate.wells[wId] = cellHtml;
         }
@@ -910,10 +1000,22 @@ const renderPlot = () => {
 
   const allData = [...experiments.value, ...suggestions.value]
 
-  allData.forEach(exp => {
+  // When 4D is active, filter to points whose compD is within ±step/2 of the current D slice.
+  const dEnabled = config.value.enableCompD
+  const dSlice = currentDSlice.value
+  const dHalf = (config.value.compDStep || 0.1) / 2
+  const dataForPlot = dEnabled
+    ? allData.filter(e => {
+        const dv = (e.compD === undefined || e.compD === null) ? 0 : e.compD
+        return Math.abs(dv - dSlice) <= dHalf
+      })
+    : allData
+
+  dataForPlot.forEach(exp => {
     const statusName = exp.phase === -1 ? 'AI Target' : (phaseNames[exp.phase] || `Phase ${exp.phase}`);
-    const label = `ID: ${exp.sampleId || 'Manual'} | ${statusName} | A: ${exp.anion} | B: ${exp.cation} | C: ${exp.salt}`;
-    
+    const dTxt = dEnabled ? ` | D: ${exp.compD ?? 0}` : '';
+    const label = `ID: ${exp.sampleId || 'Manual'} | ${statusName} | A: ${exp.anion} | B: ${exp.cation} | C: ${exp.salt}${dTxt}`;
+
     if (exp.phase >= 0 && exp.phase <= 4) {
         classTraces[exp.phase].x.push(exp.anion); classTraces[exp.phase].y.push(exp.cation); classTraces[exp.phase].z.push(exp.salt); classTraces[exp.phase].text.push(label);
     } else if (exp.sampleId > 0 && !experiments.value.some(e => e.sampleId === exp.sampleId)) {
@@ -1085,7 +1187,12 @@ const render2DPlot = () => {
   Plotly.react('phase-2d-plot', traces2d, layout2d, { displayModeBar: false, responsive: true })
 }
 
-watch([experiments, suggestions, config], () => { renderPlot() }, { deep: true })
+watch([experiments, suggestions, config, currentDSlice], () => { renderPlot() }, { deep: true })
+
+// When the 4th component is toggled on, snap the D slice to the midpoint of its range.
+watch(() => config.value.enableCompD, (on) => {
+  if (on) currentDSlice.value = (config.value.compDMin + config.value.compDMax) / 2
+})
 
 const fetchExperiments = async () => {
   if (!store.user?.id) return;
@@ -1093,7 +1200,8 @@ const fetchExperiments = async () => {
   if (!error && data) {
       experiments.value = data.map(row => ({
           ...row,
-          sampleId: row.sampleId ?? row.sampleid
+          sampleId: row.sampleId ?? row.sampleid,
+          compD: row.compD ?? row.compd ?? 0,
       }));
       renderPlot()
   }
@@ -1101,10 +1209,44 @@ const fetchExperiments = async () => {
 
 const updateExperiment = async (exp) => {
   if(!exp.id) { renderPlot(); return }
-  await db.from('phase_data').update({ phase: exp.phase, anion: exp.anion, cation: exp.cation, salt: exp.salt }).eq('id', exp.id); renderPlot()
+  const payload = { phase: exp.phase, anion: exp.anion, cation: exp.cation, salt: exp.salt }
+  if (config.value.enableCompD) payload.compd = exp.compD || 0
+  await db.from('phase_data').update(payload).eq('id', exp.id); renderPlot()
 }
 
-const addManualRow = () => { experiments.value.push({ sampleId: Math.floor(Math.random() * 9000), anion: 0, cation: 0, salt: 0, phase: -1 }) }
+const addManualRow = () => {
+  experiments.value.push({ sampleId: Math.floor(Math.random() * 9000), anion: 0, cation: 0, salt: 0, compD: 0, phase: -1 })
+}
+
+// Count of locally-added datapoints that have not yet been persisted to Supabase.
+const unsavedCount = computed(() => experiments.value.filter(e => !e.id).length)
+
+const saveAllDataPoints = async () => {
+  if (!store.user?.id) { alert('You must be signed in to save data.'); return }
+  const toInsert = experiments.value.filter(e => !e.id)
+  if (!toInsert.length) { alert('All data points are already saved.'); return }
+  isSavingData.value = true
+  try {
+    const payload = toInsert.map(e => {
+      const row = {
+        sampleId: e.sampleId,
+        anion: Number(e.anion) || 0,
+        cation: Number(e.cation) || 0,
+        salt: Number(e.salt) || 0,
+        phase: Number(e.phase),
+        owner_id: store.user.id,
+      }
+      if (config.value.enableCompD) row.compd = Number(e.compD) || 0
+      return row
+    })
+    const { error } = await db.from('phase_data').insert(payload)
+    if (error) { console.error(error); alert(`Save failed: ${error.message}`); return }
+    await fetchExperiments()
+    alert(`Saved ${payload.length} data point${payload.length === 1 ? '' : 's'} to your account.`)
+  } finally {
+    isSavingData.value = false
+  }
+}
 
 const removeRow = async (index, exp) => {
   experiments.value.splice(index, 1);
@@ -1137,6 +1279,7 @@ const clearLedger = async () => {
 const importSuggestion = async (sug) => {
   if (!store.user?.id) return;
   const payload = { sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase, owner_id: store.user.id };
+  if (config.value.enableCompD) payload.compd = sug.compD || 0;
   const { error } = await db.from('phase_data').insert([payload]);
   if (!error) {
     await fetchExperiments();
@@ -1146,9 +1289,11 @@ const importSuggestion = async (sug) => {
 
 const importAllSuggestions = async () => {
   if (!store.user?.id) return;
-  const payload = suggestions.value.map(sug => ({
-      sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase, owner_id: store.user.id
-  }));
+  const payload = suggestions.value.map(sug => {
+    const row = { sampleId: sug.sampleId, anion: sug.anion, cation: sug.cation, salt: sug.salt, phase: sug.phase, owner_id: store.user.id };
+    if (config.value.enableCompD) row.compd = sug.compD || 0;
+    return row;
+  });
   const { error } = await db.from('phase_data').insert(payload);
   if (!error) {
     await fetchExperiments();
@@ -1436,13 +1581,14 @@ const onCsvFileSelected = async (event) => {
   let idxA = headers.indexOf('anion');
   let idxB = headers.indexOf('cation');
   let idxC = headers.indexOf('salt');
+  let idxD = headers.findIndex(h => h === 'compd' || h === 'd');
   let idxPhase = headers.indexOf('phase');
 
   if (idxId === -1) idxId = 0;
   if (idxA === -1) idxA = 1;
   if (idxB === -1) idxB = 2;
   if (idxC === -1) idxC = 3;
-  if (idxPhase === -1) idxPhase = 4;
+  if (idxPhase === -1) idxPhase = idxD === -1 ? 4 : 5;
 
   const newKnowns = [];
 
@@ -1457,6 +1603,7 @@ const onCsvFileSelected = async (event) => {
     const a = parseFloat(cols[idxA]);
     const b = parseFloat(cols[idxB]);
     const c = parseFloat(cols[idxC]);
+    const d = idxD !== -1 ? parseFloat(cols[idxD]) : NaN;
     const rawPhase = parseInt(cols[idxPhase], 10);
 
     if (isNaN(sId)) sId = Math.floor(Math.random() * 9000);
@@ -1464,6 +1611,7 @@ const onCsvFileSelected = async (event) => {
     if (rawPhase < -1 || rawPhase > 4) continue;
 
     const row = { sampleId: sId, anion: Number(a.toFixed(4)), cation: Number(b.toFixed(4)), salt: Number(c.toFixed(4)), phase: rawPhase };
+    if (!isNaN(d)) row.compd = Number(d.toFixed(4));
     if (store.user?.id) row.owner_id = store.user.id;
     newKnowns.push(row);
   }

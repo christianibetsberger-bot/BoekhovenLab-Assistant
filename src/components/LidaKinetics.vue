@@ -63,130 +63,185 @@
           </div>
         </div>
 
-        <!-- 1b. HPLC Chromatogram Import (Chromeleon .txt) -->
+        <!-- 1b. HPLC Import -->
         <div class="internal-section">
-          <h3>1b. HPLC Chromatogram Import (Chromeleon .txt)</h3>
-          <p style="font-size:0.75rem; opacity:0.7; margin:0 0 8px 0;">
-            Filename schema:
-            <code>{ABseq}_AB_{A'B'seq}_{S|U}{rep}-{time}.txt</code>
-            — peaks detected &amp; integrated via hplc-py in Pyodide; both product peaks summed into a single [R].
-          </p>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <h3>1b. HPLC Import</h3>
+
+          <div class="hplc-toolbar">
             <input ref="hplcFileInput" type="file" accept=".txt,.TXT" multiple style="display:none" @change="onHplcFileSelected" />
             <button class="small success-btn" :disabled="isProcessingHplc" @click="$refs.hplcFileInput.click()">
-              <i class="fas fa-vials"></i> Pick chromatograms
+              <i class="fas fa-vials"></i> Pick files
             </button>
-            <button class="small" @click="hplcShowSettings = !hplcShowSettings" :style="hplcShowSettings ? 'background:#3b82f6;color:#fff;' : ''">
-              <i class="fas fa-sliders"></i> HPLC Settings
+            <button class="small" @click="downloadHplcTemplate" title="Download an example file with the correct filename">
+              <i class="fas fa-file-arrow-down"></i> Template
             </button>
+            <button class="small" @click="hplcShowSettings = !hplcShowSettings" :class="{ active: hplcShowSettings }">
+              <i class="fas fa-sliders"></i> Settings
+            </button>
+            <div class="hplc-toolbar-spacer"></div>
             <button v-if="hplcResults.length" class="small" @click="applyHplcResultsToDataset">
-              <i class="fas fa-arrow-right-to-bracket"></i> Append to dataset
+              <i class="fas fa-arrow-right-to-bracket"></i> Append
             </button>
             <button v-if="hplcResults.length" class="small danger-btn" @click="discardHplcResults">
               <i class="fas fa-times"></i> Discard
             </button>
-            <span v-if="isProcessingHplc" style="font-size:0.78rem; opacity:0.7;">
-              <i class="fas fa-spinner fa-spin"></i> {{ hplcProgress }}
-            </span>
-            <span v-else-if="hplcProgress" style="font-size:0.78rem; opacity:0.6;">{{ hplcProgress }}</span>
           </div>
 
-          <!-- HPLC Settings panel -->
-          <div v-if="hplcShowSettings" style="margin-top:10px; padding:10px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.78rem; display:flex; flex-direction:column; gap:8px;">
-            <div class="sub-label">Scan range (RT min)</div>
-            <div class="grid-2-col">
-              <div class="input-group"><label>RT min</label><input type="number" step="0.1" v-model.number="hplcSettings.scanMin"></div>
-              <div class="input-group"><label>RT max</label><input type="number" step="0.1" v-model.number="hplcSettings.scanMax"></div>
+          <div class="hplc-schema">
+            <code>&lcub;ABseq&rcub;_AB_&lcub;A'B'seq&rcub;_&lcub;S&vert;U&rcub;&lcub;rep&rcub;-&lcub;time&rcub;.txt</code>
+            <span v-if="isProcessingHplc" class="hplc-status"><i class="fas fa-spinner fa-spin"></i> {{ hplcProgress }}</span>
+            <span v-else-if="hplcProgress" class="hplc-status">{{ hplcProgress }}</span>
+          </div>
+
+          <!-- Settings drawer -->
+          <div v-if="hplcShowSettings" class="hplc-settings">
+            <details open>
+              <summary>Scan &amp; detection</summary>
+              <div class="grid-3-col">
+                <div class="input-group">
+                  <label>RT&nbsp;min <span class="no-upper">(min)</span></label>
+                  <input type="number" step="0.1" v-model.number="hplcSettings.scanMin">
+                </div>
+                <div class="input-group">
+                  <label>RT&nbsp;max <span class="no-upper">(min)</span></label>
+                  <input type="number" step="0.1" v-model.number="hplcSettings.scanMax">
+                </div>
+                <div class="input-group">
+                  <label>Prominence</label>
+                  <input type="number" step="0.01" v-model.number="hplcSettings.prominence">
+                </div>
+                <div class="input-group">
+                  <label>Baseline <span class="no-upper">(min)</span></label>
+                  <input type="number" step="0.1" v-model.number="hplcSettings.baselineWindow">
+                </div>
+              </div>
+            </details>
+
+            <details>
+              <summary>Beer–Lambert</summary>
+              <div class="grid-3-col">
+                <div class="input-group">
+                  <label>Pathlength <span class="no-upper">(cm)</span></label>
+                  <input type="number" step="0.01" v-model.number="hplcSettings.pathLength_cm">
+                </div>
+                <div class="input-group">
+                  <label>Injection <span class="no-upper">(µL)</span></label>
+                  <input type="number" step="0.1" v-model.number="hplcSettings.injection_uL">
+                </div>
+                <div class="input-group">
+                  <label>Flow rate <span class="no-upper">(mL/min)</span></label>
+                  <input type="number" step="0.01" v-model.number="hplcSettings.flow_mL_min">
+                </div>
+                <div class="input-group">
+                  <label>Solvent corr.</label>
+                  <input type="number" step="0.001" v-model.number="hplcSettings.solventCorrection">
+                </div>
+                <div class="input-group">
+                  <label>Aliquot <span class="no-upper">(µL)</span></label>
+                  <input type="number" step="0.1" v-model.number="hplcSettings.aliquot_uL">
+                </div>
+                <div class="input-group">
+                  <label>Vial total <span class="no-upper">(µL)</span></label>
+                  <input type="number" step="0.1" v-model.number="hplcSettings.vial_uL">
+                </div>
+              </div>
+              <div class="grid-2-col" style="margin-top:6px;">
+                <div class="input-group" title="Auto = vial / aliquot. Leave override blank to use auto.">
+                  <label>Dilution factor <span class="no-upper">(auto = {{ hplcDilutionFactor.toFixed(2) }})</span></label>
+                  <input type="number" step="0.01" v-model.number="hplcSettings.dilutionOverride" placeholder="auto">
+                </div>
+                <div class="input-group">
+                  <label>R<sub>max</sub> <span class="no-upper">(µM)</span></label>
+                  <input type="number" step="0.01" v-model.number="hplcSettings.rMax_uM">
+                </div>
+              </div>
+            </details>
+
+            <details>
+              <summary>Peak assignment</summary>
+              <div style="display:flex; gap:14px; font-size:0.8rem;">
+                <label class="radio-inline"><input type="radio" :value="true"  v-model="hplcSettings.earliestPeakIsAprime"> earliest = A'B'</label>
+                <label class="radio-inline"><input type="radio" :value="false" v-model="hplcSettings.earliestPeakIsAprime"> earliest = AB</label>
+              </div>
+            </details>
+
+            <details>
+              <summary>Batch conditions <span class="no-upper" style="opacity:0.6; font-weight:normal;">(applied to every file)</span></summary>
+              <div class="grid-3-col">
+                <div class="input-group">
+                  <label>T <span class="no-upper">(°C)</span></label>
+                  <input type="number" step="0.1" v-model.number="hplcBatchConditions.temperature">
+                </div>
+                <div class="input-group">
+                  <label>Ligase</label>
+                  <input type="number" step="any" v-model.number="hplcBatchConditions.ligase">
+                </div>
+                <div class="input-group">
+                  <label>ATP</label>
+                  <input type="number" step="any" v-model.number="hplcBatchConditions.atp">
+                </div>
+                <div class="input-group">
+                  <label><span class="no-upper">Mg²⁺</span></label>
+                  <input type="number" step="any" v-model.number="hplcBatchConditions.mg2">
+                </div>
+                <div class="input-group">
+                  <label>Env</label>
+                  <input type="text" v-model="hplcBatchConditions.env">
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <!-- Product window dual slider -->
+          <div v-if="hplcResults.length" class="hplc-window">
+            <div class="hplc-window-header">
+              <span><i class="fas fa-sliders-h"></i> Product window</span>
+              <span class="no-upper">
+                <strong>{{ Number(hplcSettings.productMin).toFixed(2) }}</strong>
+                – <strong>{{ Number(hplcSettings.productMax).toFixed(2) }}</strong> min
+              </span>
             </div>
-            <div class="sub-label">Detection</div>
-            <div class="grid-2-col">
-              <div class="input-group"><label>Prominence</label><input type="number" step="0.01" v-model.number="hplcSettings.prominence"></div>
-              <div class="input-group"><label>Baseline window (min)</label><input type="number" step="0.1" v-model.number="hplcSettings.baselineWindow"></div>
-            </div>
-            <div class="sub-label">Beer-Lambert &mdash; manual entry</div>
-            <div class="grid-3-col">
-              <div class="input-group"><label>Pathlength (cm)</label><input type="number" step="0.01" v-model.number="hplcSettings.pathLength_cm"></div>
-              <div class="input-group"><label>Injection (µL)</label><input type="number" step="0.1" v-model.number="hplcSettings.injection_uL"></div>
-              <div class="input-group"><label>Flow (mL/min)</label><input type="number" step="0.01" v-model.number="hplcSettings.flow_mL_min"></div>
-              <div class="input-group"><label>Solvent corr.</label><input type="number" step="0.001" v-model.number="hplcSettings.solventCorrection"></div>
-              <div class="input-group"><label>Aliquot (µL)</label><input type="number" step="0.1" v-model.number="hplcSettings.aliquot_uL"></div>
-              <div class="input-group"><label>Vial total (µL)</label><input type="number" step="0.1" v-model.number="hplcSettings.vial_uL"></div>
-            </div>
-            <div class="sub-label" style="display:flex; justify-content:space-between; align-items:center;">
-              <span>Dilution factor (auto = vial / aliquot)</span>
-              <span style="opacity:0.7;">{{ hplcDilutionFactor.toFixed(3) }}</span>
-            </div>
-            <div class="input-group">
-              <label>Override dilution factor (leave blank for auto)</label>
-              <input type="number" step="0.01" v-model.number="hplcSettings.dilutionOverride" placeholder="—">
-            </div>
-            <div class="sub-label">Conversion%</div>
-            <div class="input-group">
-              <label>Theoretical R<sub>max</sub> (µM)</label>
-              <input type="number" step="0.01" v-model.number="hplcSettings.rMax_uM">
-            </div>
-            <div class="sub-label">Peak-to-strand assignment</div>
-            <div style="display:flex; gap:10px; font-size:0.78rem;">
-              <label><input type="radio" :value="true"  v-model="hplcSettings.earliestPeakIsAprime"> earliest peak = A'B'</label>
-              <label><input type="radio" :value="false" v-model="hplcSettings.earliestPeakIsAprime"> earliest peak = AB</label>
-            </div>
-            <div class="sub-label">Per-batch reaction conditions (applied to every imported file)</div>
-            <div class="grid-3-col">
-              <div class="input-group"><label>T (°C)</label><input type="number" step="0.1" v-model.number="hplcBatchConditions.temperature"></div>
-              <div class="input-group"><label>Ligase</label><input type="number" step="any" v-model.number="hplcBatchConditions.ligase"></div>
-              <div class="input-group"><label>ATP</label><input type="number" step="any" v-model.number="hplcBatchConditions.atp"></div>
-              <div class="input-group"><label>Mg²⁺</label><input type="number" step="any" v-model.number="hplcBatchConditions.mg2"></div>
-              <div class="input-group"><label>Env</label><input type="text" v-model="hplcBatchConditions.env"></div>
+            <div class="hplc-window-sliders">
+              <input type="range" :min="hplcSettings.scanMin" :max="hplcSettings.scanMax" step="0.05" v-model.number="hplcSettings.productMin">
+              <input type="range" :min="hplcSettings.scanMin" :max="hplcSettings.scanMax" step="0.05" v-model.number="hplcSettings.productMax">
             </div>
           </div>
 
-          <!-- Product peak window dual slider -->
-          <div v-if="hplcResults.length" style="margin-top:12px; padding:8px 10px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.78rem; margin-bottom:4px;">
-              <span><i class="fas fa-sliders-h" style="opacity:0.6;"></i> Product peak window</span>
-              <span><strong>{{ Number(hplcSettings.productMin).toFixed(2) }}</strong> – <strong>{{ Number(hplcSettings.productMax).toFixed(2) }}</strong> min</span>
-            </div>
-            <div style="display:flex; gap:6px; align-items:center;">
-              <input type="range" :min="hplcSettings.scanMin" :max="hplcSettings.scanMax" step="0.05" v-model.number="hplcSettings.productMin" style="flex:1;">
-              <input type="range" :min="hplcSettings.scanMin" :max="hplcSettings.scanMax" step="0.05" v-model.number="hplcSettings.productMax" style="flex:1;">
-            </div>
-          </div>
-
-          <!-- Bad filenames list -->
-          <div v-if="hplcSkipped.length" style="margin-top:8px; padding:8px; background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.3); border-radius:6px; font-size:0.75rem;">
-            <strong>Skipped {{ hplcSkipped.length }} file(s):</strong>
-            <ul style="margin:4px 0 0 16px; padding:0;">
+          <!-- Skipped files -->
+          <div v-if="hplcSkipped.length" class="hplc-skipped">
+            <strong>{{ hplcSkipped.length }} skipped</strong>
+            <ul>
               <li v-for="s in hplcSkipped" :key="s.name">{{ s.name }} — {{ s.reason }}</li>
             </ul>
           </div>
 
-          <!-- Per-file preview table -->
-          <div v-if="hplcResults.length" style="margin-top:10px; max-height:200px; overflow:auto; border:1px solid var(--border-color,#e2e8f0); border-radius:6px;">
-            <table style="width:100%; font-size:0.72rem; border-collapse:collapse;">
-              <thead style="background:var(--summary-bg,#f1f5f9); position:sticky; top:0;">
+          <!-- Preview table -->
+          <div v-if="hplcResults.length" class="hplc-preview">
+            <table>
+              <thead>
                 <tr>
-                  <th style="text-align:left; padding:4px 6px;">file</th>
-                  <th style="text-align:right; padding:4px 6px;">rep</th>
-                  <th style="text-align:right; padding:4px 6px;">t</th>
-                  <th style="text-align:right; padding:4px 6px;">area AB</th>
-                  <th style="text-align:right; padding:4px 6px;">c AB</th>
-                  <th style="text-align:right; padding:4px 6px;">area A'B'</th>
-                  <th style="text-align:right; padding:4px 6px;">c A'B'</th>
-                  <th style="text-align:right; padding:4px 6px;">[R] µM</th>
-                  <th style="text-align:right; padding:4px 6px;">conv %</th>
+                  <th class="left">File</th>
+                  <th>Rep</th>
+                  <th class="no-upper"><span class="no-upper">t (min)</span></th>
+                  <th class="no-upper"><span class="no-upper">Area AB</span></th>
+                  <th class="no-upper"><span class="no-upper">c AB (µM)</span></th>
+                  <th class="no-upper"><span class="no-upper">Area A'B'</span></th>
+                  <th class="no-upper"><span class="no-upper">c A'B' (µM)</span></th>
+                  <th class="no-upper"><span class="no-upper">[R] (µM)</span></th>
+                  <th class="no-upper"><span class="no-upper">Conv. %</span></th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="r in hplcDerived" :key="r.name" :style="r.error ? 'opacity:0.5;' : ''">
-                  <td style="padding:3px 6px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="r.name">{{ r.name }}</td>
-                  <td style="padding:3px 6px; text-align:right;">{{ r.meta?.replicate ?? '' }}</td>
-                  <td style="padding:3px 6px; text-align:right;">{{ r.meta?.time ?? '' }}</td>
-                  <td style="padding:3px 6px; text-align:right;">{{ r.abPeak ? r.abPeak.area_mAU_min.toFixed(3) : '—' }}</td>
-                  <td style="padding:3px 6px; text-align:right;">{{ r.cAB_uM.toFixed(3) }}</td>
-                  <td style="padding:3px 6px; text-align:right;">{{ r.abPrimePeak ? r.abPrimePeak.area_mAU_min.toFixed(3) : '—' }}</td>
-                  <td style="padding:3px 6px; text-align:right;">{{ r.cABp_uM.toFixed(3) }}</td>
-                  <td style="padding:3px 6px; text-align:right;"><strong>{{ r.R_uM.toFixed(3) }}</strong></td>
-                  <td style="padding:3px 6px; text-align:right;">{{ r.conversion.toFixed(1) }}</td>
+                <tr v-for="r in hplcDerived" :key="r.name" :class="{ 'row-error': r.error }">
+                  <td class="left filename" :title="r.name">{{ r.name }}</td>
+                  <td>{{ r.meta?.replicate ?? '' }}</td>
+                  <td>{{ r.meta?.time ?? '' }}</td>
+                  <td>{{ r.abPeak ? r.abPeak.area_mAU_min.toFixed(3) : '—' }}</td>
+                  <td>{{ r.cAB_uM.toFixed(3) }}</td>
+                  <td>{{ r.abPrimePeak ? r.abPrimePeak.area_mAU_min.toFixed(3) : '—' }}</td>
+                  <td>{{ r.cABp_uM.toFixed(3) }}</td>
+                  <td><strong>{{ r.R_uM.toFixed(3) }}</strong></td>
+                  <td>{{ r.conversion.toFixed(1) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -1742,6 +1797,30 @@ function discardHplcResults() {
   hplcProgress.value = ''
 }
 
+// Download an example Chromeleon-style chromatogram with the expected filename.
+// File contents are a minimal valid header + a few dummy rows; the goal is to
+// show users the naming pattern, not to be a working test fixture.
+function downloadHplcTemplate() {
+  const name = 'ATCGATCG_AB_CGATCGAT_S1-30.txt'
+  const lines = []
+  // Chromeleon exports have 43 header lines before data; we approximate with
+  // a comment block + Chromeleon-style 'Time;Step;Value (mAU)' column header.
+  lines.push('# LIDA HPLC chromatogram — filename template')
+  lines.push("# Schema: {ABseq}_AB_{A'B'seq}_{S|U}{replicate}-{time}.txt")
+  lines.push('# Example below: AB=ATCGATCG, A\'B\'=CGATCGAT, Seeded, replicate 1, t=30 min')
+  lines.push('# Replace this file with your Chromeleon UV/Vis .txt export.')
+  for (let i = 0; i < 39; i++) lines.push('#')
+  lines.push('Time (min)\tStep (s)\tValue (mAU)')
+  for (let i = 0; i < 5; i++) {
+    const t = (i * 0.05).toFixed(3).replace('.', ',')
+    lines.push(`${t}\t0,500\t0,000`)
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob); a.download = name
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href)
+}
+
 // Mirror the chart-keyed Plotly refs so we can `Plotly.downloadImage()` per
 // chart for PNG export — single chart or batch (sequential downloads).
 function setHplcChartRef(name, el) { if (el) hplcChartRefs.value[name] = el; else delete hplcChartRefs.value[name] }
@@ -2664,6 +2743,86 @@ onBeforeUnmount(() => {
 /* ── Grids & range inputs ─────────────────────────────────── */
 .grid-2-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .grid-3-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+/* ── HPLC import panel ─────────────────────────────────────── */
+.hplc-toolbar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.hplc-toolbar-spacer { flex: 1 1 auto; }
+.hplc-toolbar .small.active { background: #3b82f6; color: #fff; }
+
+.hplc-schema {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+  font-size: 0.72rem; opacity: 0.8;
+  padding: 4px 8px;
+  background: var(--summary-bg, #f1f5f9);
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+.hplc-schema code { font-family: ui-monospace, Menlo, monospace; font-size: 0.72rem; }
+.hplc-status { font-size: 0.72rem; opacity: 0.7; }
+
+.hplc-settings {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.hplc-settings details { padding: 4px 0; }
+.hplc-settings summary {
+  cursor: pointer; font-size: 0.78rem; font-weight: 600;
+  padding: 4px 2px; user-select: none;
+  text-transform: none;
+}
+.hplc-settings summary::marker { color: var(--primary, #3b82f6); }
+.hplc-settings details > *:not(summary) { margin-top: 6px; }
+.hplc-settings .input-group { margin: 0; }
+.hplc-settings .input-group label { font-size: 0.7rem; text-transform: none; letter-spacing: 0; }
+.hplc-settings .radio-inline {
+  display: inline-flex; align-items: center; gap: 4px;
+  text-transform: none; font-weight: normal;
+}
+
+.hplc-window {
+  margin: 8px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+}
+.hplc-window-header {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 0.78rem; margin-bottom: 4px;
+}
+.hplc-window-sliders {
+  display: flex; gap: 6px; align-items: center;
+}
+.hplc-window-sliders input[type="range"] { flex: 1; }
+
+.hplc-skipped {
+  margin-top: 8px; padding: 6px 10px;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px; font-size: 0.72rem;
+}
+.hplc-skipped ul { margin: 4px 0 0 16px; padding: 0; }
+
+.hplc-preview {
+  margin-top: 8px; max-height: 220px; overflow: auto;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+}
+.hplc-preview table { width: 100%; font-size: 0.72rem; border-collapse: collapse; }
+.hplc-preview thead { background: var(--summary-bg, #f1f5f9); position: sticky; top: 0; }
+.hplc-preview th, .hplc-preview td {
+  padding: 3px 6px; text-align: right; white-space: nowrap;
+  text-transform: none;
+}
+.hplc-preview th.left, .hplc-preview td.left { text-align: left; }
+.hplc-preview td.filename { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.hplc-preview tr.row-error { opacity: 0.5; }
 
 /* ── HPLC chromatogram + kinetic-fit gallery ──────────────── */
 .hplc-gallery {

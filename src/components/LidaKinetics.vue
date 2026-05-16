@@ -63,6 +63,136 @@
           </div>
         </div>
 
+        <!-- 1b. HPLC Chromatogram Import (Chromeleon .txt) -->
+        <div class="internal-section">
+          <h3>1b. HPLC Chromatogram Import (Chromeleon .txt)</h3>
+          <p style="font-size:0.75rem; opacity:0.7; margin:0 0 8px 0;">
+            Filename schema:
+            <code>{ABseq}_AB_{A'B'seq}_{S|U}{rep}-{time}.txt</code>
+            — peaks detected &amp; integrated via hplc-py in Pyodide; both product peaks summed into a single [R].
+          </p>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <input ref="hplcFileInput" type="file" accept=".txt,.TXT" multiple style="display:none" @change="onHplcFileSelected" />
+            <button class="small success-btn" :disabled="isProcessingHplc" @click="$refs.hplcFileInput.click()">
+              <i class="fas fa-vials"></i> Pick chromatograms
+            </button>
+            <button class="small" @click="hplcShowSettings = !hplcShowSettings" :style="hplcShowSettings ? 'background:#3b82f6;color:#fff;' : ''">
+              <i class="fas fa-sliders"></i> HPLC Settings
+            </button>
+            <button v-if="hplcResults.length" class="small" @click="applyHplcResultsToDataset">
+              <i class="fas fa-arrow-right-to-bracket"></i> Append to dataset
+            </button>
+            <button v-if="hplcResults.length" class="small danger-btn" @click="discardHplcResults">
+              <i class="fas fa-times"></i> Discard
+            </button>
+            <span v-if="isProcessingHplc" style="font-size:0.78rem; opacity:0.7;">
+              <i class="fas fa-spinner fa-spin"></i> {{ hplcProgress }}
+            </span>
+            <span v-else-if="hplcProgress" style="font-size:0.78rem; opacity:0.6;">{{ hplcProgress }}</span>
+          </div>
+
+          <!-- HPLC Settings panel -->
+          <div v-if="hplcShowSettings" style="margin-top:10px; padding:10px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.78rem; display:flex; flex-direction:column; gap:8px;">
+            <div class="sub-label">Scan range (RT min)</div>
+            <div class="grid-2-col">
+              <div class="input-group"><label>RT min</label><input type="number" step="0.1" v-model.number="hplcSettings.scanMin"></div>
+              <div class="input-group"><label>RT max</label><input type="number" step="0.1" v-model.number="hplcSettings.scanMax"></div>
+            </div>
+            <div class="sub-label">Detection</div>
+            <div class="grid-2-col">
+              <div class="input-group"><label>Prominence</label><input type="number" step="0.01" v-model.number="hplcSettings.prominence"></div>
+              <div class="input-group"><label>Baseline window (min)</label><input type="number" step="0.1" v-model.number="hplcSettings.baselineWindow"></div>
+            </div>
+            <div class="sub-label">Beer-Lambert &mdash; manual entry</div>
+            <div class="grid-3-col">
+              <div class="input-group"><label>Pathlength (cm)</label><input type="number" step="0.01" v-model.number="hplcSettings.pathLength_cm"></div>
+              <div class="input-group"><label>Injection (µL)</label><input type="number" step="0.1" v-model.number="hplcSettings.injection_uL"></div>
+              <div class="input-group"><label>Flow (mL/min)</label><input type="number" step="0.01" v-model.number="hplcSettings.flow_mL_min"></div>
+              <div class="input-group"><label>Solvent corr.</label><input type="number" step="0.001" v-model.number="hplcSettings.solventCorrection"></div>
+              <div class="input-group"><label>Aliquot (µL)</label><input type="number" step="0.1" v-model.number="hplcSettings.aliquot_uL"></div>
+              <div class="input-group"><label>Vial total (µL)</label><input type="number" step="0.1" v-model.number="hplcSettings.vial_uL"></div>
+            </div>
+            <div class="sub-label" style="display:flex; justify-content:space-between; align-items:center;">
+              <span>Dilution factor (auto = vial / aliquot)</span>
+              <span style="opacity:0.7;">{{ hplcDilutionFactor.toFixed(3) }}</span>
+            </div>
+            <div class="input-group">
+              <label>Override dilution factor (leave blank for auto)</label>
+              <input type="number" step="0.01" v-model.number="hplcSettings.dilutionOverride" placeholder="—">
+            </div>
+            <div class="sub-label">Conversion%</div>
+            <div class="input-group">
+              <label>Theoretical R<sub>max</sub> (µM)</label>
+              <input type="number" step="0.01" v-model.number="hplcSettings.rMax_uM">
+            </div>
+            <div class="sub-label">Peak-to-strand assignment</div>
+            <div style="display:flex; gap:10px; font-size:0.78rem;">
+              <label><input type="radio" :value="true"  v-model="hplcSettings.earliestPeakIsAprime"> earliest peak = A'B'</label>
+              <label><input type="radio" :value="false" v-model="hplcSettings.earliestPeakIsAprime"> earliest peak = AB</label>
+            </div>
+            <div class="sub-label">Per-batch reaction conditions (applied to every imported file)</div>
+            <div class="grid-3-col">
+              <div class="input-group"><label>T (°C)</label><input type="number" step="0.1" v-model.number="hplcBatchConditions.temperature"></div>
+              <div class="input-group"><label>Ligase</label><input type="number" step="any" v-model.number="hplcBatchConditions.ligase"></div>
+              <div class="input-group"><label>ATP</label><input type="number" step="any" v-model.number="hplcBatchConditions.atp"></div>
+              <div class="input-group"><label>Mg²⁺</label><input type="number" step="any" v-model.number="hplcBatchConditions.mg2"></div>
+              <div class="input-group"><label>Env</label><input type="text" v-model="hplcBatchConditions.env"></div>
+            </div>
+          </div>
+
+          <!-- Product peak window dual slider -->
+          <div v-if="hplcResults.length" style="margin-top:12px; padding:8px 10px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.78rem; margin-bottom:4px;">
+              <span><i class="fas fa-sliders-h" style="opacity:0.6;"></i> Product peak window</span>
+              <span><strong>{{ Number(hplcSettings.productMin).toFixed(2) }}</strong> – <strong>{{ Number(hplcSettings.productMax).toFixed(2) }}</strong> min</span>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input type="range" :min="hplcSettings.scanMin" :max="hplcSettings.scanMax" step="0.05" v-model.number="hplcSettings.productMin" style="flex:1;">
+              <input type="range" :min="hplcSettings.scanMin" :max="hplcSettings.scanMax" step="0.05" v-model.number="hplcSettings.productMax" style="flex:1;">
+            </div>
+          </div>
+
+          <!-- Bad filenames list -->
+          <div v-if="hplcSkipped.length" style="margin-top:8px; padding:8px; background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.3); border-radius:6px; font-size:0.75rem;">
+            <strong>Skipped {{ hplcSkipped.length }} file(s):</strong>
+            <ul style="margin:4px 0 0 16px; padding:0;">
+              <li v-for="s in hplcSkipped" :key="s.name">{{ s.name }} — {{ s.reason }}</li>
+            </ul>
+          </div>
+
+          <!-- Per-file preview table -->
+          <div v-if="hplcResults.length" style="margin-top:10px; max-height:200px; overflow:auto; border:1px solid var(--border-color,#e2e8f0); border-radius:6px;">
+            <table style="width:100%; font-size:0.72rem; border-collapse:collapse;">
+              <thead style="background:var(--summary-bg,#f1f5f9); position:sticky; top:0;">
+                <tr>
+                  <th style="text-align:left; padding:4px 6px;">file</th>
+                  <th style="text-align:right; padding:4px 6px;">rep</th>
+                  <th style="text-align:right; padding:4px 6px;">t</th>
+                  <th style="text-align:right; padding:4px 6px;">area AB</th>
+                  <th style="text-align:right; padding:4px 6px;">c AB</th>
+                  <th style="text-align:right; padding:4px 6px;">area A'B'</th>
+                  <th style="text-align:right; padding:4px 6px;">c A'B'</th>
+                  <th style="text-align:right; padding:4px 6px;">[R] µM</th>
+                  <th style="text-align:right; padding:4px 6px;">conv %</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in hplcDerived" :key="r.name" :style="r.error ? 'opacity:0.5;' : ''">
+                  <td style="padding:3px 6px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="r.name">{{ r.name }}</td>
+                  <td style="padding:3px 6px; text-align:right;">{{ r.meta?.replicate ?? '' }}</td>
+                  <td style="padding:3px 6px; text-align:right;">{{ r.meta?.time ?? '' }}</td>
+                  <td style="padding:3px 6px; text-align:right;">{{ r.abPeak ? r.abPeak.area_mAU_min.toFixed(3) : '—' }}</td>
+                  <td style="padding:3px 6px; text-align:right;">{{ r.cAB_uM.toFixed(3) }}</td>
+                  <td style="padding:3px 6px; text-align:right;">{{ r.abPrimePeak ? r.abPrimePeak.area_mAU_min.toFixed(3) : '—' }}</td>
+                  <td style="padding:3px 6px; text-align:right;">{{ r.cABp_uM.toFixed(3) }}</td>
+                  <td style="padding:3px 6px; text-align:right;"><strong>{{ r.R_uM.toFixed(3) }}</strong></td>
+                  <td style="padding:3px 6px; text-align:right;">{{ r.conversion.toFixed(1) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- 2. CSV Concentration Units & Initial Conditions -->
         <div class="internal-section">
           <h3>2. CSV Units &amp; Initial Conditions</h3>
@@ -688,6 +818,65 @@
       </div>
     </div>
 
+    <!-- Chromatogram Gallery (full-width, below the two columns) -->
+    <div v-if="hplcResults.length" class="internal-section" style="margin-top:8px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <h3 style="margin:0;">Chromatogram Gallery <span style="opacity:0.6; font-size:0.85rem; font-weight:normal;">({{ hplcDerived.length }} files)</span></h3>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button class="small" @click="hplcShowGallery = !hplcShowGallery">
+            <i class="fas" :class="hplcShowGallery ? 'fa-eye-slash' : 'fa-eye'"></i>
+            {{ hplcShowGallery ? 'Hide' : 'Show' }}
+          </button>
+          <button class="small" :disabled="!hplcShowGallery" @click="exportAllHplcChartsPng">
+            <i class="fas fa-download"></i> Export all PNGs
+          </button>
+        </div>
+      </div>
+      <div v-if="hplcShowGallery" class="hplc-gallery">
+        <div v-for="r in hplcDerived" :key="r.name" class="hplc-gallery-card">
+          <div :ref="(el) => setHplcChartRef(r.name, el)" style="width:100%; height:240px;"></div>
+          <div class="hplc-gallery-card-footer">
+            <span style="font-size:0.7rem; opacity:0.7;">
+              ε(AB)={{ r.epsAB ? r.epsAB.toFixed(0) : '—' }} ·
+              ε(A'B')={{ r.epsABp ? r.epsABp.toFixed(0) : '—' }}
+              <span v-if="r.meta && !r.meta.isCanonicalRC" style="color:#f59e0b;" title="A'B' is not the reverse complement of AB">⚠</span>
+            </span>
+            <button class="small" @click="exportHplcChartPng(r.name)" style="padding:2px 8px;">
+              <i class="fas fa-download"></i> PNG
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Kinetic Fits Gallery (full-width, below chromatograms) -->
+    <div v-if="dataset.experiments.some(e => e.fit)" class="internal-section" style="margin-top:8px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <h3 style="margin:0;">Kinetic Fits Gallery</h3>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button class="small" @click="exportAllFitChartsPng">
+            <i class="fas fa-download"></i> Export all PNGs
+          </button>
+          <button class="small" @click="exportFitParamsCsv">
+            <i class="fas fa-file-csv"></i> Export params CSV
+          </button>
+        </div>
+      </div>
+      <div class="hplc-gallery">
+        <div v-for="exp in dataset.experiments.filter(e => e.fit)" :key="exp.groupId" class="hplc-gallery-card">
+          <div :ref="(el) => setFitChartRef(exp.groupId, el)" style="width:100%; height:260px;"></div>
+          <div class="hplc-gallery-card-footer">
+            <span style="font-size:0.7rem; opacity:0.75; max-width:75%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="exp.sequence">
+              {{ truncateSeq(exp.sequence) }} · {{ exp.replicates?.length || 1 }} rep(s)
+            </span>
+            <button class="small" @click="exportFitChartPng(exp.groupId)" style="padding:2px 8px;">
+              <i class="fas fa-download"></i> PNG
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Cloud Library Modal -->
     <div v-if="showLibrary" class="modal-overlay" @click.self="showLibrary = false">
       <div class="modal-body">
@@ -727,6 +916,10 @@ import { db } from '../services/supabase'
 import { ENDPOINTS } from '../services/kineticsBackend'
 import { fitKineticsLocal } from '../services/kineticsLocalFit'
 import { suggestNextLocal, predictSequenceLocal } from '../services/metisLocalService'
+import { processChromatograms, preloadHplcEngine } from '../services/hplcLocalService'
+import { parseChromeleonFilename, reverseComplement, HPLC_FILENAME_REGEX_SOURCE } from '../utils/hplcFilename'
+import { areaToMicromolar, concentrationToConversion, dilutionFactorFromVial, DEFAULT_HPLC_PARAMS } from '../utils/hplcConcentration'
+import { calcSeqExtinction } from '../utils/seqUtils'
 import { esc } from '../utils/htmlSafe'
 
 const store = useLabStore()
@@ -794,6 +987,64 @@ const activeExportInv = ref(null)  // 'ligase' | 'atp' | 'mg2' | null
 const exportInvSearch = reactive({ ligase: '', atp: '', mg2: '' })
 const exportError = ref('')
 const exportSuccess = ref('')
+
+// ── HPLC chromatogram import state ────────────────────────────────────────
+// Files imported as ThermoFisher Chromeleon `.txt`. The worker runs hplc-py
+// in Pyodide to detect + integrate all peaks per file. Classification of
+// "product" peaks (and area→concentration conversion) lives reactively in
+// computed bindings so the user's product-window slider re-classifies
+// instantly without re-running integration.
+const hplcSettings = reactive({
+  scanMin: 1.6, scanMax: 10.0,
+  prominence: 0.05, baselineWindow: 1.0,
+  productMin: 6.2, productMax: 7.4,
+  pathLength_cm: DEFAULT_HPLC_PARAMS.pathLength_cm,
+  flow_mL_min:   DEFAULT_HPLC_PARAMS.flow_mL_min,
+  injection_uL:  DEFAULT_HPLC_PARAMS.injection_uL,
+  solventCorrection: DEFAULT_HPLC_PARAMS.solventCorrection,
+  aliquot_uL: DEFAULT_HPLC_PARAMS.aliquot_uL,
+  vial_uL:    DEFAULT_HPLC_PARAMS.vial_uL,
+  dilutionOverride: null,        // if set, use directly instead of vial/aliquot ratio
+  rMax_uM: 1.4,
+  earliestPeakIsAprime: true,    // peak-to-strand assignment when 2 product peaks
+  useHplcPy: true,
+})
+// Per-batch reaction conditions applied to every imported file (METIS needs
+// these). Defaults come from the dataset condition ranges' midpoints.
+const hplcBatchConditions = reactive({
+  temperature: 25, ligase: 1, atp: 5, mg2: 10, env: 'none',
+})
+const hplcResults = ref([])             // [{ name, parsed, trace, peaks, ... }]
+const hplcSkipped = ref([])             // [{ name, reason }]
+const isProcessingHplc = ref(false)
+const hplcProgress = ref('')
+const hplcShowSettings = ref(false)
+const hplcShowGallery  = ref(true)
+const hplcFileInput = ref(null)
+
+const hplcDilutionFactor = computed(() => hplcSettings.dilutionOverride != null
+  ? Number(hplcSettings.dilutionOverride)
+  : dilutionFactorFromVial(hplcSettings.vial_uL, hplcSettings.aliquot_uL))
+
+// Beer-Lambert parameter bag passed to areaToMicromolar.
+const hplcParams = computed(() => ({
+  pathLength_cm:     Number(hplcSettings.pathLength_cm),
+  flow_mL_min:       Number(hplcSettings.flow_mL_min),
+  injection_uL:      Number(hplcSettings.injection_uL),
+  solventCorrection: Number(hplcSettings.solventCorrection),
+  dilutionFactor:    hplcDilutionFactor.value,
+}))
+
+// Reactive: for each HPLC result, classify peaks against the current
+// product window and compute c(AB), c(A'B'), [R], conversion%.
+const hplcDerived = computed(() => hplcResults.value.map(r => deriveHplcRow(r)))
+
+// Helpers used by the chromatogram gallery (Plotly refs keyed by filename).
+const hplcChartRefs = ref({})
+const hplcFilter = reactive({ condition: '', timeMin: null, timeMax: null, replicate: '' })
+
+// ── HPLC kinetic-fits gallery state ───────────────────────────────────────
+const fitChartRefs = ref({})
 
 // ── DNA Building Block state ────────────────────────────────────────────────
 // Sequence names in the CSV follow the pattern <LatinUpper><greeklower>, e.g.
@@ -1282,6 +1533,295 @@ function parseCsv(text) {
   if (nRepGroups > 0) parseStats.value += ` ${nRepGroups} group(s) detected with multiple replicates.`
   if (normalizedReps > 0) parseStats.value += ` Normalized ${normalizedReps} replicate(s) with inconsistent conditions across timepoints (used the most-common value per column).`
   if (badRows > 0) parseStats.value += ` Skipped ${badRows} invalid row(s).`
+}
+
+// ════════════════ HPLC chromatogram import ════════════════
+// Reads Chromeleon `.txt` files, runs hplc-py in a Pyodide worker for peak
+// detection + integration, and exposes per-file results to the gallery and
+// the dataset glue. Filename schema: `{ABseq}_AB_{ABprimeSeq}_{S|U}{rep}-{time}.txt`.
+
+async function onHplcFileSelected(e) {
+  const fileList = Array.from(e.target.files || [])
+  e.target.value = ''
+  if (!fileList.length) return
+
+  // Parse filenames first so we can drop bad ones before sending to the worker.
+  const good = []
+  const skipped = []
+  for (const f of fileList) {
+    const meta = parseChromeleonFilename(f.name)
+    if (meta.error) {
+      skipped.push({ name: f.name, reason: meta.error })
+    } else {
+      good.push({ file: f, meta })
+    }
+  }
+  hplcSkipped.value = skipped
+
+  if (!good.length) return
+
+  isProcessingHplc.value = true
+  hplcProgress.value = 'Reading files…'
+  try {
+    // Read file texts (browser File API).
+    const filesPayload = await Promise.all(good.map(async ({ file }) => ({
+      name: file.name,
+      text: await file.text(),
+    })))
+
+    const params = {
+      scanMin: Number(hplcSettings.scanMin),
+      scanMax: Number(hplcSettings.scanMax),
+      prominence: Number(hplcSettings.prominence),
+      baselineWindow: Number(hplcSettings.baselineWindow),
+      useHplcPy: !!hplcSettings.useHplcPy,
+    }
+
+    // Initialize incremental results so the gallery starts filling as files
+    // come back from the worker.
+    const incoming = []
+    hplcResults.value = []
+
+    const results = await processChromatograms(
+      filesPayload,
+      params,
+      msg => { hplcProgress.value = msg },
+      ({ index, total, result }) => {
+        const meta = good[index]?.meta
+        incoming.push({ ...result, parsed: meta })
+        // Push a fresh array reference so Vue refreshes the gallery.
+        hplcResults.value = [...incoming]
+      }
+    )
+    // Make sure the final result list is in upload order (worker preserves it).
+    hplcResults.value = results.map((r, i) => ({ ...r, parsed: good[i]?.meta }))
+    hplcProgress.value = `Done — ${results.length} file(s) processed.`
+  } catch (err) {
+    hplcProgress.value = `HPLC processing failed: ${err?.message || err}`
+  } finally {
+    isProcessingHplc.value = false
+  }
+}
+
+// Classify a single file's peaks against the current product window and
+// produce derived concentrations.  This is intentionally a pure-ish function
+// (depends on hplcSettings + hplcParams) so it can be re-run via computed
+// without re-touching the worker.
+function deriveHplcRow(result) {
+  const settings = hplcSettings
+  const params = hplcParams.value
+  const meta = result.parsed || {}
+  const ABseq      = meta.ABseq || ''
+  const ABprimeSeq = meta.ABprimeSeq || ''
+  const epsAB      = ABseq      ? calcSeqExtinction(ABseq,      'DNA') : 0
+  const epsABp     = ABprimeSeq ? calcSeqExtinction(ABprimeSeq, 'DNA') : 0
+
+  const peaks = (result.peaks || []).map(p => ({ ...p }))
+  // Tag peaks: product / building_block / other.
+  for (const p of peaks) {
+    if (p.rt >= settings.productMin && p.rt <= settings.productMax) p.peakClass = 'product'
+    else if (p.rt < settings.productMin) p.peakClass = 'building_block'
+    else p.peakClass = 'other'
+  }
+
+  // Pick the two largest product peaks (by area) — sorted by RT for assignment.
+  const products = peaks.filter(p => p.peakClass === 'product')
+    .sort((a, b) => (b.area_mAU_min || 0) - (a.area_mAU_min || 0))
+    .slice(0, 2)
+    .sort((a, b) => a.rt - b.rt)
+
+  let abPeak = null, abPrimePeak = null
+  if (products.length === 1) {
+    abPeak = products[0]
+  } else if (products.length >= 2) {
+    if (settings.earliestPeakIsAprime) {
+      abPrimePeak = products[0]; abPeak = products[1]
+    } else {
+      abPeak = products[0];     abPrimePeak = products[1]
+    }
+  }
+  if (abPeak)      abPeak.assignment      = 'AB'
+  if (abPrimePeak) abPrimePeak.assignment = "A'B'"
+
+  const areaAB  = abPeak      ? Number(abPeak.area_mAU_min) || 0      : 0
+  const areaABp = abPrimePeak ? Number(abPrimePeak.area_mAU_min) || 0 : 0
+  const cAB  = epsAB  ? areaToMicromolar(areaAB,  epsAB,  params) : 0
+  const cABp = epsABp ? areaToMicromolar(areaABp, epsABp, params) : 0
+  const R_uM = cAB + cABp
+  const conversion = concentrationToConversion(R_uM, settings.rMax_uM)
+
+  return {
+    name: result.name,
+    meta,
+    epsAB, epsABp,
+    abPeak, abPrimePeak,
+    peaks,
+    cAB_uM:  cAB,
+    cABp_uM: cABp,
+    R_uM,
+    conversion,
+    trace: result.trace || { t: [], s: [] },
+    error: result.error || null,
+  }
+}
+
+// Apply current derived rows to dataset.experiments, grouped by sequence + conditions.
+function applyHplcResultsToDataset() {
+  const rows = hplcDerived.value
+  if (!rows.length) {
+    parseError.value = 'No HPLC results to apply.'
+    return
+  }
+  // Build grouping: (ABseq + batch conditions) → time-course rows
+  const groupsByKey = new Map()
+  const repsByKey   = new Map()
+  const conds = {
+    ligase: Number(hplcBatchConditions.ligase) || 0,
+    atp:    Number(hplcBatchConditions.atp) || 0,
+    temperature: Number(hplcBatchConditions.temperature) || 0,
+    env: hplcBatchConditions.env || 'none',
+    mg2: Number(hplcBatchConditions.mg2) || 0,
+  }
+
+  for (const r of rows) {
+    if (!r.meta?.ABseq) continue
+    const seq = r.meta.ABseq
+    const time = r.meta.time
+    const conversion = r.conversion
+    if (!isFinite(time) || !isFinite(conversion)) continue
+
+    const key = groupKey(seq, conds)
+    if (!groupsByKey.has(key)) {
+      groupsByKey.set(key, {
+        groupId: key,
+        sequence: seq,
+        seqName: null,
+        conditions: { ...conds },
+        timeCourse: [],
+        maxConversion: 0,
+        fit: null,
+        hplc: { ABprimeSeq: r.meta.ABprimeSeq, epsAB: r.epsAB, epsABp: r.epsABp,
+                rMax_uM: hplcSettings.rMax_uM, productWindow: [hplcSettings.productMin, hplcSettings.productMax] },
+      })
+      repsByKey.set(key, new Map())
+    }
+    const grp = groupsByKey.get(key)
+    grp.timeCourse.push({
+      time, conversion,
+      concentration_uM: r.R_uM,
+      peakAreaAB:      r.abPeak ? r.abPeak.area_mAU_min : 0,
+      peakAreaABprime: r.abPrimePeak ? r.abPrimePeak.area_mAU_min : 0,
+      epsilonAB:       r.epsAB,
+      epsilonABprime:  r.epsABp,
+    })
+    const repId = String(r.meta.replicate ?? '1')
+    if (!repsByKey.get(key).has(repId)) repsByKey.get(key).set(repId, [])
+    repsByKey.get(key).get(repId).push({ time, conversion })
+  }
+
+  for (const [key, g] of groupsByKey) {
+    g.timeCourse.sort((a, b) => a.time - b.time)
+    g.maxConversion = g.timeCourse.length ? Math.max(...g.timeCourse.map(p => p.conversion)) : 0
+    const repsMap = repsByKey.get(key)
+    if (repsMap && repsMap.size > 1) {
+      g.replicates = [...repsMap.entries()]
+        .map(([repId, tc]) => ({ replicateId: repId, timeCourse: tc.slice().sort((a, b) => a.time - b.time) }))
+        .sort((a, b) => a.replicateId.localeCompare(b.replicateId, undefined, { numeric: true }))
+    }
+    const existingIdx = dataset.experiments.findIndex(e => e.groupId === key)
+    if (existingIdx >= 0) dataset.experiments[existingIdx] = g
+    else dataset.experiments.push(g)
+  }
+
+  parseStats.value = `HPLC: appended ${rows.length} datapoint(s) into ${groupsByKey.size} group(s). Click "Fit Kinetics" to run the ODE fit, then "Suggest Next" for METIS.`
+}
+
+function discardHplcResults() {
+  hplcResults.value = []
+  hplcSkipped.value = []
+  hplcProgress.value = ''
+}
+
+// Mirror the chart-keyed Plotly refs so we can `Plotly.downloadImage()` per
+// chart for PNG export — single chart or batch (sequential downloads).
+function setHplcChartRef(name, el) { if (el) hplcChartRefs.value[name] = el; else delete hplcChartRefs.value[name] }
+function setFitChartRef(key, el)   { if (el) fitChartRefs.value[key] = el;   else delete fitChartRefs.value[key] }
+
+async function exportHplcChartPng(name) {
+  const el = hplcChartRefs.value[name]
+  if (!el) return
+  try {
+    await Plotly.downloadImage(el, { format: 'png', filename: name.replace(/\.txt$/i, '') + '_chrom', width: 900, height: 500 })
+  } catch (err) { console.error('PNG export failed:', err) }
+}
+
+async function exportAllHplcChartsPng() {
+  const entries = Object.entries(hplcChartRefs.value)
+  for (const [name, el] of entries) {
+    if (!el) continue
+    try {
+      await Plotly.downloadImage(el, { format: 'png', filename: name.replace(/\.txt$/i, '') + '_chrom', width: 900, height: 500 })
+    } catch (err) { console.error('PNG export failed:', err) }
+    await new Promise(r => setTimeout(r, 300))   // stagger so Safari doesn't block subsequent downloads
+  }
+}
+
+async function exportFitChartPng(key) {
+  const el = fitChartRefs.value[key]
+  if (!el) return
+  try {
+    await Plotly.downloadImage(el, { format: 'png', filename: `fit_${key}`, width: 800, height: 500 })
+  } catch (err) { console.error('PNG export failed:', err) }
+}
+
+async function exportAllFitChartsPng() {
+  const entries = Object.entries(fitChartRefs.value)
+  for (const [key, el] of entries) {
+    if (!el) continue
+    try {
+      await Plotly.downloadImage(el, { format: 'png', filename: `fit_${key}`, width: 800, height: 500 })
+    } catch (err) { console.error('PNG export failed:', err) }
+    await new Promise(r => setTimeout(r, 300))
+  }
+}
+
+function exportFitParamsCsv() {
+  const rows = []
+  for (const e of dataset.experiments) {
+    const fits = []
+    if (e.replicates?.length) {
+      for (const rep of e.replicates) {
+        if (rep.fit) fits.push({ replicateId: rep.replicateId, fit: rep.fit })
+      }
+    } else if (e.fit) {
+      fits.push({ replicateId: '1', fit: e.fit })
+    }
+    for (const { replicateId, fit } of fits) {
+      rows.push({
+        sequence:   e.sequence,
+        condition:  e.conditions?.env || '',
+        temperature: e.conditions?.temperature ?? '',
+        ligase:     e.conditions?.ligase ?? '',
+        atp:        e.conditions?.atp ?? '',
+        mg2:        e.conditions?.mg2 ?? '',
+        replicate:  replicateId,
+        ku:   fit.ku ?? '',
+        k1:   fit.k1 ?? '',
+        k2:   fit.k2 ?? '',
+        kr:   fit.kr ?? '',
+        k_bg: fit.k_bg ?? '',
+        R_max: e.hplc?.rMax_uM ?? '',
+      })
+    }
+  }
+  if (!rows.length) { alert('No fits to export — run Fit Kinetics first.'); return }
+  const headers = Object.keys(rows[0])
+  const csv = [headers.join(','), ...rows.map(r => headers.map(h => JSON.stringify(r[h] ?? '')).join(','))].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `kinetic_fits_${new Date().toISOString().slice(0, 10)}.csv`
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href)
 }
 
 // ════════════════ Sequence logo (frontend) ════════════════
@@ -1943,6 +2483,128 @@ async function archiveDataset() {
   await saveToCloud()
 }
 
+// ════════════════ HPLC chromatogram gallery + kinetic-fits gallery rendering ════════════════
+
+// Render one Plotly chart per HPLC result. Reactive to derived classification
+// so adjusting the product-window slider re-shades peaks instantly.
+function renderHplcCharts() {
+  const rows = hplcDerived.value
+  for (const row of rows) {
+    const el = hplcChartRefs.value[row.name]
+    if (!el) continue
+    const t = row.trace?.t || []
+    const s = row.trace?.s || []
+    const traces = [{
+      type: 'scatter', mode: 'lines', x: t, y: s,
+      line: { color: '#0f172a', width: 1.4 }, name: 'signal', hoverinfo: 'x+y',
+    }]
+    // Shaded fills under product peaks. We synthesize a Gaussian-ish window
+    // around each assigned peak's RT using ±0.15 min (cheap visual; exact
+    // bounds were already used to compute area in the worker).
+    for (const peak of row.peaks || []) {
+      if (peak.peakClass !== 'product') continue
+      const color = peak.assignment === 'AB' ? 'rgba(59,130,246,0.45)'
+                 : peak.assignment === "A'B'" ? 'rgba(245,158,11,0.45)'
+                 : 'rgba(148,163,184,0.35)'
+      const halfWidth = (peak.scale && peak.scale > 0) ? Math.min(0.35, peak.scale * 3) : 0.18
+      const xs = [], ys = []
+      for (let i = 0; i < t.length; i++) {
+        if (t[i] >= peak.rt - halfWidth && t[i] <= peak.rt + halfWidth) {
+          xs.push(t[i]); ys.push(s[i])
+        }
+      }
+      if (xs.length > 1) {
+        traces.push({
+          type: 'scatter', mode: 'lines', x: xs, y: ys,
+          fill: 'tozeroy', line: { color }, fillcolor: color, hoverinfo: 'skip',
+          name: peak.assignment ? `${peak.assignment} (rt=${peak.rt.toFixed(2)})` : `peak ${peak.rt.toFixed(2)}`,
+          showlegend: false,
+        })
+      }
+    }
+    // Vertical dashed lines at product window edges.
+    const shapes = [
+      { type: 'line', xref: 'x', yref: 'paper', x0: hplcSettings.productMin, x1: hplcSettings.productMin, y0: 0, y1: 1,
+        line: { dash: 'dot', width: 1, color: '#64748b' } },
+      { type: 'line', xref: 'x', yref: 'paper', x0: hplcSettings.productMax, x1: hplcSettings.productMax, y0: 0, y1: 1,
+        line: { dash: 'dot', width: 1, color: '#64748b' } },
+    ]
+    const titleParts = [row.name]
+    if (row.abPeak)      titleParts.push(`AB ${row.cAB_uM.toFixed(2)} µM`)
+    if (row.abPrimePeak) titleParts.push(`A'B' ${row.cABp_uM.toFixed(2)} µM`)
+    titleParts.push(`[R] ${row.R_uM.toFixed(2)} µM`)
+    const layout = {
+      title: { text: titleParts.join(' · '), font: { size: 11 } },
+      xaxis: { title: 't / min', range: [hplcSettings.scanMin, hplcSettings.scanMax] },
+      yaxis: { title: 'signal / mAU' },
+      shapes,
+      margin: { l: 50, r: 10, t: 30, b: 35 },
+      showlegend: false,
+      paper_bgcolor: store.isDarkMode ? '#0f172a' : '#ffffff',
+      plot_bgcolor: store.isDarkMode ? '#0f172a' : '#ffffff',
+      font: { color: store.isDarkMode ? '#e2e8f0' : '#0f172a' },
+    }
+    Plotly.react(el, traces, layout, { responsive: true, displayModeBar: false })
+  }
+}
+
+// Render one Plotly chart per experiment showing data points + fitted ODE curve.
+function renderFitCharts() {
+  for (const exp of dataset.experiments) {
+    const key = exp.groupId
+    const el = fitChartRefs.value[key]
+    if (!el) continue
+    const traces = []
+    // Data points: prefer replicates if present, else aggregate timeCourse.
+    if (exp.replicates?.length) {
+      for (const rep of exp.replicates) {
+        traces.push({
+          type: 'scatter', mode: 'markers',
+          x: rep.timeCourse.map(p => p.time),
+          y: rep.timeCourse.map(p => p.conversion),
+          name: `rep ${rep.replicateId}`, marker: { size: 6, color: '#3b82f6', opacity: 0.6 },
+        })
+      }
+    } else if (exp.timeCourse?.length) {
+      traces.push({
+        type: 'scatter', mode: 'markers',
+        x: exp.timeCourse.map(p => p.time),
+        y: exp.timeCourse.map(p => p.conversion),
+        name: 'data', marker: { size: 6, color: '#3b82f6' },
+      })
+    }
+    // Fitted curve (applyFits stores simT + simY arrays per group).
+    if (exp.fit?.simT?.length && exp.fit?.simY?.length) {
+      traces.push({
+        type: 'scatter', mode: 'lines',
+        x: exp.fit.simT,
+        y: exp.fit.simY,
+        name: 'fit', line: { color: '#a62b17', width: 2 },
+      })
+    }
+    const f = exp.fit || {}
+    const subtitle = f.ku != null
+      ? `ku=${sci(f.ku, 2)} k1=${sci(f.k1, 2)} kr=${sci(f.kr, 2)} k_bg=${sci(f.k_bg, 2)}`
+      : ''
+    const layout = {
+      title: { text: `${exp.sequence}${subtitle ? ' · ' + subtitle : ''}`, font: { size: 11 } },
+      xaxis: { title: 't / min' },
+      yaxis: { title: 'conversion %', range: [0, 105] },
+      margin: { l: 50, r: 10, t: 30, b: 35 },
+      showlegend: false,
+      paper_bgcolor: store.isDarkMode ? '#0f172a' : '#ffffff',
+      plot_bgcolor: store.isDarkMode ? '#0f172a' : '#ffffff',
+      font: { color: store.isDarkMode ? '#e2e8f0' : '#0f172a' },
+    }
+    Plotly.react(el, traces, layout, { responsive: true, displayModeBar: false })
+  }
+}
+
+watch([hplcDerived, () => hplcSettings.productMin, () => hplcSettings.productMax, () => hplcSettings.scanMin, () => hplcSettings.scanMax],
+      () => { nextTick(renderHplcCharts) }, { deep: true })
+watch(() => dataset.experiments.map(e => ({ id: e.groupId, fit: e.fit })),
+      () => { nextTick(renderFitCharts) }, { deep: true })
+
 // ════════════════ Mount ════════════════
 
 watch(() => [dataset.experiments, dataset.config.yieldThreshold, heatX.value, heatY.value, store.isDarkMode], renderAll, { deep: true })
@@ -2002,6 +2664,32 @@ onBeforeUnmount(() => {
 /* ── Grids & range inputs ─────────────────────────────────── */
 .grid-2-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .grid-3-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+/* ── HPLC chromatogram + kinetic-fit gallery ──────────────── */
+.hplc-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 10px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 6px 2px;
+}
+.hplc-gallery-card {
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  padding: 6px;
+  background: var(--surface, #ffffff);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.hplc-gallery-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
 
 .range-inputs { display: flex; gap: 6px; }
 .range-inputs input { flex: 1; min-width: 0; }

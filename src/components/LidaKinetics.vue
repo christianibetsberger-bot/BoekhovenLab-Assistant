@@ -1670,6 +1670,8 @@ async function onHplcFileSelected(e) {
       prominence: Number(hplcSettings.prominence),
       baselineWindow: Number(hplcSettings.baselineWindow),
       useHplcPy: !!hplcSettings.useHplcPy,
+      productMin: Number(hplcSettings.productMin),
+      productMax: Number(hplcSettings.productMax),
     }
 
     // Initialize incremental results so the gallery starts filling as files

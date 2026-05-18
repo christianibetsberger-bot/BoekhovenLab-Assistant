@@ -91,6 +91,30 @@ def _integrate_via_valley(t, s, target_rt, max_half_width=0.3):
     return area, float(t[li]), float(t[ri])
 
 
+def _hplc_fit(chrom_obj, prominence, verbose=False):
+    # Try fit_peaks at the given prominence, falling back to prominence/5 on ValueError.
+    try:
+        return chrom_obj.fit_peaks(prominence=prominence, correct_baseline=False, verbose=verbose)
+    except ValueError:
+        try:
+            return chrom_obj.fit_peaks(prominence=prominence/5.0, correct_baseline=False, verbose=verbose)
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
+def _peak_row_to_dict(row, area_mAU_min):
+    return {
+        'rt':          float(row.get('retention_time', row.get('peak_center', row.get('center', row.get('time', 0.0))))),
+        'area_mAU_min': area_mAU_min,
+        'height':    float(row['amplitude']) if 'amplitude' in row else None,
+        'scale':     float(row['scale'])     if 'scale'     in row else None,
+        'skew':      float(row['skew'])      if 'skew'      in row else None,
+        'amplitude': float(row['amplitude']) if 'amplitude' in row else None,
+    }
+
+
 def process_chromatogram(text, params_json):
     params = json.loads(params_json)
     scan_min   = float(params.get('scanMin',   1.6))
@@ -98,6 +122,8 @@ def process_chromatogram(text, params_json):
     prominence = float(params.get('prominence', 0.05))
     baseline_window_min = float(params.get('baselineWindow', 1.0))
     use_hplc_py = bool(params.get('useHplcPy', True))
+    product_min = float(params.get('productMin', 6.2))
+    product_max = float(params.get('productMax', 7.4))
 
     df = _read_chromatogram_text(text)
     if df.empty:
@@ -112,8 +138,7 @@ def process_chromatogram(text, params_json):
     s_corr = _rough_correct(t, s_raw)
 
     peaks_out = []
-    # First try hplc-py for accurate asymmetric-Gaussian integration; fall back
-    # to valley-bounded trapz on any failure or when use_hplc_py is False.
+    # Pass 1: full-scan hplc-py for building-block (non-product) peaks + coarse product detection.
     peak_table = None
     if use_hplc_py:
         try:
@@ -124,16 +149,8 @@ def process_chromatogram(text, params_json):
                 chrom.correct_baseline(window=baseline_window_min)
             except Exception:
                 pass
-            try:
-                peak_table = chrom.fit_peaks(prominence=prominence, correct_baseline=False, verbose=False)
-            except ValueError:
-                try:
-                    peak_table = chrom.fit_peaks(prominence=prominence/5.0, correct_baseline=False, verbose=False)
-                except Exception:
-                    peak_table = None
-            except Exception:
-                peak_table = None
-            # Pull baseline-corrected signal back out
+            peak_table = _hplc_fit(chrom, prominence)
+            # Pull baseline-corrected signal back out for the trace.
             try:
                 t = chrom.df['time'].values.astype(float)
                 s_corr = chrom.df[chrom.int_col].values.astype(float)
@@ -142,24 +159,54 @@ def process_chromatogram(text, params_json):
         except Exception:
             peak_table = None
 
+    rt_col = area_col = None
     if peak_table is not None and not peak_table.empty:
-        rt_col = next((c for c in ['retention_time', 'peak_center', 'center', 'time']
-                       if c in peak_table.columns), None)
+        rt_col   = next((c for c in ['retention_time', 'peak_center', 'center', 'time']
+                         if c in peak_table.columns), None)
         area_col = next((c for c in ['area', 'integrated_area'] if c in peak_table.columns), None)
         for _, row in peak_table.iterrows():
-            rt = float(row[rt_col]) if rt_col else 0.0
             # hplc-py returns area in mAU·s; divide by 60 → mAU·min (matches notebook).
             area_min = float(row[area_col]) / 60.0 if area_col else 0.0
-            peaks_out.append({
-                'rt': rt,
-                'area_mAU_min': area_min,
-                'height':    float(row['amplitude']) if 'amplitude' in row else None,
-                'scale':     float(row['scale'])     if 'scale'     in row else None,
-                'skew':      float(row['skew'])      if 'skew'      in row else None,
-                'amplitude': float(row['amplitude']) if 'amplitude' in row else None,
-            })
+            peaks_out.append(_peak_row_to_dict(row, area_min))
 
-    # If hplc-py found nothing, fall back to scipy find_peaks + valley integration
+    # Pass 2: tight-crop hplc-py for product peaks.
+    # The notebook uses crop = [min(target_rts)-0.7, max(target_rts)+0.7] with
+    # prominence/2, which properly resolves closely-spaced product peaks that the
+    # full-range pass may merge into one peak due to a less localised baseline.
+    if use_hplc_py:
+        tight_lo = max(scan_min, product_min - 0.7)
+        tight_hi = min(scan_max, product_max + 0.7)
+        df_tight = df[(df['time'] >= tight_lo) & (df['time'] <= tight_hi)].reset_index(drop=True)
+        tight_product_peaks = []
+        if len(df_tight) >= 10:
+            try:
+                from hplc.quant import Chromatogram as _C
+                chrom_t = _C(df_tight.copy())
+                chrom_t.crop([tight_lo, tight_hi])
+                try:
+                    chrom_t.correct_baseline(window=baseline_window_min)
+                except Exception:
+                    pass
+                pt_tight = _hplc_fit(chrom_t, prominence / 2.0)
+                if pt_tight is not None and not pt_tight.empty:
+                    rt_col_t   = next((c for c in ['retention_time', 'peak_center', 'center', 'time']
+                                       if c in pt_tight.columns), None)
+                    area_col_t = next((c for c in ['area', 'integrated_area'] if c in pt_tight.columns), None)
+                    if rt_col_t and area_col_t:
+                        for _, row in pt_tight.iterrows():
+                            rt = float(row[rt_col_t])
+                            if product_min <= rt <= product_max:
+                                area_min = float(row[area_col_t]) / 60.0
+                                tight_product_peaks.append(_peak_row_to_dict(row, area_min))
+            except Exception:
+                pass
+
+        if tight_product_peaks:
+            # Replace product-range peaks from pass 1 with the tighter measurements.
+            peaks_out = [p for p in peaks_out if not (product_min <= p['rt'] <= product_max)]
+            peaks_out += tight_product_peaks
+
+    # If hplc-py found nothing at all, fall back to scipy find_peaks + valley integration
     if not peaks_out:
         idx, _ = find_peaks(s_corr, prominence=prominence)
         for i in idx:

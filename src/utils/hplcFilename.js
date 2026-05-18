@@ -24,11 +24,14 @@ export function reverseComplement(seq) {
 
 // Returns { ABseq, ABprimeSeq, condition: 'S'|'U', replicate, time, isCanonicalRC }
 // or { error: '...' } if the filename does not match the schema.
+//
+// Tolerates curly braces around any field — users often copy the schema
+// literally and end up with names like `{ATCG}_AB_{TAGC}_{S}{1}-{30}.txt`.
 export function parseChromeleonFilename(filename) {
-  const base = String(filename || '').split('/').pop()
+  const base = String(filename || '').split('/').pop().replace(/[{}]/g, '')
   const m = base.match(FILENAME_RE)
   if (!m) {
-    return { error: `Filename does not match {ABseq}_AB_{A'B'seq}_{S|U}{rep}-{time}.txt` }
+    return { error: `Filename must look like ATCGATCG_AB_CGATCGAT_S1-30.txt (AB seq · _AB_ · A'B' seq · S/U · rep · -t)` }
   }
   const ABseq = m[1].toUpperCase()
   const ABprimeSeq = m[2].toUpperCase()

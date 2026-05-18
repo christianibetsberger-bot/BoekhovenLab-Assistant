@@ -88,7 +88,10 @@
           </div>
 
           <div class="hplc-schema">
-            <code>&lcub;ABseq&rcub;_AB_&lcub;A'B'seq&rcub;_&lcub;S&vert;U&rcub;&lcub;rep&rcub;-&lcub;time&rcub;.txt</code>
+            <span class="hplc-schema-example">
+              e.g. <code>ATCGATCG_AB_CGATCGAT_S1-30.txt</code>
+              <span class="no-upper" style="opacity:0.7;">— AB seq · A'B' seq · S/U · rep · t (min)</span>
+            </span>
             <span v-if="isProcessingHplc" class="hplc-status"><i class="fas fa-spinner fa-spin"></i> {{ hplcProgress }}</span>
             <span v-else-if="hplcProgress" class="hplc-status">{{ hplcProgress }}</span>
           </div>

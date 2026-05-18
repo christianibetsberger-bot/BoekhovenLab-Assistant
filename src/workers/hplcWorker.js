@@ -91,13 +91,22 @@ def _integrate_via_valley(t, s, target_rt, max_half_width=0.3):
     return area, float(t[li]), float(t[ri])
 
 
-def _hplc_fit(chrom_obj, prominence, verbose=False):
+def _scipy_peak_count(s, prominence):
+    """Count peaks via scipy — used as a fast pre-screen before the expensive hplc-py fit."""
+    idx, _ = find_peaks(s, prominence=prominence)
+    return len(idx)
+
+
+def _hplc_fit(chrom_obj, prominence, verbose=False, max_iter=500):
     # Try fit_peaks at the given prominence, falling back to prominence/5 on ValueError.
+    # max_iterations caps the per-peak optimizer so failed-injection traces don't stall.
     try:
-        return chrom_obj.fit_peaks(prominence=prominence, correct_baseline=False, verbose=verbose)
+        return chrom_obj.fit_peaks(prominence=prominence, correct_baseline=False,
+                                   verbose=verbose, max_iterations=max_iter)
     except ValueError:
         try:
-            return chrom_obj.fit_peaks(prominence=prominence/5.0, correct_baseline=False, verbose=verbose)
+            return chrom_obj.fit_peaks(prominence=prominence/5.0, correct_baseline=False,
+                                       verbose=verbose, max_iterations=max_iter)
         except Exception:
             return None
     except Exception:
@@ -139,8 +148,10 @@ def process_chromatogram(text, params_json):
 
     peaks_out = []
     # Pass 1: full-scan hplc-py for building-block (non-product) peaks + coarse product detection.
+    # Pre-screen with scipy: if no peaks found at this prominence the trace is flat / injection
+    # failed → skip hplc-py entirely so we don't stall on the optimizer.
     peak_table = None
-    if use_hplc_py:
+    if use_hplc_py and _scipy_peak_count(s_corr, prominence) > 0:
         try:
             from hplc.quant import Chromatogram
             chrom = Chromatogram(df.copy())
@@ -178,7 +189,9 @@ def process_chromatogram(text, params_json):
         tight_hi = min(scan_max, product_max + 0.7)
         df_tight = df[(df['time'] >= tight_lo) & (df['time'] <= tight_hi)].reset_index(drop=True)
         tight_product_peaks = []
-        if len(df_tight) >= 10:
+        s_tight = df_tight['signal'].values.astype(float) if len(df_tight) >= 10 else np.array([])
+        s_tight_corr = _rough_correct(df_tight['time'].values.astype(float), s_tight) if len(s_tight) >= 10 else s_tight
+        if len(df_tight) >= 10 and _scipy_peak_count(s_tight_corr, prominence / 2.0) > 0:
             try:
                 from hplc.quant import Chromatogram as _C
                 chrom_t = _C(df_tight.copy())

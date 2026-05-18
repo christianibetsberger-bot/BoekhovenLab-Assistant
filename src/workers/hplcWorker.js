@@ -147,43 +147,26 @@ def process_chromatogram(text, params_json):
     s_corr = _rough_correct(t, s_raw)
 
     peaks_out = []
-    # Pass 1: full-scan hplc-py for building-block (non-product) peaks + coarse product detection.
-    # Pre-screen with scipy: if no peaks found at this prominence the trace is flat / injection
-    # failed → skip hplc-py entirely so we don't stall on the optimizer.
-    peak_table = None
-    if use_hplc_py and _scipy_peak_count(s_corr, prominence) > 0:
-        try:
-            from hplc.quant import Chromatogram
-            chrom = Chromatogram(df.copy())
-            chrom.crop([scan_min, scan_max])
-            try:
-                chrom.correct_baseline(window=baseline_window_min)
-            except Exception:
-                pass
-            peak_table = _hplc_fit(chrom, prominence)
-            # Pull baseline-corrected signal back out for the trace.
-            try:
-                t = chrom.df['time'].values.astype(float)
-                s_corr = chrom.df[chrom.int_col].values.astype(float)
-            except Exception:
-                pass
-        except Exception:
-            peak_table = None
+    # Pass 1 (scipy, fast): detect ALL peaks across the full scan range using valley
+    # integration.  This gives building-block peaks without the expensive hplc-py
+    # Gaussian fit.  Product-window peaks from this pass are replaced by Pass 2.
+    if _scipy_peak_count(s_corr, prominence) > 0:
+        idx_peaks, _ = find_peaks(s_corr, prominence=prominence)
+        for i in idx_peaks:
+            rt = float(t[i])
+            area, _, _ = _integrate_via_valley(t, s_corr, rt)
+            if area > 0:
+                peaks_out.append({
+                    'rt': rt,
+                    'area_mAU_min': float(area),
+                    'height': float(s_corr[i]),
+                    'scale': None, 'skew': None, 'amplitude': float(s_corr[i]),
+                })
 
-    rt_col = area_col = None
-    if peak_table is not None and not peak_table.empty:
-        rt_col   = next((c for c in ['retention_time', 'peak_center', 'center', 'time']
-                         if c in peak_table.columns), None)
-        area_col = next((c for c in ['area', 'integrated_area'] if c in peak_table.columns), None)
-        for _, row in peak_table.iterrows():
-            # hplc-py returns area in mAU·s; divide by 60 → mAU·min (matches notebook).
-            area_min = float(row[area_col]) / 60.0 if area_col else 0.0
-            peaks_out.append(_peak_row_to_dict(row, area_min))
-
-    # Pass 2: tight-crop hplc-py for product peaks.
-    # The notebook uses crop = [min(target_rts)-0.7, max(target_rts)+0.7] with
-    # prominence/2, which properly resolves closely-spaced product peaks that the
-    # full-range pass may merge into one peak due to a less localised baseline.
+    # Pass 2 (hplc-py, accurate): tight-crop around the product RT window only.
+    # The notebook uses crop = [productMin-0.7, productMax+0.7] with prominence/2
+    # to properly resolve closely-spaced product peaks.  Only this pass uses the
+    # expensive Gaussian fitter — keeping total hplc-py calls to 1 per file.
     if use_hplc_py:
         tight_lo = max(scan_min, product_min - 0.7)
         tight_hi = min(scan_max, product_max + 0.7)

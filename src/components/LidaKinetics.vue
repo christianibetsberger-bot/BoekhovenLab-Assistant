@@ -90,7 +90,7 @@
           <div class="hplc-schema">
             <span class="hplc-schema-example">
               e.g. <code>ATCGATCG_AB_CGATCGAT_S1-30.txt</code>
-              <span class="no-upper" style="opacity:0.7;">— AB seq · A'B' seq · S/U · rep · t (min)</span>
+              <span class="no-upper" style="opacity:0.7;">— seq · _ReplicatorName_ · seq · S/U · rep · t (min) &nbsp;(AB, EB, Dzeta, …)</span>
             </span>
             <span v-if="isProcessingHplc" class="hplc-status"><i class="fas fa-spinner fa-spin"></i> {{ hplcProgress }}</span>
             <span v-else-if="hplcProgress" class="hplc-status">{{ hplcProgress }}</span>
@@ -1595,7 +1595,7 @@ function parseCsv(text) {
 // ════════════════ HPLC chromatogram import ════════════════
 // Reads Chromeleon `.txt` files, runs hplc-py in a Pyodide worker for peak
 // detection + integration, and exposes per-file results to the gallery and
-// the dataset glue. Filename schema: `{ABseq}_AB_{ABprimeSeq}_{S|U}{rep}-{time}.txt`.
+// the dataset glue. Filename schema: `{seq1}_{ReplicatorName}_{seq2}_{S|U}{rep}-{time}.txt`.
 
 async function onHplcFileSelected(e) {
   const fileList = Array.from(e.target.files || [])
@@ -1828,8 +1828,9 @@ function downloadHplcTemplate() {
   // Chromeleon exports have 43 header lines before data; we approximate with
   // a comment block + Chromeleon-style 'Time;Step;Value (mAU)' column header.
   lines.push('# LIDA HPLC chromatogram — filename template')
-  lines.push("# Schema: {ABseq}_AB_{A'B'seq}_{S|U}{replicate}-{time}.txt")
-  lines.push('# Example below: AB=ATCGATCG, A\'B\'=CGATCGAT, Seeded, replicate 1, t=30 min')
+  lines.push("# Schema: {seq1}_{ReplicatorName}_{seq2}_{S|U}{replicate}-{time}.txt")
+  lines.push("# ReplicatorName can be AB, EB, Dzeta, or any label starting with a letter.")
+  lines.push('# Example: seq1=ATCGATCG, ReplicatorName=AB, seq2=CGATCGAT, Seeded, rep 1, t=30 min')
   lines.push('# Replace this file with your Chromeleon UV/Vis .txt export.')
   for (let i = 0; i < 39; i++) lines.push('#')
   lines.push('Time (min)\tStep (s)\tValue (mAU)')

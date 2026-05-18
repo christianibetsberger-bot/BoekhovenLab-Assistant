@@ -246,7 +246,7 @@ async function init() {
     pyodide = await self.loadPyodide({ indexURL: PYODIDE_CDN })
 
     self.postMessage({ type: 'progress', stage: 'loading-packages', text: 'Loading numpy + scipy + pandas…' })
-    await pyodide.loadPackage(['numpy', 'scipy', 'pandas', 'micropip'])
+    await pyodide.loadPackage(['numpy', 'scipy', 'pandas', 'matplotlib', 'micropip'])
 
     self.postMessage({ type: 'progress', stage: 'installing-hplc', text: 'Installing hplc-py…' })
     try {

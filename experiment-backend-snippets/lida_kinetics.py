@@ -91,7 +91,10 @@ def _simulate_R_at(params, initial_R, t_eval, A0, B0, rtol=1e-4, atol=1e-7):
             t_eval=t_eval, method='LSODA',
             rtol=rtol, atol=atol,
         )
-        return sol.y[6] if sol.success else None
+        if not sol.success:
+            return None
+        R = sol.y[6]
+        return None if (np.any(np.isnan(R)) or np.any(np.isinf(R))) else np.maximum.accumulate(R)
     except Exception:
         return None
 
@@ -107,7 +110,12 @@ def _simulate_R_dense(params, initial_R, t_max, A0, B0, n=100):
             t_eval=t_grid, method='LSODA',
             rtol=1e-6, atol=1e-9,
         )
-        return (sol.t, sol.y[6]) if sol.success else (None, None)
+        if not sol.success:
+            return None, None
+        R = sol.y[6]
+        if np.any(np.isnan(R)) or np.any(np.isinf(R)):
+            return None, None
+        return sol.t, np.maximum.accumulate(R)
     except Exception:
         return None, None
 
@@ -118,8 +126,7 @@ def _residuals(params, t_data, y_data, initial_R, A0, B0):
     y_sim = _simulate_R_at(params, initial_R, t_data, A0, B0)
     if y_sim is None or np.any(np.isnan(y_sim)):
         return np.full_like(y_data, 1e6)
-    penalty = 1e6 if np.any(np.diff(y_sim) < -1e-5) else 0.0
-    return (y_sim - y_data) + penalty
+    return y_sim - y_data
 
 
 def _build_initial_guesses():

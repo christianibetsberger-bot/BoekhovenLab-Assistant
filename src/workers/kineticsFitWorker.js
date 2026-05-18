@@ -65,7 +65,9 @@ def _simulate_R_at(params, initial_R, t_eval, A0, B0, rtol=1e-4, atol=1e-7):
         if not sol.success:
             return None
         R = sol.y[6]
-        return None if (np.any(np.isnan(R)) or np.any(np.isinf(R))) else R
+        if np.any(np.isnan(R)) or np.any(np.isinf(R)):
+            return None
+        return np.maximum.accumulate(R)
     except Exception:
         return None
 
@@ -101,7 +103,7 @@ def _simulate_R_dense(params, initial_R, t_max, A0, B0, n=100):
             R = sol.y[6]
             if np.any(np.isnan(R)) or np.any(np.isinf(R)):
                 continue
-            return sol.t, R
+            return sol.t, np.maximum.accumulate(R)
         except Exception:
             continue
     return None, None
@@ -115,8 +117,7 @@ def _residuals(params, t_data, y_data, initial_R, A0, B0):
     y_sim = _simulate_R_at(params, initial_R, t_data, A0, B0)
     if y_sim is None or np.any(np.isnan(y_sim)):
         return np.full_like(y_data, 1e6)
-    penalty = 1e6 if np.any(np.diff(y_sim) < -1e-5) else 0.0
-    return (y_sim - y_data) + penalty
+    return y_sim - y_data
 
 def _build_initial_guesses():
     # 4 fixed + 10 deterministic random log-uniform guesses, matching the

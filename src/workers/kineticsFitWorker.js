@@ -156,6 +156,8 @@ def fit_experiments(payload_json):
                 continue
 
             limit_uM = float(g.get('limit_uM', default_lim))
+            A0_exp   = float(g.get('A0', A0))
+            B0_exp   = float(g.get('B0', B0))
             env      = ((g.get('conditions') or {}).get('env') or '')
             seed_pct = 0.05 if 'seed' in str(env).lower() else 0.0
 
@@ -176,7 +178,7 @@ def fit_experiments(payload_json):
                     # irreversible-LIDA manifold; matches reference script.
                     res = least_squares(
                         _residuals, p0,
-                        args=(t_data, y_data, initial_R, A0, B0),
+                        args=(t_data, y_data, initial_R, A0_exp, B0_exp),
                         bounds=([0.0]*4, [100.0, 100.0, 1e-10, 100.0]),
                         ftol=1e-8, xtol=1e-8, max_nfev=200,
                     )
@@ -197,7 +199,7 @@ def fit_experiments(payload_json):
             ku, k1, k2, kr = best_res.x
             # Small buffer past the last data point for visual continuity.
             # With k2 pinned to ~0 the system is no longer stiff, so this is safe.
-            sim_t, sim_R = _simulate_R_dense(best_res.x, initial_R, float(t_data[-1]) + 5.0, A0, B0)
+            sim_t, sim_R = _simulate_R_dense(best_res.x, initial_R, float(t_data[-1]) + 5.0, A0_exp, B0_exp)
 
             curve_note = None
             if sim_t is None:

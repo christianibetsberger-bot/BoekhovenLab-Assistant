@@ -1778,11 +1778,31 @@ function applyHplcResultsToDataset() {
 
   for (const [key, g] of groupsByKey) {
     g.timeCourse.sort((a, b) => a.time - b.time)
+    // Estimate plateau = mean of last 3 concentration values (mirrors notebook's per-base
+    // stoichiometric scaling: plateau = mean of unseeded last 3 timepoints).
+    const concs = g.timeCourse.map(p => p.concentration_uM).filter(v => isFinite(v) && v > 0)
+    const lastN = concs.slice(-3)
+    const plateau_uM = lastN.length > 0
+      ? Math.max(lastN.reduce((a, b) => a + b, 0) / lastN.length, 0.01)
+      : (hplcSettings.rMax_uM || 1.4)
+    // Store per-experiment stoichiometric parameters so the kinetic fitter uses them.
+    g.limit_uM = plateau_uM
+    g.A0 = 2 * plateau_uM
+    g.B0 = plateau_uM
+    // Recompute conversion% using the measured plateau (not the fixed UI value).
+    for (const pt of g.timeCourse) {
+      pt.conversion = Math.min(100, 100 * (pt.concentration_uM || 0) / plateau_uM)
+    }
     g.maxConversion = g.timeCourse.length ? Math.max(...g.timeCourse.map(p => p.conversion)) : 0
     const repsMap = repsByKey.get(key)
     if (repsMap && repsMap.size > 1) {
       g.replicates = [...repsMap.entries()]
-        .map(([repId, tc]) => ({ replicateId: repId, timeCourse: tc.slice().sort((a, b) => a.time - b.time) }))
+        .map(([repId, tc]) => ({
+          replicateId: repId,
+          timeCourse: tc.slice()
+            .sort((a, b) => a.time - b.time)
+            .map(pt => ({ ...pt, conversion: Math.min(100, 100 * (pt.concentration_uM || 0) / plateau_uM) })),
+        }))
         .sort((a, b) => a.replicateId.localeCompare(b.replicateId, undefined, { numeric: true }))
     }
     const existingIdx = dataset.experiments.findIndex(e => e.groupId === key)
@@ -1823,27 +1843,39 @@ function downloadHplcTemplate() {
   document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href)
 }
 
-// Mirror the chart-keyed Plotly refs so we can `Plotly.downloadImage()` per
-// chart for PNG export — single chart or batch (sequential downloads).
 function setHplcChartRef(name, el) { if (el) hplcChartRefs.value[name] = el; else delete hplcChartRefs.value[name] }
 function setFitChartRef(key, el)   { if (el) fitChartRefs.value[key] = el;   else delete fitChartRefs.value[key] }
+
+// Force a Plotly div to light-mode, download PNG, then restore original theme.
+async function downloadPngLightMode(el, opts) {
+  const wasDark = store.isDarkMode
+  if (wasDark) {
+    await Plotly.relayout(el, { paper_bgcolor: '#ffffff', plot_bgcolor: '#ffffff', font: { color: '#0f172a' } })
+  }
+  try {
+    await Plotly.downloadImage(el, opts)
+  } finally {
+    if (wasDark) {
+      await Plotly.relayout(el, { paper_bgcolor: '#0f172a', plot_bgcolor: '#0f172a', font: { color: '#e2e8f0' } })
+    }
+  }
+}
 
 async function exportHplcChartPng(name) {
   const el = hplcChartRefs.value[name]
   if (!el) return
   try {
-    await Plotly.downloadImage(el, { format: 'png', filename: name.replace(/\.txt$/i, '') + '_chrom', width: 900, height: 500 })
+    await downloadPngLightMode(el, { format: 'png', filename: name.replace(/\.txt$/i, '') + '_chrom', width: 900, height: 500 })
   } catch (err) { console.error('PNG export failed:', err) }
 }
 
 async function exportAllHplcChartsPng() {
-  const entries = Object.entries(hplcChartRefs.value)
-  for (const [name, el] of entries) {
+  for (const [name, el] of Object.entries(hplcChartRefs.value)) {
     if (!el) continue
     try {
-      await Plotly.downloadImage(el, { format: 'png', filename: name.replace(/\.txt$/i, '') + '_chrom', width: 900, height: 500 })
+      await downloadPngLightMode(el, { format: 'png', filename: name.replace(/\.txt$/i, '') + '_chrom', width: 900, height: 500 })
     } catch (err) { console.error('PNG export failed:', err) }
-    await new Promise(r => setTimeout(r, 300))   // stagger so Safari doesn't block subsequent downloads
+    await new Promise(r => setTimeout(r, 300))
   }
 }
 
@@ -1851,16 +1883,15 @@ async function exportFitChartPng(key) {
   const el = fitChartRefs.value[key]
   if (!el) return
   try {
-    await Plotly.downloadImage(el, { format: 'png', filename: `fit_${key}`, width: 800, height: 500 })
+    await downloadPngLightMode(el, { format: 'png', filename: `fit_${key}`, width: 800, height: 500 })
   } catch (err) { console.error('PNG export failed:', err) }
 }
 
 async function exportAllFitChartsPng() {
-  const entries = Object.entries(fitChartRefs.value)
-  for (const [key, el] of entries) {
+  for (const [key, el] of Object.entries(fitChartRefs.value)) {
     if (!el) continue
     try {
-      await Plotly.downloadImage(el, { format: 'png', filename: `fit_${key}`, width: 800, height: 500 })
+      await downloadPngLightMode(el, { format: 'png', filename: `fit_${key}`, width: 800, height: 500 })
     } catch (err) { console.error('PNG export failed:', err) }
     await new Promise(r => setTimeout(r, 300))
   }
@@ -2630,11 +2661,15 @@ function renderHplcCharts() {
 }
 
 // Render one Plotly chart per experiment showing data points + fitted ODE curve.
+const FIT_CHART_PALETTE = ['#a62b17', '#1d6fa5', '#2e7d32', '#7c3aed', '#b45309', '#0e7490', '#9d174d']
+
 function renderFitCharts() {
   for (const exp of dataset.experiments) {
     const key = exp.groupId
     const el = fitChartRefs.value[key]
     if (!el) continue
+    const expIdx = dataset.experiments.findIndex(e => e.groupId === key)
+    const color = FIT_CHART_PALETTE[Math.max(0, expIdx) % FIT_CHART_PALETTE.length]
     const traces = []
     // Data points: prefer replicates if present, else aggregate timeCourse.
     if (exp.replicates?.length) {
@@ -2643,7 +2678,8 @@ function renderFitCharts() {
           type: 'scatter', mode: 'markers',
           x: rep.timeCourse.map(p => p.time),
           y: rep.timeCourse.map(p => p.conversion),
-          name: `rep ${rep.replicateId}`, marker: { size: 6, color: '#3b82f6', opacity: 0.6 },
+          name: `rep ${rep.replicateId}`,
+          marker: { size: 7, color: color, opacity: 0.45 },
         })
       }
     } else if (exp.timeCourse?.length) {
@@ -2651,27 +2687,29 @@ function renderFitCharts() {
         type: 'scatter', mode: 'markers',
         x: exp.timeCourse.map(p => p.time),
         y: exp.timeCourse.map(p => p.conversion),
-        name: 'data', marker: { size: 6, color: '#3b82f6' },
+        name: 'data',
+        marker: { size: 7, color: color, opacity: 0.45 },
       })
     }
-    // Fitted curve (applyFits stores simT + simY arrays per group).
+    // Fitted curve — same color as data points, full opacity.
     if (exp.fit?.simT?.length && exp.fit?.simY?.length) {
       traces.push({
         type: 'scatter', mode: 'lines',
         x: exp.fit.simT,
         y: exp.fit.simY,
-        name: 'fit', line: { color: '#a62b17', width: 2 },
+        name: 'fit', line: { color: color, width: 2 },
       })
     }
     const f = exp.fit || {}
     const subtitle = f.ku != null
       ? `ku=${sci(f.ku, 2)} k1=${sci(f.k1, 2)} kr=${sci(f.kr, 2)} k_bg=${sci(f.k_bg, 2)}`
       : ''
+    const limitLabel = exp.limit_uM != null ? ` · R_max=${exp.limit_uM.toFixed(2)} µM` : ''
     const layout = {
-      title: { text: `${exp.sequence}${subtitle ? ' · ' + subtitle : ''}`, font: { size: 11 } },
+      title: { text: `${exp.sequence}${limitLabel}${subtitle ? ' · ' + subtitle : ''}`, font: { size: 10 } },
       xaxis: { title: 't / min' },
       yaxis: { title: 'conversion %', range: [0, 105] },
-      margin: { l: 50, r: 10, t: 30, b: 35 },
+      margin: { l: 50, r: 10, t: 40, b: 35 },
       showlegend: false,
       paper_bgcolor: store.isDarkMode ? '#0f172a' : '#ffffff',
       plot_bgcolor: store.isDarkMode ? '#0f172a' : '#ffffff',

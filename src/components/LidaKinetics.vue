@@ -195,18 +195,17 @@
             </details>
           </div>
 
-          <!-- Product window dual slider -->
+          <!-- Product window inputs -->
           <div v-if="hplcResults.length" class="hplc-window">
-            <div class="hplc-window-header">
-              <span><i class="fas fa-sliders-h"></i> Product window</span>
-              <span class="no-upper">
-                <strong>{{ Number(hplcSettings.productMin).toFixed(2) }}</strong>
-                – <strong>{{ Number(hplcSettings.productMax).toFixed(2) }}</strong> min
-              </span>
-            </div>
-            <div class="hplc-window-sliders">
-              <input type="range" :min="hplcSettings.scanMin" :max="hplcSettings.scanMax" step="0.05" v-model.number="hplcSettings.productMin">
-              <input type="range" :min="hplcSettings.scanMin" :max="hplcSettings.scanMax" step="0.05" v-model.number="hplcSettings.productMax">
+            <span class="hplc-window-label"><i class="fas fa-compress-arrows-alt"></i> Product window</span>
+            <div class="hplc-window-inputs">
+              <label class="no-upper">RT min (min)
+                <input type="number" step="0.05" v-model.number="hplcSettings.productMin">
+              </label>
+              <span class="hplc-window-dash">–</span>
+              <label class="no-upper">RT max (min)
+                <input type="number" step="0.05" v-model.number="hplcSettings.productMax">
+              </label>
             </div>
           </div>
 
@@ -2794,15 +2793,19 @@ onBeforeUnmount(() => {
   padding: 6px 10px;
   border: 1px solid var(--border-color, #e2e8f0);
   border-radius: 6px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
 }
-.hplc-window-header {
-  display: flex; justify-content: space-between; align-items: center;
-  font-size: 0.78rem; margin-bottom: 4px;
+.hplc-window-label {
+  font-size: 0.78rem; font-weight: 600; white-space: nowrap;
 }
-.hplc-window-sliders {
-  display: flex; gap: 6px; align-items: center;
+.hplc-window-inputs {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
 }
-.hplc-window-sliders input[type="range"] { flex: 1; }
+.hplc-window-inputs label {
+  display: flex; align-items: center; gap: 4px; font-size: 0.75rem;
+}
+.hplc-window-inputs input[type="number"] { width: 70px; }
+.hplc-window-dash { font-size: 1rem; }
 
 .hplc-skipped {
   margin-top: 8px; padding: 6px 10px;

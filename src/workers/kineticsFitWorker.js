@@ -112,25 +112,23 @@ def _safe_floats(arr):
     return [float(v) if np.isfinite(v) else None for v in arr]
 
 def _residuals(params, t_data, y_data, initial_R, A0, B0):
-    if np.any(np.array(params) < 0):
-        return np.full_like(y_data, 1e6)
     y_sim = _simulate_R_at(params, initial_R, t_data, A0, B0)
     if y_sim is None or np.any(np.isnan(y_sim)):
         return np.full_like(y_data, 1e6)
     return y_sim - y_data
 
 def _build_initial_guesses():
-    # 4 fixed + 10 deterministic random log-uniform guesses, matching the
-    # reference Tellurium script that produced the published sigmoidal fits.
+    # 5 fixed + 15 random log-uniform guesses — matches the notebook exactly.
     base = [
-        [1e-6, 1e-3, 1e-11, 1e-6 ],
-        [1e-3, 1e-1, 1e-11, 1e-1 ],
-        [1e-2, 1.0,  1e-11, 1.0  ],
-        [1e-5, 1.0,  1e-11, 10.0 ],
+        [1e-6, 1e-3,  1e-11, 1e-6 ],
+        [1e-4, 0.1,   1e-11, 0.1  ],
+        [1e-3, 1.0,   1e-11, 1.0  ],
+        [1e-5, 1.0,   1e-11, 10.0 ],
+        [1e-6, 10.0,  1e-11, 50.0 ],
     ]
-    rng = np.random.default_rng(42)
-    for _ in range(10):
-        g = (10 ** rng.uniform(-4, 1.5, size=4)).tolist()
+    np.random.seed(42)
+    for _ in range(15):
+        g = np.power(10, np.random.uniform(-6, 2.0, size=4)).tolist()
         g[2] = 1e-11
         base.append(g)
     return base
@@ -153,7 +151,7 @@ def fit_experiments(payload_json):
                 fits.append({'groupId': gid, 'model': None,
                              'ku': None, 'k1': None, 'k2': None, 'kr': None, 'k_bg': None,
                              'limit_uM': None, 'seed_uM': None, 'cost': None,
-                             'simT': [], 'simY': [], 'note': 'Need at least 3 timepoints.'})
+                             'simT': [], 'simY': [], 'simY_uM': [], 'note': 'Need at least 3 timepoints.'})
                 continue
 
             limit_uM = float(g.get('limit_uM', default_lim))
@@ -167,26 +165,29 @@ def fit_experiments(payload_json):
             order  = np.argsort(t_data)
             t_data, y_pct = t_data[order], y_pct[order]
 
-            y_data    = (y_pct / 100.0) * limit_uM
-            initial_R = float(seed_pct * np.mean(y_data))
+            # Use raw µM when available (HPLC import), else derive from conversion%.
+            has_conc = tc[0].get('concentration_uM') is not None
+            if has_conc:
+                conc_arr = [p.get('concentration_uM') for p in tc]
+                conc_arr = [conc_arr[i] for i in order]
+                y_data = np.array([float(v) for v in conc_arr], dtype=float)
+            else:
+                y_data = (y_pct / 100.0) * limit_uM
+
+            initial_R = float(seed_pct * y_data[0]) if seed_pct > 0 else 0.0
 
             best_res, best_cost = None, np.inf
-            good_enough = max(1e-4, 1e-4 * (limit_uM ** 2) * len(t_data))
 
             for p0 in guesses:
                 try:
-                    # k2 ≤ 1e-10 keeps the optimiser on the (physical)
-                    # irreversible-LIDA manifold; matches reference script.
                     res = least_squares(
                         _residuals, p0,
                         args=(t_data, y_data, initial_R, A0_exp, B0_exp),
-                        bounds=([0.0]*4, [100.0, 100.0, 1e-10, 100.0]),
-                        ftol=1e-8, xtol=1e-8, max_nfev=200,
+                        bounds=([1e-12, 1e-12, 0.0, 1e-12], [100.0, 100.0, 1e-10, 100.0]),
+                        x_scale='jac', ftol=1e-8, xtol=1e-8,
                     )
                     if res.success and res.cost < best_cost:
                         best_cost, best_res = res.cost, res
-                        if best_cost < good_enough:
-                            break
                 except Exception:
                     continue
 
@@ -194,18 +195,14 @@ def fit_experiments(payload_json):
                 fits.append({'groupId': gid, 'model': None,
                              'ku': None, 'k1': None, 'k2': None, 'kr': None, 'k_bg': None,
                              'limit_uM': limit_uM, 'seed_uM': initial_R, 'cost': None,
-                             'simT': [], 'simY': [], 'note': 'Fit did not converge.'})
+                             'simT': [], 'simY': [], 'simY_uM': [], 'note': 'Fit did not converge.'})
                 continue
 
             ku, k1, k2, kr = best_res.x
-            # Small buffer past the last data point for visual continuity.
-            # With k2 pinned to ~0 the system is no longer stiff, so this is safe.
             sim_t, sim_R = _simulate_R_dense(best_res.x, initial_R, float(t_data[-1]) + 5.0, A0_exp, B0_exp)
 
             curve_note = None
             if sim_t is None:
-                # Last-resort: smooth interpolation through the data the optimiser
-                # minimised against. Always works, always renders a curve.
                 sim_t = np.linspace(0.0, float(t_data[-1]), 50)
                 sim_R = np.interp(sim_t, t_data, y_data)
                 curve_note = 'Curve via data interpolation (ODE sim unstable for fit params).'
@@ -223,8 +220,9 @@ def fit_experiments(payload_json):
                 'limit_uM': limit_uM,
                 'seed_uM':  initial_R,
                 'cost':     float(best_cost),
-                'simT':  _safe_floats(sim_t),
-                'simY':  _safe_floats(sim_y_pct),
+                'simT':    _safe_floats(sim_t),
+                'simY':    _safe_floats(sim_y_pct),
+                'simY_uM': _safe_floats(sim_R),
             }
             if curve_note:
                 fit_record['note'] = curve_note
@@ -233,7 +231,7 @@ def fit_experiments(payload_json):
             fits.append({'groupId': gid, 'model': None,
                          'ku': None, 'k1': None, 'k2': None, 'kr': None, 'k_bg': None,
                          'limit_uM': None, 'seed_uM': None, 'cost': None,
-                         'simT': [], 'simY': [], 'note': f'Unexpected error: {exc}'})
+                         'simT': [], 'simY': [], 'simY_uM': [], 'note': f'Unexpected error: {exc}'})
 
     return json.dumps({'fits': fits})
 `

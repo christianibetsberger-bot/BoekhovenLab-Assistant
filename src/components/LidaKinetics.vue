@@ -1820,20 +1820,15 @@ function applyHplcResultsToDataset() {
 
   for (const [key, g] of groupsByKey) {
     g.timeCourse.sort((a, b) => a.time - b.time)
-    // Estimate plateau = mean of last 3 concentration values (mirrors notebook's per-base
-    // stoichiometric scaling: plateau = mean of unseeded last 3 timepoints).
-    const concs = g.timeCourse.map(p => p.concentration_uM).filter(v => isFinite(v) && v > 0)
-    const lastN = concs.slice(-3)
-    const plateau_uM = lastN.length > 0
-      ? Math.max(lastN.reduce((a, b) => a + b, 0) / lastN.length, 0.01)
-      : (hplcSettings.rMax_uM || 1.4)
-    // Store per-experiment stoichiometric parameters so the kinetic fitter uses them.
-    g.limit_uM = plateau_uM
-    g.A0 = 2 * plateau_uM
-    g.B0 = plateau_uM
-    // Recompute conversion% using the measured plateau (not the fixed UI value).
+    // Use the user-specified rMax as strand B concentration (matches notebook: LIMIT_B = B0).
+    // Auto-estimating from the last N data points gives wrong A0/B0 when the experiment
+    // hasn't yet plateaued — the ODE ceiling then falls below the data, causing overestimation.
+    const rMax = hplcSettings.rMax_uM || 1.4
+    g.limit_uM = rMax
+    g.A0 = 2 * rMax
+    g.B0 = rMax
     for (const pt of g.timeCourse) {
-      pt.conversion = Math.min(100, 100 * (pt.concentration_uM || 0) / plateau_uM)
+      pt.conversion = Math.min(100, 100 * (pt.concentration_uM || 0) / rMax)
     }
     g.maxConversion = g.timeCourse.length ? Math.max(...g.timeCourse.map(p => p.conversion)) : 0
     const repsMap = repsByKey.get(key)
@@ -1843,7 +1838,7 @@ function applyHplcResultsToDataset() {
           replicateId: repId,
           timeCourse: tc.slice()
             .sort((a, b) => a.time - b.time)
-            .map(pt => ({ ...pt, conversion: Math.min(100, 100 * (pt.concentration_uM || 0) / plateau_uM) })),
+            .map(pt => ({ ...pt, conversion: Math.min(100, 100 * (pt.concentration_uM || 0) / rMax) })),
         }))
         .sort((a, b) => a.replicateId.localeCompare(b.replicateId, undefined, { numeric: true }))
     }
@@ -2105,6 +2100,9 @@ function renderCurves() {
       ? `${truncateSeq(g.sequence)} (T${formatNum(g.conditions.temperature)}, n=${nRep})`
       : `${truncateSeq(g.sequence)} (T${formatNum(g.conditions.temperature)})`
 
+    // Use µM when available (HPLC), fall back to conversion% (CSV).
+    const useUM = g.timeCourse.length > 0 && g.timeCourse[0].concentration_uM != null
+
     // Raw data points — always markers only, no connecting lines.
     traces.push({
       type: 'scatter',
@@ -2112,13 +2110,18 @@ function renderCurves() {
       name: label,
       legendgroup: g.groupId,
       x: g.timeCourse.map(p => p.time),
-      y: g.timeCourse.map(p => p.conversion),
+      y: useUM
+        ? g.timeCourse.map(p => p.concentration_uM)
+        : g.timeCourse.map(p => p.conversion),
       marker: { size: 8, color, line: { width: 1, color: 'rgba(0,0,0,0.25)' } },
-      hovertemplate: `<b>${esc(g.sequence)}</b><br>Time: %{x} min<br>Conv: %{y:.1f}%<extra></extra>`,
+      hovertemplate: useUM
+        ? `<b>${esc(g.sequence)}</b><br>Time: %{x} min<br>[R]: %{y:.3f} µM<extra></extra>`
+        : `<b>${esc(g.sequence)}</b><br>Time: %{x} min<br>Conv: %{y:.1f}%<extra></extra>`,
     })
 
     // Mean fit curve overlay (line only, same color, slightly darker).
-    const hasFitCurve = g.fit && Array.isArray(g.fit.simT) && g.fit.simT.length > 0
+    const fitY = useUM && g.fit?.simY_uM?.length ? g.fit.simY_uM : g.fit?.simY
+    const hasFitCurve = g.fit && Array.isArray(g.fit.simT) && g.fit.simT.length > 0 && fitY?.length
     if (hasFitCurve) {
       traces.push({
         type: 'scatter',
@@ -2127,17 +2130,23 @@ function renderCurves() {
         legendgroup: g.groupId,
         showlegend: false,
         x: g.fit.simT,
-        y: g.fit.simY,
+        y: fitY,
         line: { color, width: 2.5 },
-        hovertemplate: `<b>fit</b><br>%{x:.0f} min · %{y:.1f}%<extra></extra>`,
+        hovertemplate: useUM
+          ? `<b>fit</b><br>%{x:.0f} min · %{y:.3f} µM<extra></extra>`
+          : `<b>fit</b><br>%{x:.0f} min · %{y:.1f}%<extra></extra>`,
       })
     }
   })
 
+  // Determine if any experiment uses µM — if mixed, prefer µM axis.
+  const anyUM = dataset.experiments.some(
+    g => g.timeCourse.length > 0 && g.timeCourse[0].concentration_uM != null
+  )
   const layout = plotLayoutDark()
   layout.xaxis.title = { text: 'Time (min)', font: { size: 9 } }
-  layout.yaxis.title = { text: 'Conv (%)', font: { size: 9 } }
-  layout.yaxis.range = [0, 105]
+  layout.yaxis.title = { text: anyUM ? '[R] / µM' : 'Conv (%)', font: { size: 9 } }
+  if (!anyUM) layout.yaxis.range = [0, 105]
   Plotly.react(curvePlotEl.value, traces, layout, { responsive: true, displayModeBar: false })
 }
 
@@ -2242,11 +2251,17 @@ function replicateCount(g) {
 function meanTimeCourse(timeCourse) {
   const timeMap = new Map()
   for (const pt of timeCourse) {
-    if (!timeMap.has(pt.time)) timeMap.set(pt.time, [])
-    timeMap.get(pt.time).push(pt.conversion)
+    if (!timeMap.has(pt.time)) timeMap.set(pt.time, { convs: [], concs: [] })
+    const bucket = timeMap.get(pt.time)
+    bucket.convs.push(pt.conversion)
+    if (pt.concentration_uM != null) bucket.concs.push(pt.concentration_uM)
   }
   return [...timeMap.entries()]
-    .map(([time, vals]) => ({ time, conversion: vals.reduce((a, b) => a + b, 0) / vals.length }))
+    .map(([time, { convs, concs }]) => ({
+      time,
+      conversion: convs.reduce((a, b) => a + b, 0) / convs.length,
+      ...(concs.length ? { concentration_uM: concs.reduce((a, b) => a + b, 0) / concs.length } : {}),
+    }))
     .sort((a, b) => a.time - b.time)
 }
 
@@ -2374,9 +2389,14 @@ function applyFits(allFits, prefix = '') {
         // Average simulated curves over the replicates that produced one.
         const tMax = Math.max(...repsWithCurves.map(f => Math.max(...f.simT)))
         const simT = Array.from({ length: 100 }, (_, i) => (i / 99) * tMax)
-        const allY = repsWithCurves.map(f => interpLinear(f.simT, f.simY, simT))
-        const simY = simT.map((_, i) => allY.reduce((s, y) => s + y[i], 0) / allY.length)
-        g.fit = { ...bestFit, simT, simY, replicateCount: repsWithCurves.length }
+        const allY    = repsWithCurves.map(f => interpLinear(f.simT, f.simY,    simT))
+        const allY_uM = repsWithCurves.filter(f => f.simY_uM?.length)
+                                       .map(f => interpLinear(f.simT, f.simY_uM, simT))
+        const simY    = simT.map((_, i) => allY.reduce((s, y) => s + y[i], 0) / allY.length)
+        const simY_uM = allY_uM.length
+          ? simT.map((_, i) => allY_uM.reduce((s, y) => s + y[i], 0) / allY_uM.length)
+          : []
+        g.fit = { ...bestFit, simT, simY, simY_uM, replicateCount: repsWithCurves.length }
         if (repFits.length === g.replicates.length && repsWithCurves.length === repFits.length) {
           okCount++
         } else {
@@ -2717,14 +2737,20 @@ function renderFitCharts() {
     if (!el) continue
     const expIdx = dataset.experiments.findIndex(e => e.groupId === key)
     const color = FIT_CHART_PALETTE[Math.max(0, expIdx) % FIT_CHART_PALETTE.length]
+
+    // Use µM when available (HPLC), fall back to conversion% (CSV).
+    const sampleTc = exp.replicates?.[0]?.timeCourse ?? exp.timeCourse ?? []
+    const useUM = sampleTc.length > 0 && sampleTc[0].concentration_uM != null
+
     const traces = []
-    // Data points: prefer replicates if present, else aggregate timeCourse.
     if (exp.replicates?.length) {
       for (const rep of exp.replicates) {
         traces.push({
           type: 'scatter', mode: 'markers',
           x: rep.timeCourse.map(p => p.time),
-          y: rep.timeCourse.map(p => p.conversion),
+          y: useUM
+            ? rep.timeCourse.map(p => p.concentration_uM)
+            : rep.timeCourse.map(p => p.conversion),
           name: `rep ${rep.replicateId}`,
           marker: { size: 7, color: color, opacity: 0.45 },
         })
@@ -2733,17 +2759,20 @@ function renderFitCharts() {
       traces.push({
         type: 'scatter', mode: 'markers',
         x: exp.timeCourse.map(p => p.time),
-        y: exp.timeCourse.map(p => p.conversion),
+        y: useUM
+          ? exp.timeCourse.map(p => p.concentration_uM)
+          : exp.timeCourse.map(p => p.conversion),
         name: 'data',
         marker: { size: 7, color: color, opacity: 0.45 },
       })
     }
-    // Fitted curve — same color as data points, full opacity.
-    if (exp.fit?.simT?.length && exp.fit?.simY?.length) {
+    // Fit curve: simY_uM (µM) when available, else simY (conversion%).
+    const fitY = useUM && exp.fit?.simY_uM?.length ? exp.fit.simY_uM : exp.fit?.simY
+    if (exp.fit?.simT?.length && fitY?.length) {
       traces.push({
         type: 'scatter', mode: 'lines',
         x: exp.fit.simT,
-        y: exp.fit.simY,
+        y: fitY,
         name: 'fit', line: { color: color, width: 2 },
       })
     }
@@ -2755,7 +2784,9 @@ function renderFitCharts() {
     const layout = {
       title: { text: `${exp.sequence}${limitLabel}${subtitle ? ' · ' + subtitle : ''}`, font: { size: 10 } },
       xaxis: { title: 't / min' },
-      yaxis: { title: 'conversion %', range: [0, 105] },
+      yaxis: useUM
+        ? { title: '[R] / µM' }
+        : { title: 'conversion %', range: [0, 105] },
       margin: { l: 50, r: 10, t: 40, b: 35 },
       showlegend: false,
       paper_bgcolor: store.isDarkMode ? '#0f172a' : '#ffffff',

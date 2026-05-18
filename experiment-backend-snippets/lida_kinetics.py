@@ -121,8 +121,6 @@ def _simulate_R_dense(params, initial_R, t_max, A0, B0, n=100):
 
 
 def _residuals(params, t_data, y_data, initial_R, A0, B0):
-    if np.any(np.array(params) < 0):
-        return np.full_like(y_data, 1e6)
     y_sim = _simulate_R_at(params, initial_R, t_data, A0, B0)
     if y_sim is None or np.any(np.isnan(y_sim)):
         return np.full_like(y_data, 1e6)
@@ -130,12 +128,20 @@ def _residuals(params, t_data, y_data, initial_R, A0, B0):
 
 
 def _build_initial_guesses():
-    return [
-        [1e-6, 1e-3, 1e-11, 1e-6],
-        [1e-3, 1e-1, 1e-11, 1e-1],
-        [1e-2, 1.0,  1e-11, 1.0 ],
-        [1e-5, 1.0,  1e-11, 10.0],
+    # 5 fixed + 15 random log-uniform guesses — matches the notebook exactly.
+    base = [
+        [1e-6, 1e-3,  1e-11, 1e-6 ],
+        [1e-4, 0.1,   1e-11, 0.1  ],
+        [1e-3, 1.0,   1e-11, 1.0  ],
+        [1e-5, 1.0,   1e-11, 10.0 ],
+        [1e-6, 10.0,  1e-11, 50.0 ],
     ]
+    np.random.seed(42)
+    for _ in range(15):
+        g = np.power(10, np.random.uniform(-6, 2.0, size=4)).tolist()
+        g[2] = 1e-11
+        base.append(g)
+    return base
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -279,10 +285,13 @@ def kinetics_fit():
             fits.append({'groupId': gid, 'model': None,
                          'ku': None, 'k1': None, 'k2': None, 'kr': None, 'k_bg': None,
                          'limit_uM': None, 'seed_uM': None, 'cost': None,
-                         'simT': [], 'simY': [], 'note': 'Need at least 3 timepoints.'})
+                         'simT': [], 'simY': [], 'simY_uM': [],
+                         'note': 'Need at least 3 timepoints.'})
             continue
 
         limit_uM = float(g.get('limit_uM', default_lim))
+        A0_exp   = float(g.get('A0', A0))
+        B0_exp   = float(g.get('B0', B0))
         env      = ((g.get('conditions') or {}).get('env') or '')
         seed_pct = 0.05 if 'seed' in str(env).lower() else 0.0
 
@@ -291,24 +300,28 @@ def kinetics_fit():
         order  = np.argsort(t_data)
         t_data, y_pct = t_data[order], y_pct[order]
 
-        y_data    = (y_pct / 100.0) * limit_uM
-        initial_R = float(seed_pct * np.mean(y_data))
+        # Use raw µM when available (HPLC import), else derive from conversion%.
+        has_conc = tc[0].get('concentration_uM') is not None
+        if has_conc:
+            conc_arr = [tc[i].get('concentration_uM') for i in order]
+            y_data = np.array([float(v) for v in conc_arr], dtype=float)
+        else:
+            y_data = (y_pct / 100.0) * limit_uM
+
+        initial_R = float(seed_pct * y_data[0]) if seed_pct > 0 else 0.0
 
         best_res, best_cost = None, np.inf
-        good_enough = max(1e-4, 1e-4 * (limit_uM ** 2) * len(t_data))
 
         for p0 in guesses:
             try:
                 res = least_squares(
                     _residuals, p0,
-                    args=(t_data, y_data, initial_R, A0, B0),
-                    bounds=([0.0]*4, [100.0, 100.0, 1e-10, 100.0]),
-                    ftol=1e-6, xtol=1e-6, max_nfev=80,
+                    args=(t_data, y_data, initial_R, A0_exp, B0_exp),
+                    bounds=([1e-12, 1e-12, 0.0, 1e-12], [100.0, 100.0, 1e-10, 100.0]),
+                    x_scale='jac', ftol=1e-8, xtol=1e-8,
                 )
                 if res.success and res.cost < best_cost:
                     best_cost, best_res = res.cost, res
-                    if best_cost < good_enough:
-                        break
             except Exception:
                 continue
 
@@ -316,12 +329,16 @@ def kinetics_fit():
             fits.append({'groupId': gid, 'model': None,
                          'ku': None, 'k1': None, 'k2': None, 'kr': None, 'k_bg': None,
                          'limit_uM': limit_uM, 'seed_uM': initial_R, 'cost': None,
-                         'simT': [], 'simY': [], 'note': 'Fit did not converge.'})
+                         'simT': [], 'simY': [], 'simY_uM': [],
+                         'note': 'Fit did not converge.'})
             continue
 
         ku, k1, k2, kr = best_res.x
-        sim_t, sim_R   = _simulate_R_dense(best_res.x, initial_R, float(t_data[-1]) + 5.0, A0, B0)
+        sim_t, sim_R   = _simulate_R_dense(best_res.x, initial_R, float(t_data[-1]) + 5.0, A0_exp, B0_exp)
         sim_y_pct      = (sim_R / limit_uM) * 100.0 if sim_R is not None else None
+
+        def _safe(arr):
+            return [float(v) if np.isfinite(v) else None for v in arr] if arr is not None else []
 
         fits.append({
             'groupId': gid,
@@ -334,8 +351,9 @@ def kinetics_fit():
             'limit_uM': limit_uM,
             'seed_uM':  initial_R,
             'cost':     float(best_cost),
-            'simT':  sim_t.tolist()     if sim_t     is not None else [],
-            'simY':  sim_y_pct.tolist() if sim_y_pct is not None else [],
+            'simT':    _safe(sim_t),
+            'simY':    _safe(sim_y_pct),
+            'simY_uM': _safe(sim_R),
         })
 
     ranked  = sorted(experiments, key=_max_yield, reverse=True)[:5]

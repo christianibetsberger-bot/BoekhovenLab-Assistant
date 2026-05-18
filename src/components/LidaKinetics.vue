@@ -1773,7 +1773,7 @@ function applyHplcResultsToDataset() {
     })
     const repId = String(r.meta.replicate ?? '1')
     if (!repsByKey.get(key).has(repId)) repsByKey.get(key).set(repId, [])
-    repsByKey.get(key).get(repId).push({ time, conversion })
+    repsByKey.get(key).get(repId).push({ time, conversion, concentration_uM: r.R_uM })
   }
 
   for (const [key, g] of groupsByKey) {
@@ -2228,6 +2228,9 @@ async function fitKinetics() {
           sequence: g.sequence,
           conditions: g.conditions,
           timeCourse: rep.timeCourse,
+          limit_uM: g.limit_uM,
+          A0: g.A0,
+          B0: g.B0,
         })
       }
     } else {

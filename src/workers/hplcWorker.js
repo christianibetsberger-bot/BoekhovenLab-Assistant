@@ -252,7 +252,7 @@ async function init() {
     try {
       await pyodide.runPythonAsync(`
 import micropip
-await micropip.install(['tqdm', 'seaborn', 'hplc-py'])
+await micropip.install(['tqdm', 'seaborn', 'lmfit', 'asteval', 'uncertainties', 'hplc-py'])
 `)
     } catch (err) {
       // hplc-py install failed — log the reason so it's visible in DevTools console.

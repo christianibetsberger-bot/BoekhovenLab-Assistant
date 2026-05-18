@@ -198,8 +198,9 @@ def process_chromatogram(text, params_json):
                             if product_min <= rt <= product_max:
                                 area_min = float(row[area_col_t]) / 60.0
                                 tight_product_peaks.append(_peak_row_to_dict(row, area_min))
-            except Exception:
-                pass
+            except Exception as e:
+                import sys
+                print(f'[hplcWorker] tight-crop pass failed: {e}', file=sys.stderr)
 
         if tight_product_peaks:
             # Replace product-range peaks from pass 1 with the tighter measurements.
@@ -254,9 +255,8 @@ import micropip
 await micropip.install('hplc-py')
 `)
     } catch (err) {
-      // hplc-py install failed (rare; pure-Python but may pull in incompatible deps).
-      // The Python code falls back to scipy find_peaks + valley integration when
-      // hplc-py is unavailable, so we keep going.
+      // hplc-py install failed — log the reason so it's visible in DevTools console.
+      console.error('[hplcWorker] hplc-py install failed:', err?.message || String(err))
       self.postMessage({ type: 'progress', stage: 'installing-hplc',
         text: 'hplc-py unavailable — falling back to scipy peak integration.' })
     }

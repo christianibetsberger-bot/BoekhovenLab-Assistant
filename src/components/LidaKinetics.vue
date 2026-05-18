@@ -231,6 +231,11 @@
                   <th class="no-upper"><span class="no-upper">c A'B' (µM)</span></th>
                   <th class="no-upper"><span class="no-upper">[R] (µM)</span></th>
                   <th class="no-upper"><span class="no-upper">Conv. %</span></th>
+                  <th class="no-upper" style="border-left:2px solid var(--border-color,#e2e8f0);"><span class="no-upper">T (°C)</span></th>
+                  <th class="no-upper"><span class="no-upper">Ligase</span></th>
+                  <th class="no-upper"><span class="no-upper">ATP (mM)</span></th>
+                  <th class="no-upper"><span class="no-upper">Mg²⁺ (mM)</span></th>
+                  <th class="no-upper"><span class="no-upper">Env</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -244,6 +249,21 @@
                   <td>{{ r.cABp_uM.toFixed(3) }}</td>
                   <td><strong>{{ r.R_uM.toFixed(3) }}</strong></td>
                   <td>{{ r.conversion.toFixed(1) }}</td>
+                  <template v-if="hplcFileConditions[r.name]">
+                    <td style="border-left:2px solid var(--border-color,#e2e8f0);">
+                      <input type="number" step="0.5" class="cond-input" v-model.number="hplcFileConditions[r.name].temperature">
+                    </td>
+                    <td><input type="number" step="any" class="cond-input" v-model.number="hplcFileConditions[r.name].ligase"></td>
+                    <td><input type="number" step="any" class="cond-input" v-model.number="hplcFileConditions[r.name].atp"></td>
+                    <td><input type="number" step="any" class="cond-input" v-model.number="hplcFileConditions[r.name].mg2"></td>
+                    <td>
+                      <select class="cond-select" v-model="hplcFileConditions[r.name].env">
+                        <option value="seeded">Seeded</option>
+                        <option value="unseeded">Unseeded</option>
+                        <option value="none">—</option>
+                      </select>
+                    </td>
+                  </template>
                 </tr>
               </tbody>
             </table>
@@ -315,21 +335,21 @@
               </div>
             </div>
             <div class="input-group">
-              <label>T4-Ligase ({{ dataset.units.ligase }})</label>
+              <label>T4-Ligase <span class="no-upper">({{ dataset.units.ligase }})</span></label>
               <div class="range-inputs">
                 <input type="number" step="any" v-model.number="dataset.config.ranges.ligaseMin" placeholder="Min" />
                 <input type="number" step="any" v-model.number="dataset.config.ranges.ligaseMax" placeholder="Max" />
               </div>
             </div>
             <div class="input-group">
-              <label>ATP ({{ dataset.units.atp }})</label>
+              <label>ATP <span class="no-upper">({{ dataset.units.atp }})</span></label>
               <div class="range-inputs">
                 <input type="number" step="any" v-model.number="dataset.config.ranges.atpMin" placeholder="Min" />
                 <input type="number" step="any" v-model.number="dataset.config.ranges.atpMax" placeholder="Max" />
               </div>
             </div>
             <div class="input-group">
-              <label><span class="no-upper">Mg²⁺</span> ({{ dataset.units.mg2 }})</label>
+              <label><span class="no-upper">Mg²⁺ ({{ dataset.units.mg2 }})</span></label>
               <div class="range-inputs">
                 <input type="number" step="any" v-model.number="dataset.config.ranges.mg2Min" placeholder="Min" />
                 <input type="number" step="any" v-model.number="dataset.config.ranges.mg2Max" placeholder="Max" />
@@ -1071,6 +1091,9 @@ const hplcSettings = reactive({
 const hplcBatchConditions = reactive({
   temperature: 25, ligase: 1, atp: 5, mg2: 10, env: 'none',
 })
+// Per-file condition overrides. Keyed by filename; initialized from
+// hplcBatchConditions at upload time with env auto-set from the S/U filename flag.
+const hplcFileConditions = reactive({})
 const hplcResults = ref([])             // [{ name, parsed, trace, peaks, ... }]
 const hplcSkipped = ref([])             // [{ name, reason }]
 const isProcessingHplc = ref(false)
@@ -1617,6 +1640,21 @@ async function onHplcFileSelected(e) {
 
   if (!good.length) return
 
+  // Initialise per-file conditions (only for new files; preserve any user edits).
+  for (const { file, meta } of good) {
+    if (!hplcFileConditions[file.name]) {
+      hplcFileConditions[file.name] = {
+        temperature: hplcBatchConditions.temperature,
+        ligase:      hplcBatchConditions.ligase,
+        atp:         hplcBatchConditions.atp,
+        mg2:         hplcBatchConditions.mg2,
+        env: meta.condition === 'S' ? 'seeded'
+           : meta.condition === 'U' ? 'unseeded'
+           : (hplcBatchConditions.env || 'none'),
+      }
+    }
+  }
+
   isProcessingHplc.value = true
   hplcProgress.value = 'Reading files…'
   try {
@@ -1729,16 +1767,10 @@ function applyHplcResultsToDataset() {
     parseError.value = 'No HPLC results to apply.'
     return
   }
-  // Build grouping: (ABseq + batch conditions) → time-course rows
+  // Build grouping: (ABseq + per-file conditions) → time-course rows.
+  // Files with different conditions end up in separate experiment groups.
   const groupsByKey = new Map()
   const repsByKey   = new Map()
-  const conds = {
-    ligase: Number(hplcBatchConditions.ligase) || 0,
-    atp:    Number(hplcBatchConditions.atp) || 0,
-    temperature: Number(hplcBatchConditions.temperature) || 0,
-    env: hplcBatchConditions.env || 'none',
-    mg2: Number(hplcBatchConditions.mg2) || 0,
-  }
 
   for (const r of rows) {
     if (!r.meta?.ABseq) continue
@@ -1746,6 +1778,16 @@ function applyHplcResultsToDataset() {
     const time = r.meta.time
     const conversion = r.conversion
     if (!isFinite(time) || !isFinite(conversion)) continue
+
+    // Resolve conditions: per-file override > batch defaults.
+    const fc = hplcFileConditions[r.name] || hplcBatchConditions
+    const conds = {
+      ligase:      Number(fc.ligase)      || 0,
+      atp:         Number(fc.atp)         || 0,
+      temperature: Number(fc.temperature) || 0,
+      env:         fc.env || 'none',
+      mg2:         Number(fc.mg2)         || 0,
+    }
 
     const key = groupKey(seq, conds)
     if (!groupsByKey.has(key)) {
@@ -1814,6 +1856,7 @@ function applyHplcResultsToDataset() {
 }
 
 function discardHplcResults() {
+  hplcResults.value.forEach(r => { delete hplcFileConditions[r.name] })
   hplcResults.value = []
   hplcSkipped.value = []
   hplcProgress.value = ''
@@ -2725,6 +2768,8 @@ function renderFitCharts() {
 
 watch([hplcDerived, () => hplcSettings.productMin, () => hplcSettings.productMax, () => hplcSettings.scanMin, () => hplcSettings.scanMax],
       () => { nextTick(renderHplcCharts) }, { deep: true })
+// Re-render after show — v-if destroys DOM, so refs are fresh on re-mount.
+watch(hplcShowGallery, (v) => { if (v) nextTick(renderHplcCharts) })
 watch(() => dataset.experiments.map(e => ({ id: e.groupId, fit: e.fit })),
       () => { nextTick(renderFitCharts) }, { deep: true })
 
@@ -2871,6 +2916,8 @@ onBeforeUnmount(() => {
 .hplc-preview th.left, .hplc-preview td.left { text-align: left; }
 .hplc-preview td.filename { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
 .hplc-preview tr.row-error { opacity: 0.5; }
+.cond-input  { width: 56px; padding: 1px 3px; font-size: 0.7rem; }
+.cond-select { width: 80px; padding: 1px 2px; font-size: 0.7rem; }
 
 /* ── HPLC chromatogram + kinetic-fit gallery ──────────────── */
 .hplc-gallery {

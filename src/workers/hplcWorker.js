@@ -98,19 +98,31 @@ def _scipy_peak_count(s, prominence):
 
 
 def _hplc_fit(chrom_obj, prominence, verbose=False, max_iter=500):
-    # Try fit_peaks at the given prominence, falling back to prominence/5 on ValueError.
-    # max_iterations caps the per-peak optimizer so failed-injection traces don't stall.
-    try:
-        return chrom_obj.fit_peaks(prominence=prominence, correct_baseline=False,
-                                   verbose=verbose, max_iterations=max_iter)
-    except ValueError:
-        try:
-            return chrom_obj.fit_peaks(prominence=prominence/5.0, correct_baseline=False,
-                                       verbose=verbose, max_iterations=max_iter)
-        except Exception:
-            return None
-    except Exception:
+    import sys
+    # Build kwargs; drop max_iterations if this hplc-py version doesn't support it.
+    def _call(prom):
+        for kwargs in [
+            {'prominence': prom, 'correct_baseline': False, 'verbose': verbose, 'max_iterations': max_iter},
+            {'prominence': prom, 'correct_baseline': False, 'verbose': verbose},
+        ]:
+            try:
+                result = chrom_obj.fit_peaks(**kwargs)
+                print(f'[hplcWorker] fit_peaks OK prominence={prom:.4f} max_iter={kwargs.get("max_iterations","?")} → {len(result)} peaks', file=sys.stderr)
+                return result
+            except TypeError as te:
+                if 'max_iterations' in str(te):
+                    continue  # retry without max_iterations
+                print(f'[hplcWorker] fit_peaks TypeError: {te}', file=sys.stderr)
+                return None
+            except Exception as ex:
+                print(f'[hplcWorker] fit_peaks error: {ex}', file=sys.stderr)
+                return None
         return None
+
+    result = _call(prominence)
+    if result is None or result.empty:
+        result = _call(prominence / 5.0)
+    return result
 
 
 def _peak_row_to_dict(row, area_mAU_min):
@@ -198,6 +210,9 @@ def process_chromatogram(text, params_json):
                 import sys
                 print(f'[hplcWorker] tight-crop pass failed: {e}', file=sys.stderr)
 
+        import sys
+        print(f'[hplcWorker] tight-crop found {len(tight_product_peaks)} product peaks in [{product_min},{product_max}]: {[(round(p["rt"],3), round(p["area_mAU_min"],4)) for p in tight_product_peaks]}', file=sys.stderr)
+
         if tight_product_peaks:
             # Replace product-range peaks from pass 1 with the tighter measurements.
             peaks_out = [p for p in peaks_out if not (product_min <= p['rt'] <= product_max)]
@@ -259,6 +274,7 @@ await micropip.install(['tqdm', 'seaborn', 'termcolor', 'lmfit', 'asteval', 'unc
 
     self.postMessage({ type: 'progress', stage: 'compiling-code', text: 'Compiling HPLC engine…' })
     pyodide.runPython(HPLC_CODE)
+    console.log('[hplcWorker] v6 ready')
 
     self.postMessage({ type: 'ready' })
   })()

@@ -150,6 +150,49 @@
             </label>
           </div>
 
+          <!-- ── Component Links (dependencies) ── -->
+          <div style="margin-top: 8px;">
+            <button type="button"
+              @click="config.showDependencies = !config.showDependencies"
+              style="width:100%; text-align:left; background:transparent; border:1px dashed var(--border-color,#cbd5e1); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
+              <i class="fas" :class="config.showDependencies ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
+              Component Links — lock one component as a function of another (e.g. D = 2 × C)
+              <span v-if="config.dependencies && config.dependencies.length" style="margin-left:auto; background:rgba(139,92,246,0.2); color:#8b5cf6; border-radius:10px; padding:1px 7px; font-size:0.7rem;">{{ config.dependencies.length }} link{{ config.dependencies.length > 1 ? 's' : '' }}</span>
+            </button>
+
+            <div v-if="config.showDependencies" style="margin-top:8px; padding:10px 12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
+              <p style="font-size:0.72rem; opacity:0.6; margin:0;">
+                Each link enforces <strong>target = source × factor + offset</strong> (values in each component's configured unit).
+                Applied when exporting to wellplate and when post-processing AI suggestions.
+              </p>
+
+              <!-- Existing links -->
+              <div v-for="(dep, di) in (config.dependencies || [])" :key="di"
+                style="display:grid; grid-template-columns:1fr 20px 1fr 16px 80px 16px 70px auto; gap:6px; align-items:center;">
+                <select v-model="dep.source" style="font-size:0.78rem; padding:3px 5px;">
+                  <option v-for="k in COMP_KEYS" :key="k" :value="k">{{ compLabel(k) }}</option>
+                </select>
+                <span style="text-align:center; opacity:0.5;">→</span>
+                <select v-model="dep.target" @change="dep.target === 'compD' && (config.enableCompD = true)" style="font-size:0.78rem; padding:3px 5px;">
+                  <option v-for="k in COMP_KEYS" :key="k" :value="k" :disabled="k === dep.source">{{ compLabel(k) }}</option>
+                </select>
+                <span style="text-align:center; opacity:0.5; font-size:0.7rem;">×</span>
+                <input type="number" v-model.number="dep.factor" step="any" style="font-size:0.78rem; padding:3px 5px;" placeholder="factor" title="Multiplier">
+                <span style="text-align:center; opacity:0.5; font-size:0.7rem;">+</span>
+                <input type="number" v-model.number="dep.offset" step="any" style="font-size:0.78rem; padding:3px 5px;" placeholder="offset" title="Offset (in target unit)">
+                <button @click="removeDependency(di)" style="background:none; border:none; cursor:pointer; color:#ef4444; font-size:0.85rem; padding:0 4px;" title="Remove link">✕</button>
+              </div>
+
+              <div v-if="!config.dependencies || config.dependencies.length === 0" style="font-size:0.75rem; opacity:0.45; text-align:center; padding:4px 0;">
+                No links defined yet.
+              </div>
+
+              <button class="small" @click="addDependency" style="align-self:flex-start; padding:3px 10px; font-size:0.75rem;">
+                <i class="fas fa-plus"></i> Add Link
+              </button>
+            </div>
+          </div>
+
           <!-- ── Advanced: Solvents, Background Salt & pH ── -->
           <div style="margin-top: 10px;">
             <button type="button"
@@ -688,6 +731,141 @@
           </div>
       </div>
     </div>
+
+    <!-- ── 6. Additive Experiment Layer ── -->
+    <div class="internal-section full-width-section">
+      <div class="flex-between" style="border-bottom:1px solid var(--border-color,#e2e8f0); padding-bottom:8px; margin-bottom:12px;">
+        <h3 style="margin:0; border:none; padding:0;">
+          <i class="fas fa-flask" style="font-size:0.85rem; opacity:0.7;"></i> 6. Additive Experiment Layer
+        </h3>
+        <label class="checkbox-label" style="font-size:0.8rem; gap:8px;">
+          <input type="checkbox" v-model="additiveConfig.enabled">
+          Enable
+        </label>
+      </div>
+
+      <div v-if="!additiveConfig.enabled" style="font-size:0.8rem; opacity:0.5; text-align:center; padding:8px 0;">
+        Add a new component ON TOP of existing wells. Concentrations of all existing components are
+        automatically diluted by the added volume.
+      </div>
+
+      <template v-else>
+        <!-- Row 1: source + additive component definition -->
+        <div style="display:grid; grid-template-columns:180px 1fr 120px 120px; gap:10px; align-items:end; margin-bottom:12px; flex-wrap:wrap;">
+          <!-- Source -->
+          <div class="input-group" style="margin:0;">
+            <label style="font-size:0.75rem;">Base rows from</label>
+            <select v-model="additiveConfig.source" style="padding:5px; font-size:0.82rem; width:100%;">
+              <option value="suggestions">AI Suggestions ({{ suggestions.length }})</option>
+              <option value="experiments">Experiment Ledger ({{ experiments.length }})</option>
+            </select>
+          </div>
+          <!-- Component name + inventory -->
+          <div class="input-group" style="margin:0; position:relative;" @click.stop>
+            <label style="font-size:0.75rem;">Additive component</label>
+            <div style="display:flex; gap:5px;">
+              <input type="text" v-model="additiveConfig.name" placeholder="Name…" style="flex:1; font-size:0.82rem; padding:5px;" />
+              <div style="flex:1.5; position:relative;">
+                <div @click="additiveConfig.showAdditiveInvDropdown = !additiveConfig.showAdditiveInvDropdown" class="inventory-select-box" style="min-height:30px; font-size:0.78rem;">
+                  <span class="truncate-text">{{ additiveConfig.inv ? `[${additiveConfig.inv.code}] ${additiveConfig.inv.name}` : 'Search inventory…' }}</span>
+                  <i class="fas fa-search" style="font-size:0.7rem; opacity:0.5;"></i>
+                </div>
+                <div v-if="additiveConfig.showAdditiveInvDropdown" class="inventory-dropdown">
+                  <div class="dropdown-scope-selector">
+                    <label class="checkbox-label"><input type="radio" value="Global" v-model="additiveConfig.invSearchScope"> Global</label>
+                    <label class="checkbox-label"><input type="radio" value="Personal" v-model="additiveConfig.invSearchScope"> Personal</label>
+                  </div>
+                  <div class="dropdown-search"><input type="text" v-model="additiveConfig.invSearchQuery" placeholder="Filter…" @click.stop /></div>
+                  <div class="dropdown-results">
+                    <div v-for="inv in filterBlockInventory(additiveConfig.invSearchQuery, additiveConfig.invSearchScope)" :key="inv.id"
+                      class="dropdown-item"
+                      @mousedown.prevent="additiveConfig.inv = inv; additiveConfig.name = inv.name; additiveConfig.stockConc = inv.stock; additiveConfig.stockUnit = inv.stockUnit || 'mM'; additiveConfig.showAdditiveInvDropdown = false">
+                      [{{ inv.code }}] {{ inv.name }} ({{ inv.stock }} {{ inv.stockUnit || 'µM' }})
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <button v-if="additiveConfig.inv" @click="additiveConfig.inv = null" style="background:none; border:none; cursor:pointer; color:#ef4444; font-size:0.75rem; padding:0 4px;" title="Clear">✕</button>
+            </div>
+          </div>
+          <!-- Stock concentration + unit -->
+          <div class="input-group" style="margin:0;">
+            <label style="font-size:0.75rem;">Stock conc.</label>
+            <div style="display:flex; gap:4px;">
+              <input type="number" v-model.number="additiveConfig.stockConc" min="0" step="any" style="flex:1; font-size:0.82rem; padding:5px;" placeholder="100" />
+              <select v-model="additiveConfig.stockUnit" class="unit-select" style="max-width:56px;">
+                <option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option>
+              </select>
+            </div>
+          </div>
+          <!-- Volumes to add -->
+          <div class="input-group" style="margin:0;">
+            <label style="font-size:0.75rem;">Volumes to add (µL, comma-sep.)</label>
+            <input type="text" v-model="additiveConfig.volumesText" placeholder="1, 2, 5, 10" style="font-size:0.82rem; padding:5px; width:100%;" />
+          </div>
+        </div>
+
+        <!-- Summary line -->
+        <div style="font-size:0.76rem; opacity:0.65; margin-bottom:10px;">
+          <strong>{{ additiveBaseRows.length }}</strong> base rows × <strong>{{ additiveVolumes.length }}</strong> volumes
+          = <strong>{{ additivePreviewRows.length }}</strong> wells
+          | Base volume: <strong>{{ config.targetVolume }} µL</strong>
+          | Stock: <strong>{{ additiveConfig.stockConc }} {{ additiveConfig.stockUnit }}</strong>
+        </div>
+
+        <!-- Preview table (first 12 rows) -->
+        <div v-if="additivePreviewRows.length > 0" style="overflow-x:auto; margin-bottom:12px;">
+          <table class="ledger-table" style="font-size:0.74rem; min-width:600px;">
+            <thead>
+              <tr>
+                <th>Base ID</th>
+                <th>+Vol (µL)</th>
+                <th>{{ config.anionName || 'A' }} ({{ config.anionUnit }})</th>
+                <th>{{ config.cationName || 'B' }} ({{ config.cationUnit }})</th>
+                <th>{{ config.saltName || 'C' }} ({{ config.saltUnit }})</th>
+                <th v-if="config.enableCompD">{{ config.compDName || 'D' }} ({{ config.compDUnit }})</th>
+                <th>{{ additiveConfig.name || 'Additive' }} ({{ additiveConfig.stockUnit }})</th>
+                <th>Total (µL)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, ri) in additivePreviewRows.slice(0, 24)" :key="ri" :style="ri % additiveVolumes.length === 0 ? 'border-top:2px solid var(--border-color,#e2e8f0);' : ''">
+                <td style="opacity:0.6;">{{ row._baseId }}</td>
+                <td><strong>{{ row._vAdd }}</strong></td>
+                <td>{{ row.anion }}</td>
+                <td>{{ row.cation }}</td>
+                <td>{{ row.salt }}</td>
+                <td v-if="config.enableCompD">{{ row.compD }}</td>
+                <td style="color:#f59e0b; font-weight:600;">{{ row.additive }}</td>
+                <td style="opacity:0.6;">{{ row._totalVol }}</td>
+              </tr>
+              <tr v-if="additivePreviewRows.length > 24">
+                <td :colspan="config.enableCompD ? 8 : 7" style="text-align:center; opacity:0.45; font-style:italic;">
+                  … {{ additivePreviewRows.length - 24 }} more rows not shown
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Export controls -->
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <span style="font-size:0.82rem; font-weight:600; opacity:0.7;">Export additive wells:</span>
+          <select v-model="targetPlateId" class="compact-select">
+            <option value="" disabled>Select Plate…</option>
+            <option v-for="p in store.wellPlates" :key="p.id" :value="p.id">{{ p.name }}</option>
+          </select>
+          <input type="text" v-model="targetStartWell" placeholder="A1" class="compact-input" />
+          <button class="small" @click="exportAdditiveToPlate"
+            style="background:#f59e0b; color:#000; border:none; padding:4px 14px; border-radius:4px; cursor:pointer; font-weight:600;">
+            <i class="fas fa-arrow-down"></i> Send to Plate
+          </button>
+          <span style="font-size:0.72rem; opacity:0.5;">
+            {{ additivePreviewRows.length }} wells → fills {{ Math.ceil(additivePreviewRows.length / 12) }} rows
+          </span>
+        </div>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -741,6 +919,9 @@ const config = ref({
   saltMedium:   { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
   compDMedium:  { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
   fillupMedium: { type: 'water', bufName: '', naMM: 0, pH: 7.0, inv: null, searchQuery: '', searchScope: 'Global' },
+  // Component dependency links: target = source * factor + offset (stored-unit arithmetic)
+  dependencies: [],
+  showDependencies: false,
 })
 
 // Current D-slice value for the 4th-component slider in the 3D scatter plot.
@@ -758,6 +939,117 @@ const fixedAxis = computed(() => {
 const experiments = ref([])
 const suggestions = ref([])
 const isCalculating = ref(false)
+
+// ─── Additive Layer ────────────────────────────────────────────────────────
+// Lets the user spike a new component into an already-prepared set of wells.
+// User specifies volumes (µL) to add; concentrations of ALL existing components
+// are automatically diluted: c_final = c_base × Vbase / (Vbase + Vadd).
+// The additive component reaches: c_add = stockConc × Vadd / (Vbase + Vadd).
+const additiveConfig = reactive({
+  enabled: false,
+  source: 'suggestions',       // 'suggestions' | 'experiments'
+  name: 'Additive',
+  stockConc: 100,
+  stockUnit: 'mM',
+  inv: null,
+  invSearchQuery: '',
+  invSearchScope: 'Global',
+  medium: { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
+  volumesText: '1, 2, 5, 10',
+  showAdditiveInvDropdown: false,
+})
+
+const additiveVolumes = computed(() =>
+  (additiveConfig.volumesText || '')
+    .split(',')
+    .map(s => parseFloat(s.trim()))
+    .filter(n => !isNaN(n) && n > 0)
+    .sort((a, b) => a - b)
+)
+
+const additiveBaseRows = computed(() =>
+  additiveConfig.source === 'experiments' ? experiments.value : suggestions.value
+)
+
+const additivePreviewRows = computed(() => {
+  if (!additiveConfig.enabled) return []
+  const Vbase = config.value.targetVolume
+  const stockMM = getMM(additiveConfig.stockConc, additiveConfig.stockUnit)
+  const rows = []
+  additiveBaseRows.value.forEach(base => {
+    additiveVolumes.value.forEach(vAdd => {
+      const Vnew = Vbase + vAdd
+      const dil = Vbase / Vnew
+      rows.push({
+        _baseId: base.sampleId,
+        _vAdd: vAdd,
+        _totalVol: +Vnew.toFixed(4),
+        anion:    +(base.anion    * dil).toFixed(4),
+        cation:   +(base.cation   * dil).toFixed(4),
+        salt:     +(base.salt     * dil).toFixed(4),
+        compD:    +((base.compD || 0) * dil).toFixed(4),
+        additive: +((stockMM * vAdd) / Vnew).toFixed(4),
+      })
+    })
+  })
+  return rows
+})
+
+const exportAdditiveToPlate = () => {
+  if (!targetPlateId.value || !targetStartWell.value) {
+    alert('Please select a target plate and starting well.')
+    return
+  }
+  if (additivePreviewRows.value.length === 0) {
+    alert('No additive rows to export. Check that there are base rows and at least one valid volume.')
+    return
+  }
+  const plate = store.wellPlates.find(p => p.id === targetPlateId.value)
+  if (!plate) return
+
+  const startWell = targetStartWell.value.toUpperCase().trim()
+  const match = startWell.match(/^([A-Z]+)(\d+)$/)
+  if (!match) { alert('Invalid well format. Use A1, B2, etc.'); return }
+
+  let startRow = match[1].charCodeAt(0) - 65
+  let startCol = parseInt(match[2]) - 1
+
+  const fmt = n => Number(n).toFixed(2)
+  const stockMM = getMM(additiveConfig.stockConc, additiveConfig.stockUnit)
+
+  const addInvTag = (vol) => {
+    const inv = additiveConfig.inv
+    if (!inv) return `<strong>${esc(additiveConfig.name || 'Additive')}:</strong> ${esc(fmt(vol))} µL<br>`
+    return `&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(inv.code)}] ${esc(inv.name)} (${esc(store.formatNum(inv.stock))} ${esc(inv.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(fmt(vol))} µL<br>`
+  }
+
+  additivePreviewRows.value.forEach((row, i) => {
+    const rOffset = Math.floor((startCol + i) / 12)
+    const cOffset  = (startCol + i) % 12
+    const targetR  = startRow + rOffset
+    const targetC  = cOffset
+    if (targetR >= 8 || targetC >= 12) return
+
+    const wId    = String.fromCharCode(65 + targetR) + (targetC + 1)
+    const vAdd   = row._vAdd
+    const Vnew   = row._totalVol
+    const vStock = stockMM > 0 ? (row.additive * Vnew) / stockMM : vAdd
+
+    let html = `<strong style="color:#f59e0b;">Add→[${esc(String(row._baseId))}]</strong><br>`
+    html += addInvTag(vStock)
+    html += `<span style="font-size:0.65rem; color:#64748b;">After addition (${fmt(Vnew)} µL total):</span><br>`
+    html += `<span style="font-size:0.68rem;">`
+    html += `${esc(config.value.anionName || 'A')}: ${fmt(row.anion)} `
+    html += `${esc(config.value.cationName || 'B')}: ${fmt(row.cation)} `
+    html += `${esc(config.value.saltName || 'C')}: ${fmt(row.salt)}`
+    if (config.value.enableCompD) html += ` ${esc(config.value.compDName || 'D')}: ${fmt(row.compD)}`
+    html += ` | ${esc(additiveConfig.name || 'Add')}: ${fmt(row.additive)} ${esc(additiveConfig.stockUnit)}</span>`
+
+    plate.wells[wId] = html
+  })
+
+  alert(`Exported ${additivePreviewRows.value.length} additive wells to "${plate.name}" starting at ${startWell}.`)
+}
 
 const boundaryData = ref(null)
 const isCalculatingBoundary = ref(false)
@@ -954,6 +1246,33 @@ const computeWellVolumes = (sug) => {
   return { vA, vB, vC, vD, vFill: Math.max(0, vFill), backgroundNa_mM, mixedPH, exceeds: vFill < 0 }
 }
 
+// Apply component-dependency links to a (copied) experiment/suggestion object.
+// Formula (stored-unit arithmetic): target = source * factor + offset
+const COMP_KEYS = ['anion', 'cation', 'salt', 'compD']
+const compLabel = (key) => ({
+  anion: () => config.value.anionName || 'A',
+  cation: () => config.value.cationName || 'B',
+  salt: () => config.value.saltName || 'C',
+  compD: () => config.value.compDName || 'D',
+}[key]?.() ?? key)
+
+const applyDependencies = (exp) => {
+  const deps = config.value.dependencies || []
+  deps.forEach(dep => {
+    if (!dep.source || !dep.target || dep.source === dep.target) return
+    const srcVal = Number(exp[dep.source]) || 0
+    exp[dep.target] = +(srcVal * (dep.factor ?? 1) + (dep.offset ?? 0)).toFixed(6)
+  })
+  return exp
+}
+
+const addDependency = () => {
+  if (!config.value.dependencies) config.value.dependencies = []
+  config.value.dependencies.push({ source: 'salt', target: 'compD', factor: 1, offset: 0 })
+  config.value.enableCompD = true
+}
+const removeDependency = (i) => { config.value.dependencies.splice(i, 1) }
+
 const existingPlateData = computed(() => {
   const map = new Map();
   experiments.value.forEach(item => map.set(item.sampleId, item));
@@ -1006,7 +1325,8 @@ const exportSuggestionsToPlate = () => {
         if (targetR < 8 && targetC < 12) {
             let wId = String.fromCharCode(65 + targetR) + (targetC + 1);
 
-            const { vA, vB, vC, vD, vFill, backgroundNa_mM, mixedPH, exceeds } = computeWellVolumes(sug)
+            const effectiveSug = applyDependencies({ ...sug })
+            const { vA, vB, vC, vD, vFill, backgroundNa_mM, mixedPH, exceeds } = computeWellVolumes(effectiveSug)
 
             let warningHtml = exceeds ? `<br><span style="color:#ef4444; font-size:0.7rem;">⚠️ Vol Exceeds Limit</span>` : '';
 
@@ -1030,13 +1350,13 @@ const exportSuggestionsToPlate = () => {
             }
 
             const dRowHtml = config.value.enableCompD
-                ? getInventoryTag(config.value.compDInv, fmt(vD), sug.compD || 0)
+                ? getInventoryTag(config.value.compDInv, fmt(vD), effectiveSug.compD || 0)
                 : '';
 
             let cellHtml = `<strong style="color: var(--primary);">AI Target [${sug.sampleId}]</strong><br>
-                            ${getInventoryTag(config.value.anionInv, fmt(vA), sug.anion)}
-                            ${getInventoryTag(config.value.cationInv, fmt(vB), sug.cation)}
-                            ${getInventoryTag(config.value.saltInv, fmt(vC), sug.salt)}
+                            ${getInventoryTag(config.value.anionInv, fmt(vA), effectiveSug.anion)}
+                            ${getInventoryTag(config.value.cationInv, fmt(vB), effectiveSug.cation)}
+                            ${getInventoryTag(config.value.saltInv, fmt(vC), effectiveSug.salt)}
                             ${dRowHtml}${bgHtml}${fillupHtml}${warningHtml}`;
 
             plate.wells[wId] = cellHtml;
@@ -1858,7 +2178,7 @@ const calculateNextExperiments = async () => {
     if (!response.ok) throw new Error('Backend responded with an error.');
     
     const data = await response.json();
-    suggestions.value = data.suggestions;
+    suggestions.value = data.suggestions.map(s => applyDependencies({ ...s }));
     
   } catch (err) {
     console.error("Active Learning Engine failed:", err);

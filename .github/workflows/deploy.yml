@@ -31,10 +31,17 @@ jobs:
 
       - name: Deploy to GitHub Pages
         run: |
-          cd dist
-          git init
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Fetch gh-pages if it exists (ignore error if first deploy)
+          git fetch origin gh-pages || true
+          # Switch to gh-pages, resetting it to the remote (or orphan on first run)
+          git checkout -B gh-pages origin/gh-pages 2>/dev/null || git checkout --orphan gh-pages
+          # Remove all tracked files (dist/ is untracked so it survives the rm)
+          git rm -rf . --quiet 2>/dev/null || true
+          # Copy built output into the workspace root
+          cp -r dist/. .
+          rm -rf dist node_modules
           git add -A
-          git commit -m "deploy: ${{ github.sha }}"
-          git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:gh-pages
+          git commit -m "deploy: ${{ github.sha }}" --allow-empty
+          git push origin gh-pages --force

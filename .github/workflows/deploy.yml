@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.DEPLOY_PAT }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -33,13 +35,10 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Fetch gh-pages if it exists (ignore error if first deploy)
+          git remote set-url origin "https://x-access-token:${{ secrets.DEPLOY_PAT }}@github.com/${{ github.repository }}.git"
           git fetch origin gh-pages || true
-          # Switch to gh-pages, resetting it to the remote (or orphan on first run)
           git checkout -B gh-pages origin/gh-pages 2>/dev/null || git checkout --orphan gh-pages
-          # Remove all tracked files (dist/ is untracked so it survives the rm)
           git rm -rf . --quiet 2>/dev/null || true
-          # Copy built output into the workspace root
           cp -r dist/. .
           rm -rf dist node_modules
           git add -A

@@ -43,12 +43,12 @@ const MODULE_META = {
 }
 
 // ── Free-placement grid layout — 12-column absolute grid ───────────────────
-const ROW_HEIGHT = 60
+const ROW_HEIGHT = 30
 const COL_COUNT  = 12
 const gridLayout     = ref([])   // [{i, x, y, w, h}] one entry per visible module
 const savedPositions = ref({})   // last position for modules that were hidden
 const dragState      = ref(null) // live drag preview  {id, x, y}
-const resizeState    = ref(null) // live resize preview {id, w, h}
+const resizeState    = ref(null) // live resize preview {id, x, y, w, h}
 const bumpedLayout   = ref(null) // collision-resolved layout computed during drag
 const gridContainer  = ref(null)
 const containerWidth = ref(1200)
@@ -58,9 +58,11 @@ function cw() { return containerWidth.value / COL_COUNT }
 const containerHeight = computed(() => {
   if (!gridLayout.value.length) return 400
   return Math.max(...gridLayout.value.map(item => {
-    const h = resizeState.value?.id === item.i ? resizeState.value.h : item.h
+    const isResized = resizeState.value?.id === item.i
+    const h = isResized ? resizeState.value.h : item.h
     let y
     if (dragState.value?.id === item.i) y = dragState.value.y
+    else if (isResized) y = resizeState.value.y
     else if (bumpedLayout.value) y = bumpedLayout.value.find(i => i.i === item.i)?.y ?? item.y
     else y = item.y
     return (y + h) * ROW_HEIGHT
@@ -74,6 +76,7 @@ function getModuleStyle(item) {
   if (isDragged) {
     x = dragState.value.x; y = dragState.value.y
   } else if (isResized) {
+    x = resizeState.value.x; y = resizeState.value.y
     w = resizeState.value.w; h = resizeState.value.h
   } else if (bumpedLayout.value) {
     const bumped = bumpedLayout.value.find(i => i.i === item.i)
@@ -93,29 +96,40 @@ function getModuleStyle(item) {
 
 function getDefaultGridLayout() {
   return [
-    { i: 'inventoryManager',  x: 0,  y: 0,   w: 6,  h: 14 },
-    { i: 'labJournal',        x: 6,  y: 0,   w: 6,  h: 14 },
-    { i: 'reactionPlan',      x: 0,  y: 14,  w: 6,  h: 12 },
-    { i: 'matrixPlanner',     x: 6,  y: 14,  w: 6,  h: 12 },
-    { i: 'standardStock',     x: 0,  y: 26,  w: 4,  h: 10 },
-    { i: 'sequenceCalc',      x: 4,  y: 26,  w: 4,  h: 10 },
-    { i: 'screeningPlanner',  x: 8,  y: 26,  w: 4,  h: 10 },
-    { i: 'phasePredictor',    x: 0,  y: 36,  w: 12, h: 20 },
-    { i: 'lidaKinetics',      x: 0,  y: 56,  w: 12, h: 18 },
-    { i: 'wellPlateEditor',   x: 0,  y: 74,  w: 12, h: 14 },
-    { i: 'timeTracker',       x: 0,  y: 88,  w: 6,  h: 12 },
-    { i: 'archiveManager',    x: 6,  y: 88,  w: 6,  h: 12 },
-    { i: 'globalSettings',    x: 0,  y: 100, w: 12, h: 10 },
+    { i: 'inventoryManager',  x: 0,  y: 0,   w: 6,  h: 28 },
+    { i: 'labJournal',        x: 6,  y: 0,   w: 6,  h: 28 },
+    { i: 'reactionPlan',      x: 0,  y: 28,  w: 6,  h: 24 },
+    { i: 'matrixPlanner',     x: 6,  y: 28,  w: 6,  h: 24 },
+    { i: 'standardStock',     x: 0,  y: 52,  w: 4,  h: 20 },
+    { i: 'sequenceCalc',      x: 4,  y: 52,  w: 4,  h: 20 },
+    { i: 'screeningPlanner',  x: 8,  y: 52,  w: 4,  h: 20 },
+    { i: 'phasePredictor',    x: 0,  y: 72,  w: 12, h: 40 },
+    { i: 'lidaKinetics',      x: 0,  y: 112, w: 12, h: 36 },
+    { i: 'wellPlateEditor',   x: 0,  y: 148, w: 12, h: 28 },
+    { i: 'timeTracker',       x: 0,  y: 176, w: 6,  h: 24 },
+    { i: 'archiveManager',    x: 6,  y: 176, w: 6,  h: 24 },
+    { i: 'globalSettings',    x: 0,  y: 200, w: 12, h: 20 },
   ]
 }
 
-const GL_KEY    = computed(() => store.user?.id ? `gl2_${store.user.id}`   : null)
+const GL_KEY    = computed(() => store.user?.id ? `gl3_${store.user.id}`   : null)
+const GL_KEY_V2 = computed(() => store.user?.id ? `gl2_${store.user.id}`   : null)
 const LMETA_KEY = computed(() => store.user?.id ? `lmeta_${store.user.id}` : null)
 
 function loadGridLayout() {
   if (!GL_KEY.value) return
   const raw = localStorage.getItem(GL_KEY.value)
   try { if (raw) { gridLayout.value = JSON.parse(raw); return } } catch {}
+  // Migrate from gl2_ (60px rows → 30px rows): multiply all y and h × 2
+  const rawV2 = GL_KEY_V2.value && localStorage.getItem(GL_KEY_V2.value)
+  if (rawV2) {
+    try {
+      const old = JSON.parse(rawV2)
+      gridLayout.value = old.map(i => ({ ...i, y: i.y * 2, h: i.h * 2 }))
+      saveGridLayout()
+      return
+    } catch {}
+  }
   gridLayout.value = getDefaultGridLayout().filter(i => !isModuleHiddenForUser(i.i))
 }
 function saveGridLayout() {
@@ -150,7 +164,7 @@ function toggleModule(id) {
     if (item) savedPositions.value[id] = { x: item.x, y: item.y, w: item.w, h: item.h }
     gridLayout.value = gridLayout.value.filter(i => i.i !== id)
   } else {
-    const def = getDefaultGridLayout().find(i => i.i === id) || { x: 0, y: 0, w: 6, h: 10 }
+    const def = getDefaultGridLayout().find(i => i.i === id) || { x: 0, y: 0, w: 6, h: 20 }
     const w   = savedPositions.value[id]?.w ?? def.w
     const h   = savedPositions.value[id]?.h ?? def.h
     // Always re-add at the very top of the page (y=0, full width)
@@ -239,24 +253,38 @@ function startDrag(id, e) {
   window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp)
 }
 
-// ── Resize from bottom-right corner ──
-function startGridResize(id, e) {
+// ── Resize from any edge or corner ──
+// edge: 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
+function startGridResize(id, edge, e) {
   e.preventDefault(); e.stopPropagation()
   const item = gridLayout.value.find(i => i.i === id)
   if (!item) return
-  const smx = e.clientX, smy = e.clientY, sw = item.w, sh = item.h, scw = cw()
-  resizeState.value = { id, w: sw, h: sh }
+  const smx = e.clientX, smy = e.clientY
+  const sx = item.x, sy = item.y, sw = item.w, sh = item.h
+  const scw = cw()
+  resizeState.value = { id, x: sx, y: sy, w: sw, h: sh }
   const onMove = (me) => {
-    const nw = Math.max(2, Math.min(COL_COUNT - item.x, Math.round(sw + (me.clientX - smx) / scw)))
-    const nh = Math.max(4, Math.round(sh + (me.clientY - smy) / ROW_HEIGHT))
-    resizeState.value = { id, w: nw, h: nh }
-    const preview = gridLayout.value.map(i => i.i === id ? {...i, w: nw, h: nh} : {...i})
+    const dx = Math.round((me.clientX - smx) / scw)
+    const dy = Math.round((me.clientY - smy) / ROW_HEIGHT)
+    let nx = sx, ny = sy, nw = sw, nh = sh
+    if (edge.includes('e')) nw = Math.max(2, Math.min(COL_COUNT - sx, sw + dx))
+    if (edge.includes('w')) {
+      const cdx = Math.max(-sx, Math.min(sw - 2, dx))
+      nx = sx + cdx; nw = sw - cdx
+    }
+    if (edge.includes('s')) nh = Math.max(8, sh + dy)
+    if (edge.includes('n')) {
+      const cdy = Math.max(-sy, Math.min(sh - 8, dy))
+      ny = sy + cdy; nh = sh - cdy
+    }
+    resizeState.value = { id, x: nx, y: ny, w: nw, h: nh }
+    const preview = gridLayout.value.map(i => i.i === id ? {...i, x: nx, y: ny, w: nw, h: nh} : {...i})
     bumpedLayout.value = resolveCollisions(preview, id)
   }
   const onUp = () => {
     if (!resizeState.value) return
-    const { w, h } = resizeState.value; resizeState.value = null
-    const base = bumpedLayout.value ?? gridLayout.value.map(i => i.i === id ? {...i, w, h} : {...i})
+    const { x, y, w, h } = resizeState.value; resizeState.value = null
+    const base = bumpedLayout.value ?? gridLayout.value.map(i => i.i === id ? {...i, x, y, w, h} : {...i})
     bumpedLayout.value = null
     gridLayout.value = applyGravity(base)
     saveGridLayout()
@@ -859,7 +887,15 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
               <div class="grid-module-content">
                 <component :is="MODULE_META[item.i].component" />
               </div>
-              <div class="grid-resize-handle" @mousedown.prevent="startGridResize(item.i, $event)" title="Drag to resize"></div>
+              <!-- 8-direction resize handles -->
+              <div class="rh rh-n"  @mousedown.prevent.stop="startGridResize(item.i, 'n',  $event)"></div>
+              <div class="rh rh-s"  @mousedown.prevent.stop="startGridResize(item.i, 's',  $event)"></div>
+              <div class="rh rh-e"  @mousedown.prevent.stop="startGridResize(item.i, 'e',  $event)"></div>
+              <div class="rh rh-w"  @mousedown.prevent.stop="startGridResize(item.i, 'w',  $event)"></div>
+              <div class="rh rh-ne" @mousedown.prevent.stop="startGridResize(item.i, 'ne', $event)"></div>
+              <div class="rh rh-nw" @mousedown.prevent.stop="startGridResize(item.i, 'nw', $event)"></div>
+              <div class="rh rh-se" @mousedown.prevent.stop="startGridResize(item.i, 'se', $event)"></div>
+              <div class="rh rh-sw" @mousedown.prevent.stop="startGridResize(item.i, 'sw', $event)"></div>
             </div>
           </template>
         </div>
@@ -1138,22 +1174,29 @@ body { padding: 0 !important; margin: 0 !important; }
   overflow-x: hidden;
 }
 
-.grid-resize-handle {
+/* ── 8-direction resize handles ── */
+.rh {
   position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 18px;
-  height: 18px;
-  cursor: se-resize;
-  background: linear-gradient(135deg, transparent 50%, color-mix(in srgb, var(--primary) 40%, transparent) 50%);
-  border-radius: 0 0 var(--radius) 0;
-  opacity: 0.5;
-  transition: opacity 0.15s;
-  flex-shrink: 0;
+  z-index: 3;
+  opacity: 0;
+  transition: opacity 0.12s;
   user-select: none;
-  z-index: 2;
 }
-.grid-resize-handle:hover { opacity: 1; }
+.grid-module:hover .rh,
+.grid-module--active .rh { opacity: 0.45; }
+.rh:hover { opacity: 1 !important; background: color-mix(in srgb, var(--primary) 30%, transparent); }
+
+/* Edge strips */
+.rh-n { top: 0;    left: 10px; right: 10px; height: 5px; cursor: n-resize; }
+.rh-s { bottom: 0; left: 10px; right: 10px; height: 5px; cursor: s-resize; }
+.rh-e { right: 0;  top: 10px; bottom: 10px; width: 5px;  cursor: e-resize; }
+.rh-w { left: 0;   top: 10px; bottom: 10px; width: 5px;  cursor: w-resize; }
+
+/* Corner squares */
+.rh-ne { top: 0;    right: 0;  width: 10px; height: 10px; cursor: ne-resize; }
+.rh-nw { top: 0;    left: 0;   width: 10px; height: 10px; cursor: nw-resize; }
+.rh-se { bottom: 0; right: 0;  width: 10px; height: 10px; cursor: se-resize; }
+.rh-sw { bottom: 0; left: 0;   width: 10px; height: 10px; cursor: sw-resize; }
 
 /* ── Responsive card headers at narrow widths ──
    Targets .flex-between pattern used in all module card headers.

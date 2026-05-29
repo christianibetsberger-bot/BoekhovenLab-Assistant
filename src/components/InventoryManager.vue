@@ -241,25 +241,42 @@ const bulkStartNum   = ref(1)
 const parsedBulkRows = computed(() => {
     const text = bulkPasteText.value.trim()
     if (!text) return []
-    const lines = text.split('\n')
-    if (lines.length < 2) return []
-    const headers = lines[0].split('\t').map(h => h.trim())
-    const nameIdx     = headers.findIndex(h => h.toLowerCase() === 'name')
-    const seqIdx      = headers.findIndex(h => h.toLowerCase() === 'sequence')
-    const concBaseIdx = headers.findIndex(h => h.toLowerCase().replace(/\s/g, '') === 'conc_baseline(um)')
-    if (nameIdx === -1 || seqIdx === -1) return []
-    const rows = []
-    for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim()
-        if (!line) continue
-        const parts = line.split('\t')
-        const name = (parts[nameIdx] || '').trim()
-        const seq  = (parts[seqIdx]  || '').trim()
-        const concBase = concBaseIdx !== -1 ? parseFloat(parts[concBaseIdx]) : NaN
-        if (!name && !seq) continue
-        rows.push({ name, seq, concBase })
+    const lines = text.split(/\r?\n/).map(l => l.trimEnd())
+    const nonEmpty = lines.filter(l => l.trim())
+    if (nonEmpty.length < 2) return []
+    const headerLine = nonEmpty[0]
+    const dataLines  = nonEmpty.slice(1)
+
+    // ── Tab-separated (TSV) ──────────────────────────────────────────────
+    if (headerLine.includes('\t')) {
+        const hdrs = headerLine.split('\t').map(h => h.trim())
+        const ni = hdrs.findIndex(h => h.toLowerCase() === 'name')
+        const si = hdrs.findIndex(h => h.toLowerCase() === 'sequence')
+        const ci = hdrs.findIndex(h => h.toLowerCase().replace(/\s/g, '') === 'conc_baseline(um)')
+        if (ni !== -1 && si !== -1) {
+            return dataLines.flatMap(line => {
+                const p = line.split('\t')
+                const name = (p[ni] || '').trim()
+                const seq  = (p[si] || '').trim()
+                if (!name && !seq) return []
+                return [{ name, seq, concBase: ci !== -1 ? parseFloat(p[ci]) : NaN }]
+            })
+        }
     }
-    return rows
+
+    // ── Space-padded / fixed-width (pandas to_string style) ─────────────
+    // Row layout: FILENAME  NAME  SEQUENCE  mass a260 a280 ratio conc CONC_BASELINE ...
+    // NAME may contain one internal space (e.g. "A prime0001"); SEQUENCE is
+    // nucleotides with optional [Mod] prefixes (no spaces); numeric fields follow.
+    // Conc_baseline is the 6th token after SEQUENCE (positions: mass A260 A280
+    // A260/A280 Conc_uM Conc_baseline).
+    const ROW_RE = /^(\S+)\s{2,}(.*?)\s{2,}((?:\[[A-Za-z0-9_']+\])*[ACGTU]{4,})\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+(\S+)/i
+    return dataLines.flatMap(line => {
+        if (!line.trim()) return []
+        const m = line.match(ROW_RE)
+        if (!m) return []
+        return [{ name: m[2].trim(), seq: m[3].trim(), concBase: parseFloat(m[4]) }]
+    })
 })
 
 const importBulk = () => {

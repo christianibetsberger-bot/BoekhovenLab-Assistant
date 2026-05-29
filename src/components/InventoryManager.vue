@@ -232,6 +232,63 @@ const importInventory = (event) => {
     reader.readAsArrayBuffer(file);
 }
 
+// ── Bulk TSV Import (Conc.txt format) ─────────────────────────────────────────
+const showBulkModal  = ref(false)
+const bulkPasteText  = ref('')
+const bulkCodePrefix = ref('CTI-117')
+const bulkStartNum   = ref(1)
+
+const parsedBulkRows = computed(() => {
+    const text = bulkPasteText.value.trim()
+    if (!text) return []
+    const lines = text.split('\n')
+    if (lines.length < 2) return []
+    const headers = lines[0].split('\t').map(h => h.trim())
+    const nameIdx     = headers.findIndex(h => h.toLowerCase() === 'name')
+    const seqIdx      = headers.findIndex(h => h.toLowerCase() === 'sequence')
+    const concBaseIdx = headers.findIndex(h => h.toLowerCase().replace(/\s/g, '') === 'conc_baseline(um)')
+    if (nameIdx === -1 || seqIdx === -1) return []
+    const rows = []
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim()
+        if (!line) continue
+        const parts = line.split('\t')
+        const name = (parts[nameIdx] || '').trim()
+        const seq  = (parts[seqIdx]  || '').trim()
+        const concBase = concBaseIdx !== -1 ? parseFloat(parts[concBaseIdx]) : NaN
+        if (!name && !seq) continue
+        rows.push({ name, seq, concBase })
+    }
+    return rows
+})
+
+const importBulk = () => {
+    const rows = parsedBulkRows.value
+    if (rows.length === 0) return alert('No valid rows found.\nMake sure the header includes Name, Sequence, and Conc_baseline (uM) columns (tab-delimited).')
+    const items = rows.map((row, idx) => {
+        const num  = String(bulkStartNum.value + idx).padStart(2, '0')
+        const code = `${bulkCodePrefix.value}-${num}`
+        const seq  = row.seq
+        const formattedSeq = seq && !seq.startsWith("5'") ? `5'-${seq}-3'` : seq
+        const oligoType = seq.toUpperCase().includes('U') ? 'RNA' : 'DNA'
+        const conc = !isNaN(row.concBase) ? row.concBase : 100
+        return {
+            id: 'inv_bulk_' + crypto.randomUUID(),
+            code, cas: '', itemClass: 'DNA', name: row.name,
+            stock: conc, stockUnit: 'µM', location: '',
+            sequence: formattedSeq,
+            length: seq.replace(/\[.*?\]/g, '').replace(/[^a-zA-Z]/g, '').length,
+            gc: calcSeqGc(seq), tm: calcSeqTm(seq),
+            mw: calcSeqMw(seq, oligoType), oligoType,
+            extinction: calcSeqExtinction(seq, oligoType), manualMw: null,
+        }
+    })
+    importTargetMode.value = inventoryMode.value
+    processImports(items, `Bulk TSV (${bulkCodePrefix.value})`)
+    showBulkModal.value = false
+    bulkPasteText.value = ''
+}
+
 // ── Label Printing ────────────────────────────────────────────────────────────
 
 const showLabelModal  = ref(false)
@@ -580,6 +637,45 @@ const generateLabelsPDF = () => {
       </div>
     </div>
 
+    <!-- ── Bulk TSV import modal ────────────────────────────────────────────── -->
+    <div v-if="showBulkModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 1000;">
+      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); width: 92%; max-width: 640px; display: flex; flex-direction: column; gap: 0; overflow: hidden;">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border);">
+          <h3 style="margin: 0; color: var(--primary); font-size: 1rem;"><i class="fas fa-file-import" style="margin-right: 7px;"></i>Bulk Import — Conc.txt (TSV)</h3>
+          <button class="danger small" @click="showBulkModal = false; bulkPasteText = ''"><i class="fas fa-times"></i></button>
+        </div>
+        <div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;">
+          <div style="display: flex; gap: 10px; align-items: flex-end;">
+            <div style="flex: 1;">
+              <div style="font-size: 0.72rem; opacity: 0.65; margin-bottom: 4px;">Code prefix</div>
+              <input type="text" v-model="bulkCodePrefix" placeholder="CTI-117" style="width: 100%; padding: 6px;">
+            </div>
+            <div style="width: 80px;">
+              <div style="font-size: 0.72rem; opacity: 0.65; margin-bottom: 4px;">Start #</div>
+              <input type="number" v-model.number="bulkStartNum" min="1" style="width: 100%; padding: 6px;">
+            </div>
+            <div v-if="parsedBulkRows.length > 0" style="font-size: 0.78rem; opacity: 0.7; padding-bottom: 7px; white-space: nowrap;">
+              → codes <strong>{{ bulkCodePrefix }}-{{ String(bulkStartNum).padStart(2,'0') }}</strong> … <strong>{{ bulkCodePrefix }}-{{ String(bulkStartNum + parsedBulkRows.length - 1).padStart(2,'0') }}</strong>
+            </div>
+          </div>
+          <div>
+            <div style="font-size: 0.72rem; opacity: 0.65; margin-bottom: 4px;">Paste tab-delimited data (include header row with Name, Sequence, Conc_baseline (uM) columns)</div>
+            <textarea v-model="bulkPasteText" rows="10" placeholder="File&#9;Name&#9;Sequence&#9;Mass (Da)&#9;...&#9;Conc_baseline (uM)&#9;..." style="width: 100%; font-family: monospace; font-size: 0.72rem; resize: vertical; padding: 8px;"></textarea>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: 0.8rem; opacity: 0.65;">
+              <span v-if="parsedBulkRows.length > 0" style="color: var(--success, #4caf50); font-weight: 600;"><i class="fas fa-check" style="margin-right: 4px;"></i>{{ parsedBulkRows.length }} rows detected</span>
+              <span v-else-if="bulkPasteText.trim()">No rows detected — check header column names</span>
+              <span v-else>Paste your data above</span>
+            </span>
+            <button @click="importBulk" :disabled="parsedBulkRows.length === 0" style="padding: 8px 18px; font-weight: 600;">
+              <i class="fas fa-file-import" style="margin-right: 6px;"></i>Import {{ parsedBulkRows.length > 0 ? parsedBulkRows.length + ' items' : '' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Main inventory card ────────────────────────────────────────────── -->
     <div class="card">
         <h2><i class="fas fa-boxes-stacked"></i> Inventory</h2>
@@ -644,6 +740,9 @@ const generateLabelsPDF = () => {
             <button @click="addInventoryItem" style="flex-grow: 1; height: 40px;"><i class="fas fa-plus"></i> Add to {{ inventoryMode }}</button>
             <button @click="importTargetMode = inventoryMode; excelUpload.click()" style="flex-grow: 1; height: 40px;">
                 <i class="fas fa-file-excel"></i> Import
+            </button>
+            <button @click="showBulkModal = true" style="flex-grow: 1; height: 40px;">
+                <i class="fas fa-file-import"></i> Bulk Import
             </button>
             <button @click="showLabelModal = true" style="flex-grow: 1; height: 40px;">
                 <i class="fas fa-tag"></i> Print Labels

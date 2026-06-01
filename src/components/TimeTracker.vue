@@ -278,6 +278,16 @@
           <div style="font-size:0.72rem; opacity:0.6; margin-top:4px; text-align:right;">
             {{ Math.round(weekPercent) }}% of weekly target
           </div>
+          <div v-if="avgWorkStats.weekCount > 0" class="tt-avg-row">
+            <div class="tt-stat">
+              <div class="tt-stat-value">{{ formatHours(avgWorkStats.avgDaily) }}</div>
+              <div class="tt-stat-label">Avg / official day<span class="tt-we-note"> ({{ avgWorkStats.workdayCount }}d)</span></div>
+            </div>
+            <div class="tt-stat">
+              <div class="tt-stat-value">{{ formatHours(avgWorkStats.avgWeekly) }}</div>
+              <div class="tt-stat-label">Avg / week<span class="tt-we-note"> ({{ avgWorkStats.weekCount }}wk)</span></div>
+            </div>
+          </div>
         </section>
 
         <!-- History log -->
@@ -884,6 +894,17 @@ function effectiveWeekTarget(weekStart) {
   const reduction = absenceDaysInWeek(weekStart) + holidaysInWeek(weekStart)
   return Math.max(0, settings.weekly_hours - (settings.weekly_hours / 5) * reduction)
 }
+// ISO year-week key e.g. "2026-W22" — used for weekly average bucketing
+function getISOWeekKey(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  const dow = dt.getDay() || 7                        // Mon=1 … Sun=7
+  dt.setDate(dt.getDate() + 4 - dow)                  // shift to Thursday of same ISO week
+  const yearStart = new Date(dt.getFullYear(), 0, 1)
+  const weekNo = Math.ceil(((dt - yearStart) / 86400000 + 1) / 7)
+  return `${dt.getFullYear()}-W${String(weekNo).padStart(2, '0')}`
+}
+
 // Convenience for the current week's UI
 const thisWeekAbsenceDays = computed(() => absenceDaysInWeek(thisWeekStart.value))
 const effectiveWeeklyHours = computed(() => effectiveWeekTarget(thisWeekStart.value))
@@ -991,6 +1012,49 @@ const totalVacationThisYear = computed(() =>
 const vacationRemaining = computed(() =>
   totalVacationThisYear.value - vacationUsedThisYear.value
 )
+
+// ── Historical average worktime ───────────────────────────────────────────────
+// avgDaily  = total hours on official Mon-Fri non-holiday non-absent days
+//             divided by the count of such days with logged work
+// avgWeekly = all logged hours (inc. weekends/holidays) divided by the number
+//             of ISO weeks that contain at least one entry
+const avgWorkStats = computed(() => {
+  const done = entries.value.filter(e => e.checked_out)
+  if (!done.length) return { avgDaily: 0, avgWeekly: 0, workdayCount: 0, weekCount: 0 }
+
+  const hoursByDate = new Map()
+  for (const e of done) {
+    const ds = new Date(e.checked_in).toISOString().split('T')[0]
+    hoursByDate.set(ds, (hoursByDate.get(ds) || 0) + entryMinutes(e) / 60)
+  }
+
+  const hoursByWeek = new Map()
+  for (const [ds, hrs] of hoursByDate) {
+    const wk = getISOWeekKey(ds)
+    hoursByWeek.set(wk, (hoursByWeek.get(wk) || 0) + hrs)
+  }
+
+  const absenceSet = new Set(absences.value.map(a => a.date))
+  let totalWorkdayHours = 0, workdayCount = 0
+  for (const [ds, hrs] of hoursByDate) {
+    const [y, m, d] = ds.split('-').map(Number)
+    const dow = new Date(y, m - 1, d).getDay()
+    if (dow === 0 || dow === 6) continue
+    if (isBavarianHoliday(ds)) continue
+    if (absenceSet.has(ds)) continue
+    totalWorkdayHours += hrs
+    workdayCount++
+  }
+
+  const weekCount = hoursByWeek.size
+  const totalHours = [...hoursByDate.values()].reduce((a, b) => a + b, 0)
+  return {
+    avgDaily:     workdayCount > 0 ? totalWorkdayHours / workdayCount : 0,
+    avgWeekly:    weekCount    > 0 ? totalHours / weekCount           : 0,
+    workdayCount,
+    weekCount,
+  }
+})
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
@@ -1881,6 +1945,9 @@ onBeforeUnmount(() => {
 
 .tt-week-grid, .tt-year-grid {
   display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; margin-bottom: 7px;
+}
+.tt-avg-row {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 7px;
 }
 .tt-stat {
   text-align: center; padding: 5px 3px; border-radius: var(--radius);

@@ -1047,10 +1047,10 @@ const avgWorkStats = computed(() => {
   }
 
   const weekCount = hoursByWeek.size
-  const avgDaily = workdayCount > 0 ? totalWorkdayHours / workdayCount : 0
+  const totalHours = [...hoursByDate.values()].reduce((a, b) => a + b, 0)
   return {
-    avgDaily,
-    avgWeekly:    avgDaily * 5,
+    avgDaily:  workdayCount > 0 ? totalWorkdayHours / workdayCount : 0,
+    avgWeekly: weekCount    > 0 ? totalHours / weekCount           : 0,
     workdayCount,
     weekCount,
   }

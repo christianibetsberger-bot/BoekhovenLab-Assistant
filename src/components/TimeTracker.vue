@@ -1035,8 +1035,9 @@ const avgWorkStats = computed(() => {
   }
 
   // Numerator: every logged hour counts regardless of day type.
-  // Denominator: Mon-Fri non-public-holiday days that have any logged work
-  // (sick/vacation days where work was done still count as official workdays).
+  // Denominator: only Mon-Fri non-public-holiday non-sick/vacation days
+  // (work logged on non-official days adds to the numerator but never the denominator).
+  const absenceSet = new Set(absences.value.map(a => a.date))
   let totalAllHours = 0, workdayCount = 0
   for (const [ds, hrs] of hoursByDate) {
     totalAllHours += hrs
@@ -1044,6 +1045,7 @@ const avgWorkStats = computed(() => {
     const dow = new Date(y, m - 1, d).getDay()
     if (dow === 0 || dow === 6) continue
     if (isBavarianHoliday(ds)) continue
+    if (absenceSet.has(ds)) continue
     workdayCount++
   }
 

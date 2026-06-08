@@ -1034,23 +1034,24 @@ const avgWorkStats = computed(() => {
     hoursByWeek.set(wk, (hoursByWeek.get(wk) || 0) + hrs)
   }
 
-  const absenceSet = new Set(absences.value.map(a => a.date))
-  let totalWorkdayHours = 0, workdayCount = 0
+  // Numerator: every logged hour counts regardless of day type.
+  // Denominator: Mon-Fri non-public-holiday days that have any logged work
+  // (sick/vacation days where work was done still count as official workdays).
+  let totalAllHours = 0, workdayCount = 0
   for (const [ds, hrs] of hoursByDate) {
+    totalAllHours += hrs
     const [y, m, d] = ds.split('-').map(Number)
     const dow = new Date(y, m - 1, d).getDay()
     if (dow === 0 || dow === 6) continue
     if (isBavarianHoliday(ds)) continue
-    if (absenceSet.has(ds)) continue
-    totalWorkdayHours += hrs
     workdayCount++
   }
 
   const weekCount = hoursByWeek.size
   const totalHours = [...hoursByDate.values()].reduce((a, b) => a + b, 0)
   return {
-    avgDaily:  workdayCount > 0 ? totalWorkdayHours / workdayCount : 0,
-    avgWeekly: weekCount    > 0 ? totalHours / weekCount           : 0,
+    avgDaily:  workdayCount > 0 ? totalAllHours / workdayCount : 0,
+    avgWeekly: weekCount    > 0 ? totalHours / weekCount       : 0,
     workdayCount,
     weekCount,
   }

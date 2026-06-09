@@ -2093,12 +2093,15 @@ function exportFitParamsCsv() {
 // Renders a sequence logo SVG from a list of equal-or-mixed-length DNA strings.
 // Letter heights are Shannon-entropy-derived information content (bits, max 2).
 // Used for both the OBSERVED top-yield logo and the PREDICTED logo from METIS.
-function buildLogoSvg(seqs) {
+// blockSplit: position (0-based index) after which to draw a separator and
+// "left block / right block" labels. Pass 9 for LIDA 9+9 nt sequences.
+function buildLogoSvg(seqs, blockSplit = null) {
   if (!seqs?.length) return ''
   const maxLen = Math.max(...seqs.map(s => s.length))
   const charW = 22
   const charH = 60
-  const pad = { left: 28, top: 6, bottom: 18, right: 6 }
+  const showBlockLabels = blockSplit != null && blockSplit > 0 && blockSplit < maxLen
+  const pad = { left: 28, top: 6, bottom: showBlockLabels ? 32 : 18, right: 6 }
   const W = pad.left + maxLen * charW + pad.right
   const H = pad.top + charH + pad.bottom
 
@@ -2108,6 +2111,18 @@ function buildLogoSvg(seqs) {
   body += `<text x="4" y="${pad.top + 6}" font-size="9" fill="currentColor" opacity="0.7">2.0</text>`
   body += `<text x="4" y="${pad.top + charH}" font-size="9" fill="currentColor" opacity="0.7">0</text>`
   body += `<text x="2" y="${pad.top + charH / 2 + 3}" font-size="9" fill="currentColor" opacity="0.7" transform="rotate(-90 6 ${pad.top + charH / 2 + 3})">bits</text>`
+
+  if (showBlockLabels) {
+    const sepX = pad.left + blockSplit * charW
+    // Dashed divider spanning from top through position-number row
+    body += `<line x1="${sepX}" y1="${pad.top - 2}" x2="${sepX}" y2="${pad.top + charH + 20}" stroke="currentColor" stroke-width="1.2" stroke-dasharray="4 3" opacity="0.35"/>`
+    // Block labels centred under each half
+    const leftCX  = pad.left + (blockSplit / 2) * charW
+    const rightCX = pad.left + (blockSplit + (maxLen - blockSplit) / 2) * charW
+    const labelY  = pad.top + charH + 28
+    body += `<text x="${leftCX}"  y="${labelY}" font-size="8" fill="currentColor" opacity="0.55" text-anchor="middle">← left block →</text>`
+    body += `<text x="${rightCX}" y="${labelY}" font-size="8" fill="currentColor" opacity="0.55" text-anchor="middle">← right block →</text>`
+  }
 
   for (let i = 0; i < maxLen; i++) {
     const counts = { A: 0, C: 0, G: 0, T: 0 }
@@ -2166,7 +2181,7 @@ function computeLogo() {
     logoWarning.value = `${top.length} sequences have ${lengths.size} different lengths; logo extends to longest (${maxLen}); shorter sequences excluded from later positions.`
   }
 
-  logoSvg.value = buildLogoSvg(top.map(g => g.sequence))
+  logoSvg.value = buildLogoSvg(top.map(g => g.sequence), 9)
 }
 
 // Sequence logo from METIS-predicted high-yield sequences. Shows the
@@ -2174,7 +2189,7 @@ function computeLogo() {
 // observed logo for spotting positions the AI wants to change.
 function computePredictedLogo() {
   if (!seqCandidates.value?.length) { predictedLogoSvg.value = ''; return }
-  predictedLogoSvg.value = buildLogoSvg(seqCandidates.value.map(c => c.sequence))
+  predictedLogoSvg.value = buildLogoSvg(seqCandidates.value.map(c => c.sequence), 9)
 }
 
 // Nearest-neighbor high-yield logo: sequences in the dataset that are
@@ -2187,7 +2202,10 @@ const nnCandidates = computed(() => {
   const sorted = [...withSeq].sort((a, b) => b.maxConversion - a.maxConversion)
   const cutIdx = Math.max(1, Math.floor(sorted.length * dataset.config.yieldThreshold / 100))
   const topSeqs = sorted.slice(0, cutIdx).map(e => e.sequence)
-  const medianYield = sorted[Math.floor(sorted.length / 2)].maxConversion
+  // 66th-percentile cutoff: only include experiments in the top 34% of yield
+  // (stricter than above-median so the NN logo stays selective).
+  // sorted is DESC so the 66th percentile sits at index floor(N * 0.34).
+  const nnCutoff = sorted[Math.min(Math.floor(sorted.length * 0.34), sorted.length - 1)].maxConversion
 
   function hammingDist(a, b) {
     const len = Math.min(a.length, b.length)
@@ -2197,7 +2215,7 @@ const nnCandidates = computed(() => {
   }
 
   return sorted
-    .filter(e => !topSeqs.includes(e.sequence) && e.maxConversion >= medianYield)
+    .filter(e => !topSeqs.includes(e.sequence) && e.maxConversion >= nnCutoff)
     .map(e => ({ seq: e.sequence, yield: e.maxConversion, minDist: Math.min(...topSeqs.map(s => hammingDist(e.sequence, s))) }))
     .sort((a, b) => a.minDist - b.minDist || b.yield - a.yield)
     .slice(0, 15)
@@ -2205,7 +2223,7 @@ const nnCandidates = computed(() => {
 
 function computeNNLogo() {
   nnLogoSvg.value = nnCandidates.value.length
-    ? buildLogoSvg(nnCandidates.value.map(c => c.seq))
+    ? buildLogoSvg(nnCandidates.value.map(c => c.seq), 9)
     : ''
 }
 

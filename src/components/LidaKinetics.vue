@@ -577,7 +577,7 @@
           </div>
         </div>
 
-        <!-- Sequence Logos: observed (top yield) + predicted (METIS) -->
+        <!-- Sequence Logos: observed → nearest-neighbor high-yield → METIS prediction -->
         <div class="internal-section">
           <div class="logos-row">
             <div class="logo-col">
@@ -587,6 +587,13 @@
               </div>
               <div ref="logoEl" class="logo-wrap" v-html="logoSvg"></div>
               <div v-if="!logoSvg" class="logo-empty">No experiments yet.</div>
+            </div>
+            <div class="logo-col">
+              <div class="logo-col-header">Nearest-Neighbour High-Yield</div>
+              <div class="logo-wrap" v-html="nnLogoSvg"></div>
+              <div v-if="!nnLogoSvg" class="logo-empty">
+                Load experiments to compute.
+              </div>
             </div>
             <div class="logo-col">
               <div class="logo-col-header">Predicted (METIS top-{{ seqCandidates.length || '?' }})</div>
@@ -1334,6 +1341,7 @@ const curvePlotEl = ref(null)
 const heatPlotEl = ref(null)
 const logoEl = ref(null)
 const logoSvg = ref('')
+const nnLogoSvg = ref('')
 const predictedLogoSvg = ref('')
 const logoWarning = ref('')
 
@@ -1366,15 +1374,22 @@ const seqMatrixData = computed(() => {
   for (const e of labeled) for (const p of (e.timeCourse || [])) timepointSet.add(p.time)
   const timepoints = [...timepointSet].sort((a, b) => a - b)
 
-  const leftLabels  = [...new Set(labeled.map(e => e._left))].sort()
-  const rightLabels = [...new Set(labeled.map(e => e._right))].sort()
+  const seededExps   = labeled.filter(e =>  e._seeded)
+  const unseededExps = labeled.filter(e => !e._seeded)
+
+  // Per-group label sets so each heatmap only shows building blocks that
+  // actually appear in that condition — avoids phantom empty rows/columns.
+  const labelsOf = (exps) => ({
+    left:  [...new Set(exps.map(e => e._left))].sort(),
+    right: [...new Set(exps.map(e => e._right))].sort(),
+  })
 
   return {
     timepoints,
-    leftLabels,
-    rightLabels,
-    seededExps:   labeled.filter(e =>  e._seeded),
-    unseededExps: labeled.filter(e => !e._seeded),
+    seededExps,
+    unseededExps,
+    seededLabels:   labelsOf(seededExps),
+    unseededLabels: labelsOf(unseededExps),
   }
 })
 
@@ -2147,6 +2162,38 @@ function computePredictedLogo() {
   predictedLogoSvg.value = buildLogoSvg(seqCandidates.value.map(c => c.sequence))
 }
 
+// Nearest-neighbor high-yield logo: sequences in the dataset that are
+// Hamming-close to the top performers and have above-median yield.
+// Highlights the "high-yield neighbourhood" in sequence space without
+// requiring a METIS run.
+const nnCandidates = computed(() => {
+  const withSeq = dataset.experiments.filter(e => e.sequence)
+  if (withSeq.length < 4) return []
+  const sorted = [...withSeq].sort((a, b) => b.maxConversion - a.maxConversion)
+  const cutIdx = Math.max(1, Math.floor(sorted.length * dataset.config.yieldThreshold / 100))
+  const topSeqs = sorted.slice(0, cutIdx).map(e => e.sequence)
+  const medianYield = sorted[Math.floor(sorted.length / 2)].maxConversion
+
+  function hammingDist(a, b) {
+    const len = Math.min(a.length, b.length)
+    let d = Math.abs(a.length - b.length)
+    for (let i = 0; i < len; i++) if (a[i] !== b[i]) d++
+    return d
+  }
+
+  return sorted
+    .filter(e => !topSeqs.includes(e.sequence) && e.maxConversion >= medianYield)
+    .map(e => ({ seq: e.sequence, yield: e.maxConversion, minDist: Math.min(...topSeqs.map(s => hammingDist(e.sequence, s))) }))
+    .sort((a, b) => a.minDist - b.minDist || b.yield - a.yield)
+    .slice(0, 15)
+})
+
+function computeNNLogo() {
+  nnLogoSvg.value = nnCandidates.value.length
+    ? buildLogoSvg(nnCandidates.value.map(c => c.seq))
+    : ''
+}
+
 // ════════════════ Plotly: kinetic curves ════════════════
 
 function plotLayoutDark() {
@@ -2282,10 +2329,11 @@ function renderHeatmap() {
 
 function renderSeqMatrix() {
   const data = seqMatrixData.value
-  const t = data?.timepoints[seqHeatTimeIdx.value]
+  if (!data) return
+  const t = data.timepoints[seqHeatTimeIdx.value]
 
-  const buildZ = (exps) => (data?.leftLabels || []).map(left =>
-    (data?.rightLabels || []).map(right => {
+  const buildZ = (exps, leftLabels, rightLabels) => leftLabels.map(left =>
+    rightLabels.map(right => {
       const hits = exps.filter(e => e._left === left && e._right === right)
       if (!hits.length) return null
       const vals = hits.flatMap(e => {
@@ -2299,15 +2347,15 @@ function renderSeqMatrix() {
     })
   )
 
-  const makeTrace = (exps, cbLabel) => ({
+  const makeTrace = (exps, labels) => ({
     type: 'heatmap',
-    x: data.rightLabels,
-    y: data.leftLabels,
-    z: buildZ(exps),
+    x: labels.right,
+    y: labels.left,
+    z: buildZ(exps, labels.left, labels.right),
     colorscale: 'Viridis',
     zmin: 0, zmax: 100,
     connectgaps: false,
-    colorbar: { title: { text: cbLabel, font: { size: 10 } }, thickness: 12 },
+    colorbar: { title: { text: 'Conv %', font: { size: 10 } }, thickness: 12 },
     hovertemplate: 'Left: %{y}<br>Right: %{x}<br>Conv: %{z:.1f}%<extra></extra>',
   })
 
@@ -2322,10 +2370,10 @@ function renderSeqMatrix() {
   }
 
   const opts = { responsive: true, displayModeBar: false }
-  if (seqHeatSeededEl.value && data?.seededExps.length)
-    Plotly.react(seqHeatSeededEl.value, [makeTrace(data.seededExps, 'Conv %')], makeLayout(), opts)
-  if (seqHeatUnseededEl.value && data?.unseededExps.length)
-    Plotly.react(seqHeatUnseededEl.value, [makeTrace(data.unseededExps, 'Conv %')], makeLayout(), opts)
+  if (seqHeatSeededEl.value && data.seededExps.length)
+    Plotly.react(seqHeatSeededEl.value, [makeTrace(data.seededExps, data.seededLabels)], makeLayout(), opts)
+  if (seqHeatUnseededEl.value && data.unseededExps.length)
+    Plotly.react(seqHeatUnseededEl.value, [makeTrace(data.unseededExps, data.unseededLabels)], makeLayout(), opts)
 }
 
 function toggleSeqHeatAnim() {
@@ -2345,6 +2393,7 @@ function toggleSeqHeatAnim() {
 
 function renderAll() {
   computeLogo()
+  computeNNLogo()
   computePredictedLogo()
   nextTick(() => {
     renderCurves()
@@ -2956,6 +3005,7 @@ watch(() => dataset.experiments.map(e => ({ id: e.groupId, fit: e.fit })),
 watch(() => [dataset.experiments, dataset.config.yieldThreshold, heatX.value, heatY.value, store.isDarkMode], renderAll, { deep: true })
 watch(seqHeatTimeIdx, () => nextTick(renderSeqMatrix))
 watch(seqCandidates, computePredictedLogo, { deep: true })
+watch(nnCandidates, computeNNLogo, { deep: true })
 // Ensure a dnaStocks entry exists for every building-block letter that appears
 // in the current suggestions so v-model bindings in the template never hit undefined.
 watch(exportBuildingBlocks, ({ aside, bside, asideComp, bsideComp }) => {
@@ -3275,8 +3325,9 @@ onBeforeUnmount(() => {
 .logo-wrap { width: 100%; overflow-x: auto; padding: 8px 0; color: var(--text); }
 .logo-wrap svg { display: block; }
 
-.logos-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-@media (max-width: 900px) { .logos-row { grid-template-columns: 1fr; } }
+.logos-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+@media (max-width: 1100px) { .logos-row { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 700px) { .logos-row { grid-template-columns: 1fr; } }
 .logo-col { display: flex; flex-direction: column; min-width: 0; }
 .logo-col-header {
   font-size: 0.75rem; font-weight: 700; opacity: 0.85;

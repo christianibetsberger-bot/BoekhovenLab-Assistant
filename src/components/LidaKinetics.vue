@@ -1367,7 +1367,8 @@ const seqMatrixData = computed(() => {
       left  = e.sequence?.slice(0, 9)  || '?'
       right = e.sequence?.slice(9, 18) || '?'
     }
-    return { ...e, _left: left, _right: right, _seeded: /seed/i.test(e.conditions?.env || '') }
+    const env = (e.conditions?.env || '').toLowerCase()
+    return { ...e, _left: left, _right: right, _seeded: env.includes('seed') && !env.includes('unseed') }
   })
 
   const timepointSet = new Set()

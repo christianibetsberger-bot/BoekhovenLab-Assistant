@@ -2380,6 +2380,7 @@ function renderSeqMatrix() {
     l.yaxis.title = { text: 'Left block (first 9 nt)', font: { size: 9 } }
     l.xaxis.type = 'category'
     l.yaxis.type = 'category'
+    l.yaxis.autorange = 'reversed'   // A at top, O at bottom
     l.margin.r = 60
     return l
   }

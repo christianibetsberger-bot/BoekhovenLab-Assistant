@@ -538,6 +538,45 @@
           </div>
         </div>
 
+        <!-- Sequence Matrix Heatmap: 14×14 left-block × right-block, seeded / unseeded -->
+        <div class="internal-section" v-if="seqMatrixData">
+          <div class="flex-between" style="margin-bottom:8px;">
+            <h3 style="margin:0;">Sequence Matrix</h3>
+            <div style="display:flex; gap:8px; align-items:center; font-size:0.78rem;">
+              <span style="opacity:0.7; white-space:nowrap;">
+                t = {{ seqMatrixData.timepoints[seqHeatTimeIdx] != null ? seqMatrixData.timepoints[seqHeatTimeIdx].toFixed(1) + ' h' : '—' }}
+              </span>
+              <input
+                type="range"
+                v-model.number="seqHeatTimeIdx"
+                :min="0"
+                :max="Math.max(0, seqMatrixData.timepoints.length - 1)"
+                step="1"
+                style="width:140px;"
+              />
+              <button
+                class="compact-btn"
+                @click="toggleSeqHeatAnim"
+                :disabled="seqMatrixData.timepoints.length < 2"
+                :title="seqHeatPlaying ? 'Pause animation' : 'Play through timepoints'"
+              >
+                <i class="fas" :class="seqHeatPlaying ? 'fa-pause' : 'fa-play'"></i>
+                {{ seqHeatPlaying ? 'Pause' : 'Play' }}
+              </button>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <div v-if="seqMatrixData.seededExps.length">
+              <div style="text-align:center; font-size:0.78rem; font-weight:600; opacity:0.75; margin-bottom:4px;">Seeded</div>
+              <div ref="seqHeatSeededEl" class="plot-area"></div>
+            </div>
+            <div v-if="seqMatrixData.unseededExps.length">
+              <div style="text-align:center; font-size:0.78rem; font-weight:600; opacity:0.75; margin-bottom:4px;">Unseeded</div>
+              <div ref="seqHeatUnseededEl" class="plot-area"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- Sequence Logos: observed (top yield) + predicted (METIS) -->
         <div class="internal-section">
           <div class="logos-row">
@@ -1045,6 +1084,12 @@ const seqCandidates = ref([])
 const heatX = ref('temperature')
 const heatY = ref('ligase')
 
+const seqHeatSeededEl   = ref(null)
+const seqHeatUnseededEl = ref(null)
+const seqHeatTimeIdx    = ref(0)
+const seqHeatPlaying    = ref(false)
+const seqHeatAnimTimer  = ref(null)
+
 const showLibrary = ref(false)
 
 // ── Send-to-Wellplate state ─────────────────────────────────────────────
@@ -1295,6 +1340,42 @@ const logoWarning = ref('')
 const libraryItems = computed(() => {
   const all = [...store.cloudKinetics, ...store.archivedKinetics]
   return all.filter(i => i.scope === 'Global' || i.owner_id === store.user?.id)
+})
+
+// ── Sequence Matrix Heatmap ──────────────────────────────────────────────────
+// Splits seqName like "Aalpha" → left="A", right="alpha" via uppercase-prefix rule.
+// Falls back to raw first-9/last-9 nucleotide fragment when no seqName.
+const seqMatrixData = computed(() => {
+  const exps = dataset.experiments
+  if (!exps.length) return null
+
+  const labeled = exps.map(e => {
+    let left, right
+    if (e.seqName) {
+      const m = e.seqName.match(/^([A-Z]+)(.+)$/)
+      if (m) { left = m[1]; right = m[2] }
+    }
+    if (!left) {
+      left  = e.sequence?.slice(0, 9)  || '?'
+      right = e.sequence?.slice(9, 18) || '?'
+    }
+    return { ...e, _left: left, _right: right, _seeded: /seed/i.test(e.conditions?.env || '') }
+  })
+
+  const timepointSet = new Set()
+  for (const e of labeled) for (const p of (e.timeCourse || [])) timepointSet.add(p.time)
+  const timepoints = [...timepointSet].sort((a, b) => a - b)
+
+  const leftLabels  = [...new Set(labeled.map(e => e._left))].sort()
+  const rightLabels = [...new Set(labeled.map(e => e._right))].sort()
+
+  return {
+    timepoints,
+    leftLabels,
+    rightLabels,
+    seededExps:   labeled.filter(e =>  e._seeded),
+    unseededExps: labeled.filter(e => !e._seeded),
+  }
 })
 
 function formatNum(n) {
@@ -2199,12 +2280,76 @@ function renderHeatmap() {
   Plotly.react(heatPlotEl.value, [trace], layout, { responsive: true, displayModeBar: false })
 }
 
+function renderSeqMatrix() {
+  const data = seqMatrixData.value
+  const t = data?.timepoints[seqHeatTimeIdx.value]
+
+  const buildZ = (exps) => (data?.leftLabels || []).map(left =>
+    (data?.rightLabels || []).map(right => {
+      const hits = exps.filter(e => e._left === left && e._right === right)
+      if (!hits.length) return null
+      const vals = hits.flatMap(e => {
+        const tc = e.timeCourse || []
+        if (!tc.length) return []
+        const times = tc.map(p => p.time)
+        const convs = tc.map(p => p.conversion)
+        return [times.length === 1 ? convs[0] : interpLinear(times, convs, [t])[0]]
+      }).filter(v => v != null && isFinite(v))
+      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
+    })
+  )
+
+  const makeTrace = (exps, cbLabel) => ({
+    type: 'heatmap',
+    x: data.rightLabels,
+    y: data.leftLabels,
+    z: buildZ(exps),
+    colorscale: 'Viridis',
+    zmin: 0, zmax: 100,
+    connectgaps: false,
+    colorbar: { title: { text: cbLabel, font: { size: 10 } }, thickness: 12 },
+    hovertemplate: 'Left: %{y}<br>Right: %{x}<br>Conv: %{z:.1f}%<extra></extra>',
+  })
+
+  const makeLayout = () => {
+    const l = plotLayoutDark()
+    l.xaxis.title = { text: 'Right block (last 9 nt)', font: { size: 9 } }
+    l.yaxis.title = { text: 'Left block (first 9 nt)', font: { size: 9 } }
+    l.xaxis.type = 'category'
+    l.yaxis.type = 'category'
+    l.margin.r = 60
+    return l
+  }
+
+  const opts = { responsive: true, displayModeBar: false }
+  if (seqHeatSeededEl.value && data?.seededExps.length)
+    Plotly.react(seqHeatSeededEl.value, [makeTrace(data.seededExps, 'Conv %')], makeLayout(), opts)
+  if (seqHeatUnseededEl.value && data?.unseededExps.length)
+    Plotly.react(seqHeatUnseededEl.value, [makeTrace(data.unseededExps, 'Conv %')], makeLayout(), opts)
+}
+
+function toggleSeqHeatAnim() {
+  if (seqHeatPlaying.value) {
+    clearInterval(seqHeatAnimTimer.value)
+    seqHeatAnimTimer.value = null
+    seqHeatPlaying.value = false
+  } else {
+    const max = (seqMatrixData.value?.timepoints.length ?? 1) - 1
+    if (max < 1) return
+    seqHeatPlaying.value = true
+    seqHeatAnimTimer.value = setInterval(() => {
+      seqHeatTimeIdx.value = seqHeatTimeIdx.value >= max ? 0 : seqHeatTimeIdx.value + 1
+    }, 800)
+  }
+}
+
 function renderAll() {
   computeLogo()
   computePredictedLogo()
   nextTick(() => {
     renderCurves()
     renderHeatmap()
+    renderSeqMatrix()
   })
 }
 
@@ -2809,6 +2954,7 @@ watch(() => dataset.experiments.map(e => ({ id: e.groupId, fit: e.fit })),
 // ════════════════ Mount ════════════════
 
 watch(() => [dataset.experiments, dataset.config.yieldThreshold, heatX.value, heatY.value, store.isDarkMode], renderAll, { deep: true })
+watch(seqHeatTimeIdx, () => nextTick(renderSeqMatrix))
 watch(seqCandidates, computePredictedLogo, { deep: true })
 // Ensure a dnaStocks entry exists for every building-block letter that appears
 // in the current suggestions so v-model bindings in the template never hit undefined.
@@ -2833,6 +2979,9 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (curvePlotEl.value) Plotly.purge(curvePlotEl.value)
   if (heatPlotEl.value) Plotly.purge(heatPlotEl.value)
+  if (seqHeatSeededEl.value) Plotly.purge(seqHeatSeededEl.value)
+  if (seqHeatUnseededEl.value) Plotly.purge(seqHeatUnseededEl.value)
+  if (seqHeatAnimTimer.value) clearInterval(seqHeatAnimTimer.value)
 })
 </script>
 

@@ -1353,6 +1353,20 @@ const libraryItems = computed(() => {
 // ── Sequence Matrix Heatmap ──────────────────────────────────────────────────
 // Splits seqName like "Aalpha" → left="A", right="alpha" via uppercase-prefix rule.
 // Falls back to raw first-9/last-9 nucleotide fragment when no seqName.
+
+const GREEK_ORDER = ['alpha','beta','gamma','delta','epsilon','zeta','eta','theta','iota','kappa','lambda','mu','nu','xi']
+
+function sortSeqLabels(labels) {
+  return [...labels].sort((a, b) => {
+    const ia = GREEK_ORDER.indexOf(a.toLowerCase())
+    const ib = GREEK_ORDER.indexOf(b.toLowerCase())
+    if (ia !== -1 && ib !== -1) return ia - ib   // both Greek: canonical order
+    if (ia !== -1) return 1                        // Greek after Latin
+    if (ib !== -1) return -1
+    return a.localeCompare(b)                      // both Latin: alphabetical A→O
+  })
+}
+
 const seqMatrixData = computed(() => {
   const exps = dataset.experiments
   if (!exps.length) return null
@@ -1381,8 +1395,8 @@ const seqMatrixData = computed(() => {
   // Per-group label sets so each heatmap only shows building blocks that
   // actually appear in that condition — avoids phantom empty rows/columns.
   const labelsOf = (exps) => ({
-    left:  [...new Set(exps.map(e => e._left))].sort(),
-    right: [...new Set(exps.map(e => e._right))].sort(),
+    left:  sortSeqLabels([...new Set(exps.map(e => e._left))]),
+    right: sortSeqLabels([...new Set(exps.map(e => e._right))]),
   })
 
   return {

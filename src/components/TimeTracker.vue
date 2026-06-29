@@ -563,7 +563,7 @@
         <h3 style="margin:0;">
           <i class="fas fa-diagram-project icon-muted"></i>
           Task Allocation Flow
-          <span style="font-weight:400; opacity:.6; font-size:.72rem;">— how time splits across tasks over {{ chartPeriodLabel }}</span>
+          <span style="font-weight:400; opacity:.6; font-size:.72rem;">— how the task mix shifts across {{ chartPeriodLabel }}</span>
         </h3>
         <select v-model="chartPeriod" style="font-size:0.78rem; padding:3px 8px; width:auto;">
           <option value="week">This week</option>
@@ -1839,9 +1839,10 @@ function renderTrendChart() {
 }
 
 // ── Task-allocation Sankey ──────────────────────────────────────────────────────
-// Splits the selected period into ordered time buckets (days / weeks / months),
-// then draws a bipartite Sankey: each period flows into the tasks it was spent on,
-// so you can read how the task mix shifts from one bucket to the next.
+// Splits the selected period into ordered time buckets (days / weeks / months)
+// laid out as columns, then draws an alluvial flow: each task is a coloured band
+// flowing from one bucket to the next, so you can read how the task mix changes
+// across the period (e.g. weekday → weekday within the current week).
 function getSankeyBuckets() {
   const period = chartPeriod.value
   const buckets = []
@@ -1902,62 +1903,144 @@ function renderSankey() {
     tally(ai, activeEntry.value.task, (now.value - ai) / 3600000)
   }
 
-  // Tasks ordered by total hours (biggest first) → stable colour assignment.
+  // Tasks ordered by total hours (biggest first) → stable colour & stacking order.
   const tasks = Object.keys(taskTotals).sort((a, b) => taskTotals[b] - taskTotals[a])
+  const B = buckets.length
+  const nonEmpty = perBucket.filter(m => Object.keys(m).length).length
   hasSankeyData.value = tasks.length > 0
   if (!hasSankeyData.value) { try { Plotly.purge(sankeyChartEl.value) } catch(_) {}; return }
 
   const taskColor = {}
   tasks.forEach((t, i) => { taskColor[t] = CHART_PALETTE[i % CHART_PALETTE.length] })
 
-  // Node 0..B-1 = period buckets, then one node per task.
-  const nodeLabels = [
-    ...buckets.map(b => b.label),
-    ...tasks.map(t => `${t} · ${taskTotals[t].toFixed(1)}h`),
-  ]
-  const nodeColors = [
-    ...buckets.map(() => dark ? '#475569' : '#cbd5e1'),
-    ...tasks.map(t => taskColor[t]),
-  ]
+  const baseLayout = {
+    paper_bgcolor: dark ? '#111827' : '#ffffff',
+    plot_bgcolor:  dark ? '#111827' : '#ffffff',
+    font:   { color: dark ? '#f3f4f6' : '#1f2937', size: 10 },
+    margin: { l: 4, r: 4, t: 20, b: 4 },
+  }
+  const finish = () => nextTick(() => {
+    if (sankeyChartEl.value) try { Plotly.Plots.resize(sankeyChartEl.value) } catch(_) {}
+  })
 
-  const src = [], tgt = [], val = [], linkColor = [], linkLabel = []
-  perBucket.forEach((map, bi) => {
-    for (const [t, h] of Object.entries(map)) {
-      if (h <= 0) continue
-      src.push(bi)
-      tgt.push(buckets.length + tasks.indexOf(t))
-      val.push(+h.toFixed(2))
-      linkColor.push(hexToRgba(taskColor[t], dark ? 0.55 : 0.45))
-      linkLabel.push(t)
+  // ── Fallback: only one bucket has data → a flow needs at least two columns.
+  // Show that single bucket split across its tasks instead.
+  if (nonEmpty < 2 || B < 2) {
+    const map = perBucket.find(m => Object.keys(m).length) || {}
+    const present = tasks.filter(t => map[t] > 0)
+    Plotly.react(sankeyChartEl.value, [{
+      type: 'sankey', orientation: 'h', arrangement: 'snap',
+      node: {
+        label: ['Period', ...present.map(t => `${t} · ${map[t].toFixed(1)}h`)],
+        color: [dark ? '#475569' : '#cbd5e1', ...present.map(t => taskColor[t])],
+        pad: 12, thickness: 14, line: { color: dark ? '#111827' : '#ffffff', width: 1 },
+        hovertemplate: '%{label}<extra></extra>',
+      },
+      link: {
+        source: present.map(() => 0),
+        target: present.map((_, i) => i + 1),
+        value:  present.map(t => +map[t].toFixed(2)),
+        color:  present.map(t => hexToRgba(taskColor[t], dark ? 0.55 : 0.45)),
+        customdata: present,
+        hovertemplate: '%{customdata} · %{value:.1f}h<extra></extra>',
+      },
+    }], baseLayout, { responsive: true, displayModeBar: false })
+    finish()
+    return
+  }
+
+  // ── Alluvial: one node per (bucket, task) with hours, columns ordered by time.
+  // Bands link the same task between consecutive buckets; width = the source
+  // bucket's hours for that task, so the band swells/shrinks as allocation shifts.
+  const nodeIdx = new Map()                 // `${bi}|${task}` → node index
+  const nodeLabel = [], nodeColor = [], nodeX = [], nodeCustom = []
+  buckets.forEach((b, bi) => {
+    const x = B === 1 ? 0.5 : 0.04 + (bi / (B - 1)) * 0.92
+    for (const t of tasks) {                // iterate in stable order for clean stacking
+      const h = perBucket[bi][t]
+      if (!h) continue
+      nodeIdx.set(`${bi}|${t}`, nodeLabel.length)
+      nodeLabel.push(t)
+      nodeColor.push(taskColor[t])
+      nodeX.push(x)
+      nodeCustom.push(`${t} · ${b.label} · ${h.toFixed(1)}h`)
     }
   })
+
+  const src = [], tgt = [], val = [], linkColor = [], linkCustom = []
+  for (let bi = 0; bi < B - 1; bi++) {
+    for (const t of tasks) {
+      const a = nodeIdx.get(`${bi}|${t}`)
+      const c = nodeIdx.get(`${bi + 1}|${t}`)
+      if (a == null || c == null) continue   // task absent in one of the two → band breaks
+      src.push(a); tgt.push(c)
+      val.push(+perBucket[bi][t].toFixed(2))
+      linkColor.push(hexToRgba(taskColor[t], dark ? 0.5 : 0.4))
+      linkCustom.push(`${t}: ${buckets[bi].label} → ${buckets[bi + 1].label}`)
+    }
+  }
+
+  // Guard: data so sparse that no task spans two consecutive buckets → no bands.
+  // Fall back to a bucket → task split so the breakdown is still visible.
+  if (!src.length) {
+    const liveBuckets = buckets.map((b, bi) => ({ b, bi })).filter(({ bi }) => Object.keys(perBucket[bi]).length)
+    const bLabel = liveBuckets.map(({ b }) => b.label)
+    const fSrc = [], fTgt = [], fVal = [], fColor = [], fCustom = []
+    liveBuckets.forEach(({ bi }, col) => {
+      for (const t of tasks) {
+        const h = perBucket[bi][t]
+        if (!h) continue
+        fSrc.push(col)
+        fTgt.push(liveBuckets.length + tasks.indexOf(t))
+        fVal.push(+h.toFixed(2))
+        fColor.push(hexToRgba(taskColor[t], dark ? 0.5 : 0.4))
+        fCustom.push(`${t} · ${buckets[bi].label}`)
+      }
+    })
+    Plotly.react(sankeyChartEl.value, [{
+      type: 'sankey', orientation: 'h', arrangement: 'snap',
+      node: {
+        label: [...bLabel, ...tasks.map(t => `${t} · ${taskTotals[t].toFixed(1)}h`)],
+        color: [...liveBuckets.map(() => dark ? '#475569' : '#cbd5e1'), ...tasks.map(t => taskColor[t])],
+        pad: 12, thickness: 14, line: { color: dark ? '#111827' : '#ffffff', width: 1 },
+        hovertemplate: '%{label}<extra></extra>',
+      },
+      link: { source: fSrc, target: fTgt, value: fVal, color: fColor, customdata: fCustom,
+        hovertemplate: '%{customdata} · %{value:.1f}h<extra></extra>' },
+    }], baseLayout, { responsive: true, displayModeBar: false })
+    finish()
+    return
+  }
+
+  // Time-axis column headers above each bucket.
+  baseLayout.annotations = buckets.map((b, bi) => ({
+    x: B === 1 ? 0.5 : 0.04 + (bi / (B - 1)) * 0.92,
+    y: 1.04, xref: 'paper', yref: 'paper',
+    text: b.label, showarrow: false, xanchor: 'center',
+    font: { size: 9, color: dark ? '#9ca3af' : '#6b7280' },
+  }))
 
   Plotly.react(sankeyChartEl.value, [{
     type: 'sankey',
     orientation: 'h',
     arrangement: 'snap',
     node: {
-      label: nodeLabels,
-      color: nodeColors,
-      pad: 12,
-      thickness: 14,
+      label: nodeLabel,
+      color: nodeColor,
+      x: nodeX,
+      customdata: nodeCustom,
+      pad: 10,
+      thickness: 12,
       line: { color: dark ? '#111827' : '#ffffff', width: 1 },
-      hovertemplate: '%{label}<br>%{value:.1f}h<extra></extra>',
+      hovertemplate: '%{customdata}<extra></extra>',
     },
     link: {
       source: src, target: tgt, value: val, color: linkColor,
-      customdata: linkLabel,
-      hovertemplate: '%{customdata} · %{value:.1f}h<extra></extra>',
+      customdata: linkCustom,
+      hovertemplate: '%{customdata}<br>%{value:.1f}h<extra></extra>',
     },
-  }], {
-    paper_bgcolor: dark ? '#111827' : '#ffffff',
-    plot_bgcolor:  dark ? '#111827' : '#ffffff',
-    font:   { color: dark ? '#f3f4f6' : '#1f2937', size: 10 },
-    margin: { l: 4, r: 4, t: 4, b: 4 },
-  }, { responsive: true, displayModeBar: false })
-  // The div may have been display:none (empty state) until this render — resize
-  // once Vue has revealed it so the Sankey fills the full width.
-  nextTick(() => { if (sankeyChartEl.value) try { Plotly.Plots.resize(sankeyChartEl.value) } catch(_) {} })
+  }], baseLayout, { responsive: true, displayModeBar: false })
+  finish()
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────

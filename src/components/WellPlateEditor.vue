@@ -647,16 +647,16 @@ const exportAndrewPlusMulti = () => {
     const steps = [{ index: 0, state: { labwareStates, errors: [], warnings: [] }, ref: onpHex(16), groupStepRefs: [] }];
 
     // Group transfers by source + destination plate + volume → one PIPETTING step each.
-    // A given destination cavity must appear at most once per group, otherwise the
-    // robot would dispense the same volume into that well twice.
+    // Repeated (well, stock, volume) transfers are intentional and must NOT be collapsed:
+    // the matrix can add the same stock to a well as both a row and a column component
+    // (e.g. "H" twice at 0.633 µL → 1.266 µL total). Listing the cavity once per transfer
+    // makes the robot dispense each portion so the volumes sum — mirroring the single-plate
+    // export exactly, which is the verified-correct reference.
     const groupedTransfers = {};
     allTransfers.forEach(t => {
         const formattedVol = Number(t.volume.toFixed(3));
         const key = `${t.sourceKey}__${t.plateRef}__${formattedVol}`;
-        if (!groupedTransfers[key]) groupedTransfers[key] = { sourceKey: t.sourceKey, plateRef: t.plateRef, volume: formattedVol, cavities: [], _seen: new Set() };
-        const cavityId = `${t.destCavity.row}-${t.destCavity.column}`;
-        if (groupedTransfers[key]._seen.has(cavityId)) return;
-        groupedTransfers[key]._seen.add(cavityId);
+        if (!groupedTransfers[key]) groupedTransfers[key] = { sourceKey: t.sourceKey, plateRef: t.plateRef, volume: formattedVol, cavities: [] };
         groupedTransfers[key].cavities.push(t.destCavity);
     });
 

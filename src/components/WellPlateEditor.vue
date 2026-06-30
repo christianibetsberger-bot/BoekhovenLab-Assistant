@@ -573,7 +573,7 @@ const exportAndrewPlusMulti = () => {
     if (allTransfers.length === 0) { alert("No pipetting transfers found in the selected plates."); return; }
 
     // Water must be pipetted first so other reagents are diluted into it.
-    allTransfers.sort((a, b) => (a.type === 'water' ? -1 : b.type === 'water' ? 1 : 0));
+    allTransfers.sort((a, b) => (a.type === 'water' ? 0 : 1) - (b.type === 'water' ? 0 : 1));
 
     // Global source dedup: water → one shared key; reagents → code + name.
     const stockKey = (t) => t.type === 'water'
@@ -647,11 +647,16 @@ const exportAndrewPlusMulti = () => {
     const steps = [{ index: 0, state: { labwareStates, errors: [], warnings: [] }, ref: onpHex(16), groupStepRefs: [] }];
 
     // Group transfers by source + destination plate + volume → one PIPETTING step each.
+    // A given destination cavity must appear at most once per group, otherwise the
+    // robot would dispense the same volume into that well twice.
     const groupedTransfers = {};
     allTransfers.forEach(t => {
         const formattedVol = Number(t.volume.toFixed(3));
         const key = `${t.sourceKey}__${t.plateRef}__${formattedVol}`;
-        if (!groupedTransfers[key]) groupedTransfers[key] = { sourceKey: t.sourceKey, plateRef: t.plateRef, volume: formattedVol, cavities: [] };
+        if (!groupedTransfers[key]) groupedTransfers[key] = { sourceKey: t.sourceKey, plateRef: t.plateRef, volume: formattedVol, cavities: [], _seen: new Set() };
+        const cavityId = `${t.destCavity.row}-${t.destCavity.column}`;
+        if (groupedTransfers[key]._seen.has(cavityId)) return;
+        groupedTransfers[key]._seen.add(cavityId);
         groupedTransfers[key].cavities.push(t.destCavity);
     });
 

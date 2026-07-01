@@ -112,33 +112,30 @@ const calculateMatrixCell = (matrix, rowBlockId, colBlockId) => {
     let htmlStr = "";
     let totalVol = 0;
 
-    rowBlock.itemIds.forEach(itemId => {
+    // De-duplicate by inventory item: a building block contributed by BOTH the row
+    // and the column (e.g. diagonal cells where the row block == the col block, or any
+    // incidental overlap between the two blocks) must be added only ONCE at the target
+    // concentration — not once per axis — otherwise its well concentration doubles.
+    const seenItems = new Set();
+    const addContribution = (itemId, role, targetConc, targetConcUnit, blockLabware) => {
+        if (seenItems.has(itemId)) return;       // already added from the other axis
         const item = store.inventory.find(i => i.id === itemId);
-        if(item) {
-            const ratio = concentrationRatio(matrix.rowTargetConc, matrix.rowTargetConcUnit || 'µM', item.stock, item.stockUnit || 'µM');
-            if (ratio === null) {
-                htmlStr += `<strong>Row:</strong> <span style="color: var(--danger);"><i class="fas fa-triangle-exclamation"></i> [${esc(item.code)}] ${esc(item.name)}: unit mismatch (stock: ${esc(item.stockUnit || 'µM')} vs target: ${esc(matrix.rowTargetConcUnit || 'µM')})</span><br>`;
-                return;
-            }
-            let v = ratio * tv;
-            totalVol += v;
-            htmlStr += `<strong>Row:</strong> &nbsp;<span class="inv-ref" contenteditable="false" data-labware="${esc(rowBlock.labware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(v))} ${esc(unit)} (${esc(matrix.rowTargetConc)} ${esc(matrix.rowTargetConcUnit || 'µM')})<br>`;
+        if (!item) return;
+        seenItems.add(itemId);
+        const ratio = concentrationRatio(targetConc, targetConcUnit || 'µM', item.stock, item.stockUnit || 'µM');
+        if (ratio === null) {
+            htmlStr += `<strong>${role}:</strong> <span style="color: var(--danger);"><i class="fas fa-triangle-exclamation"></i> [${esc(item.code)}] ${esc(item.name)}: unit mismatch (stock: ${esc(item.stockUnit || 'µM')} vs target: ${esc(targetConcUnit || 'µM')})</span><br>`;
+            return;
         }
-    });
+        const v = ratio * tv;
+        totalVol += v;
+        htmlStr += `<strong>${role}:</strong> &nbsp;<span class="inv-ref" contenteditable="false" data-labware="${esc(blockLabware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(v))} ${esc(unit)} (${esc(targetConc)} ${esc(targetConcUnit || 'µM')})<br>`;
+    };
 
-    colBlock.itemIds.forEach(itemId => {
-        const item = store.inventory.find(i => i.id === itemId);
-        if(item) {
-            const ratio = concentrationRatio(matrix.colTargetConc, matrix.colTargetConcUnit || 'µM', item.stock, item.stockUnit || 'µM');
-            if (ratio === null) {
-                htmlStr += `<strong>Col:</strong> <span style="color: var(--danger);"><i class="fas fa-triangle-exclamation"></i> [${esc(item.code)}] ${esc(item.name)}: unit mismatch (stock: ${esc(item.stockUnit || 'µM')} vs target: ${esc(matrix.colTargetConcUnit || 'µM')})</span><br>`;
-                return;
-            }
-            let v = ratio * tv;
-            totalVol += v;
-            htmlStr += `<strong>Col:</strong> &nbsp;<span class="inv-ref" contenteditable="false" data-labware="${esc(colBlock.labware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(v))} ${esc(unit)} (${esc(matrix.colTargetConc)} ${esc(matrix.colTargetConcUnit || 'µM')})<br>`;
-        }
-    });
+    // Row contributions first (so a shared block is dosed at the row target), then any
+    // column-only blocks. On the diagonal every block is shared, so it is added once.
+    rowBlock.itemIds.forEach(itemId => addContribution(itemId, 'Row', matrix.rowTargetConc, matrix.rowTargetConcUnit, rowBlock.labware));
+    colBlock.itemIds.forEach(itemId => addContribution(itemId, 'Col', matrix.colTargetConc, matrix.colTargetConcUnit, colBlock.labware));
     
     let fixedVolTotal = 0; let fixedHtml = "";
     if(matrix.fixedAdditives) {

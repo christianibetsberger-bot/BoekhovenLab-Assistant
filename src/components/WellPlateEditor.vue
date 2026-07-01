@@ -386,25 +386,28 @@ const exportAndrewPlus = (plate) => {
     let stepIdx = 1;
     for (const group of Object.values(groupedTransfers)) {
         const srcData = sourceMap[group.sourceKey];
-        steps.push({
-            index: stepIdx++, actionTypeId: "PIPETTING",
-            action: {
-                type: "PIPETTING",
-                sources: [{ labwareRef: srcData.labwareRef, cavities: [{ row: 1, column: 1 }], customPipettingPolicy: false }],
-                destinations: [{ labwareRef: targetPlateRef, cavities: group.cavities, customPipettingPolicy: false }],
-                params: {
-                    volume: { value: group.volume, unit: "uL" }, mode: "forward", aspirationSpeed: "normal", dispensingSpeed: "normal",
-                    airTopCushion: false, airBottomCushion: false, tipChangeBeginning: true, tipChangeBetween: true, tipWithFilter: false,
-                    movingSpeed: "normal", verifyTip: false, blowOut: true, blowOutPause: false, tipTouch: false, armSpeed: "normal",
-                    preciseAspirationSpeed: 5, preciseDispensingSpeed: 5, preciseFluidicSpeedEnabled: false
+        // Emit one step per de-duplicated round so a well never repeats within a step.
+        for (const roundCavities of onpCavityRounds(group.cavities)) {
+            steps.push({
+                index: stepIdx++, actionTypeId: "PIPETTING",
+                action: {
+                    type: "PIPETTING",
+                    sources: [{ labwareRef: srcData.labwareRef, cavities: [{ row: 1, column: 1 }], customPipettingPolicy: false }],
+                    destinations: [{ labwareRef: targetPlateRef, cavities: roundCavities, customPipettingPolicy: false }],
+                    params: {
+                        volume: { value: group.volume, unit: "uL" }, mode: "forward", aspirationSpeed: "normal", dispensingSpeed: "normal",
+                        airTopCushion: false, airBottomCushion: false, tipChangeBeginning: true, tipChangeBetween: true, tipWithFilter: false,
+                        movingSpeed: "normal", verifyTip: false, blowOut: true, blowOutPause: false, tipTouch: false, armSpeed: "normal",
+                        preciseAspirationSpeed: 5, preciseDispensingSpeed: 5, preciseFluidicSpeedEnabled: false
+                    },
+                    mixingSource: { enabled: false, times: 3, speed: "normal", volume: { value: 0, unit: "uL" }, preciseSpeed: 5, preciseSpeedEnabled: false },
+                    tipPositionSource: { position: "liquid", customHeight: false, customHeightValue: 0, avoidTouch: false },
+                    mixingDest: { enabled: false, times: 3, speed: "normal", volume: { value: 0, unit: "uL" }, preciseSpeed: 5, preciseSpeedEnabled: false },
+                    tipPositionDest: { position: "bottom", customHeight: false, customHeightValue: 0, avoidTouch: false }
                 },
-                mixingSource: { enabled: false, times: 3, speed: "normal", volume: { value: 0, unit: "uL" }, preciseSpeed: 5, preciseSpeedEnabled: false },
-                tipPositionSource: { position: "liquid", customHeight: false, customHeightValue: 0, avoidTouch: false },
-                mixingDest: { enabled: false, times: 3, speed: "normal", volume: { value: 0, unit: "uL" }, preciseSpeed: 5, preciseSpeedEnabled: false },
-                tipPositionDest: { position: "bottom", customHeight: false, customHeightValue: 0, avoidTouch: false }
-            },
-            ref: generateHex(16), groupStepRefs: []
-        });
+                ref: generateHex(16), groupStepRefs: []
+            });
+        }
     }
 
     const baseProtocol = {
@@ -471,6 +474,28 @@ const onpUuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c 
     const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
 });
+
+// Split a step's cavity list into "rounds" so a given well never appears twice within
+// one PIPETTING step. A well that receives the same stock+volume N times (e.g. a matrix
+// diagonal cell fed by both its row and its column component) is spread across N steps —
+// the robot still dispenses it N times (total volume unchanged), but no single step lists
+// the same well twice. Duplicate cavities in one step otherwise serialise as overlapping
+// cavity ranges (e.g. "E1:E5, E5:E7") that Andrew+ / OneLab mis-expands, double-counting
+// the wells around the overlap and reporting inflated well volumes.
+// Declared as a function so it is hoisted for use by exportAndrewPlus (defined above).
+function onpCavityRounds(cavities) {
+    const rounds = [];
+    const seen = [];
+    for (const cav of cavities) {
+        const id = `${cav.row}-${cav.column}`;
+        let r = 0;
+        while (seen[r] && seen[r].has(id)) r++;
+        if (!seen[r]) { seen[r] = new Set(); rounds[r] = []; }
+        seen[r].add(id);
+        rounds[r].push(cav);
+    }
+    return rounds;
+}
 
 // Parse a single plate's wells into a flat transfer list. Mirrors the parsing in
 // exportAndrewPlus but additionally extracts the stock [code] for cross-plate dedup.
@@ -663,25 +688,28 @@ const exportAndrewPlusMulti = () => {
     let stepIdx = 1;
     for (const group of Object.values(groupedTransfers)) {
         const srcData = sourceMap[group.sourceKey];
-        steps.push({
-            index: stepIdx++, actionTypeId: "PIPETTING",
-            action: {
-                type: "PIPETTING",
-                sources: [{ labwareRef: srcData.labwareRef, cavities: [{ row: 1, column: 1 }], customPipettingPolicy: false }],
-                destinations: [{ labwareRef: group.plateRef, cavities: group.cavities, customPipettingPolicy: false }],
-                params: {
-                    volume: { value: group.volume, unit: "uL" }, mode: "forward", aspirationSpeed: "normal", dispensingSpeed: "normal",
-                    airTopCushion: false, airBottomCushion: false, tipChangeBeginning: true, tipChangeBetween: true, tipWithFilter: false,
-                    movingSpeed: "normal", verifyTip: false, blowOut: true, blowOutPause: false, tipTouch: false, armSpeed: "normal",
-                    preciseAspirationSpeed: 5, preciseDispensingSpeed: 5, preciseFluidicSpeedEnabled: false
+        // Emit one step per de-duplicated round so a well never repeats within a step.
+        for (const roundCavities of onpCavityRounds(group.cavities)) {
+            steps.push({
+                index: stepIdx++, actionTypeId: "PIPETTING",
+                action: {
+                    type: "PIPETTING",
+                    sources: [{ labwareRef: srcData.labwareRef, cavities: [{ row: 1, column: 1 }], customPipettingPolicy: false }],
+                    destinations: [{ labwareRef: group.plateRef, cavities: roundCavities, customPipettingPolicy: false }],
+                    params: {
+                        volume: { value: group.volume, unit: "uL" }, mode: "forward", aspirationSpeed: "normal", dispensingSpeed: "normal",
+                        airTopCushion: false, airBottomCushion: false, tipChangeBeginning: true, tipChangeBetween: true, tipWithFilter: false,
+                        movingSpeed: "normal", verifyTip: false, blowOut: true, blowOutPause: false, tipTouch: false, armSpeed: "normal",
+                        preciseAspirationSpeed: 5, preciseDispensingSpeed: 5, preciseFluidicSpeedEnabled: false
+                    },
+                    mixingSource: { enabled: false, times: 3, speed: "normal", volume: { value: 0, unit: "uL" }, preciseSpeed: 5, preciseSpeedEnabled: false },
+                    tipPositionSource: { position: "liquid", customHeight: false, customHeightValue: 0, avoidTouch: false },
+                    mixingDest: { enabled: false, times: 3, speed: "normal", volume: { value: 0, unit: "uL" }, preciseSpeed: 5, preciseSpeedEnabled: false },
+                    tipPositionDest: { position: "bottom", customHeight: false, customHeightValue: 0, avoidTouch: false }
                 },
-                mixingSource: { enabled: false, times: 3, speed: "normal", volume: { value: 0, unit: "uL" }, preciseSpeed: 5, preciseSpeedEnabled: false },
-                tipPositionSource: { position: "liquid", customHeight: false, customHeightValue: 0, avoidTouch: false },
-                mixingDest: { enabled: false, times: 3, speed: "normal", volume: { value: 0, unit: "uL" }, preciseSpeed: 5, preciseSpeedEnabled: false },
-                tipPositionDest: { position: "bottom", customHeight: false, customHeightValue: 0, avoidTouch: false }
-            },
-            ref: onpHex(16), groupStepRefs: []
-        });
+                ref: onpHex(16), groupStepRefs: []
+            });
+        }
     }
 
     const protocolName = (groupExportName.value || "Grouped Protocol").trim() || "Grouped Protocol";

@@ -413,32 +413,33 @@ const renderDnaLabel = (doc, item, x, y, w, h) => {
 // monospace identifier code. Uses Helvetica for text and Courier for identifiers.
 const renderChemLabel = (doc, item, x, y, w, h) => {
     const s = w / 24
-    const px = x + 1.1 * s
-    const rightX = x + w - 1.1 * s
-    const codeReserve = item.code ? lineMM((s >= 1.5 ? 5.4 : 3.9)) + 0.8 * s : 0
-    const bottom = y + h - 0.6 * s - codeReserve
-    let cy = y + 2.7 * s
+    const big = s >= 1.5
+    const px = x + 1.0 * s
+    const rightX = x + w - 1.0 * s
+    const codeReserve = item.code ? lineMM(big ? 5.4 : 3.6) + (big ? 0.8 : 0.35) * s : 0
+    const bottom = y + h - (big ? 0.6 : 0.4) * s - codeReserve
+    let cy = y + (big ? 2.7 : 2.2) * s
 
     // Compound name — bold, wraps to fill the width (up to 2 lines small / 3 large)
-    const nameSize = (s >= 1.5 ? 8 : 6.2)
+    const nameSize = big ? 8 : 5.6
     doc.setFont('helvetica', 'bold'); doc.setFontSize(nameSize); doc.setTextColor(15, 15, 15)
-    const nameLines = doc.splitTextToSize(item.name || '', rightX - px).slice(0, s >= 1.5 ? 3 : 2)
+    const nameLines = doc.splitTextToSize(item.name || '', rightX - px).slice(0, big ? 3 : 2)
     nameLines.forEach(ln => { doc.text(ln, px, cy); cy += lineMM(nameSize) })
 
     // Separator rule (large labels only; tiny labels stay compact)
-    cy += 0.6 * s
-    if (s >= 1.5) {
+    cy += (big ? 0.6 : 0.25) * s
+    if (big) {
         doc.setLineDash([]); doc.setDrawColor(45, 45, 45); doc.setLineWidth(0.13 * s)
         doc.line(px, cy, rightX, cy)
         cy += 1.9 * s
     } else {
-        cy += 0.7 * s
+        cy += 0.3 * s
     }
 
     // Labelled data rows: muted key + value
-    const fieldSize = s >= 1.5 ? 5.6 : 3.7
-    const keyW = (s >= 1.5 ? 9 : 6.3) * s
-    const rowH = lineMM(fieldSize) + 0.35 * s
+    const fieldSize = big ? 5.6 : 3.5
+    const keyW = (big ? 9 : 6.0) * s
+    const rowH = lineMM(fieldSize) + (big ? 0.35 : 0.12) * s
     const field = (key, val, { mono = false, bold = false } = {}) => {
         if (val == null || val === '' || cy > bottom) return
         doc.setFontSize(fieldSize)
@@ -453,16 +454,16 @@ const renderChemLabel = (doc, item, x, y, w, h) => {
     const conc = (item.stock != null && item.stock !== '') ? `${item.stock} ${item.stockUnit || 'µM'}` : ''
     const mw   = (item.mw || item.manualMw) ? `${store.formatNum ? store.formatNum(item.mw || item.manualMw) : Math.round(item.mw || item.manualMw)} Da` : ''
     const loc  = [item.location, item.sublocation].filter(v => v != null && v !== '').join(' / ')
-    const phBuf = [
-        (item.pH != null && item.pH !== '') ? `pH ${item.pH}` : '',
-        item.buffer || ''
-    ].filter(Boolean).join('  ·  ')
+    // Solvent line: buffer (name + concentration) if prepared in buffer, otherwise "in water".
+    // pH is appended when set. item.buffer already carries "<conc> <unit> <name>".
+    const solvent = (item.buffer && String(item.buffer).trim() !== '') ? String(item.buffer).trim() : 'in water'
+    const solventLine = [solvent, (item.pH != null && item.pH !== '') ? `pH ${item.pH}` : ''].filter(Boolean).join(', ')
 
     field('CONC', conc, { bold: true })
-    field('CAS',  item.cas, { mono: true })
-    field('MW',   mw)
+    field('SOLV', solventLine)
     field('LOC',  loc)
-    field('BUF',  phBuf)
+    field('MW',   mw)
+    field('CAS',  item.cas, { mono: true })
 
     // Identifier code — monospace, anchored to the bottom like a catalog / lot number
     if (item.code) {

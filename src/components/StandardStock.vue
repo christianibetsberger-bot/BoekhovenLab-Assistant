@@ -134,6 +134,10 @@ const buildStockNotes = () => {
 
 // Save Method
 const saveStdToInventory = () => {
+    const bufSrc = store.inventory.find(i => i.id === store.stdCalc.bufferItemId)
+    const bufferStr = (store.stdCalc.diluent === 'buffer' && store.stdCalc.bufferTargetConc)
+        ? `${store.formatNum(store.stdCalc.bufferTargetConc)} ${store.stdCalc.bufferTargetUnit}${bufSrc ? ' ' + bufSrc.name : ''}`
+        : null
     const newItem = {
         id: 'std_' + crypto.randomUUID(),
         code: store.stdCalc.saveCode || 'STD',
@@ -148,6 +152,7 @@ const saveStdToInventory = () => {
         unitSize: '',
         notes: buildStockNotes(),
         pH: (store.stdCalc.pH != null && store.stdCalc.pH !== '') ? store.stdCalc.pH : null,
+        buffer: bufferStr,
         scope: saveScope.value
     };
     store.inventory.unshift(newItem);

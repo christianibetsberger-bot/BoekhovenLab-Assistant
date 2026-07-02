@@ -315,12 +315,19 @@ const printerXShift   = ref(0)    // mm
 const printerYShift   = ref(0)    // mm
 const labelSearch     = ref('')
 const labelDragFrom   = ref(null)
+const labelSize       = ref('small')   // 'small' = 0.5 mL eppi (24×13), 'large' = 2×2 (48×26)
 
-const dnaRnaItems = computed(() => {
+// Label grid geometry within a HERMA 4363 master block, by chosen size.
+// Both sizes share the same die-cut origin so a large label tiles 2×2 small cells.
+const labelGeom = computed(() =>
+    labelSize.value === 'large'
+        ? { tw: 48, th: 26, cols: 2, rows: 1 }   // 2 per master
+        : { tw: 24, th: 13, cols: 4, rows: 3 }   // 12 per master
+)
+
+const labelItems = computed(() => {
     const term = labelSearch.value.toLowerCase()
     return store.inventory.filter(item => {
-        const cls = item.itemClass || ''
-        if (cls !== 'DNA' && cls !== 'RNA') return false
         if (!term) return true
         return (item.code?.toLowerCase().includes(term)) || (item.name?.toLowerCase().includes(term))
     })
@@ -337,9 +344,11 @@ const toggleLabelItem = (item) => {
 const labelCapacity = computed(() => {
     const total = labelQueue.value.reduce((s, e) => s + (e.copies || 1), 0)
     if (total === 0) return null
-    const offset = (startHermaLabel.value - 1) * 12
-    const pages   = Math.ceil((total + offset) / 144)
-    const lastPos = Math.min(12, Math.ceil((total + offset) / 12))
+    const perHerma = labelGeom.value.cols * labelGeom.value.rows   // 12 small, 2 large
+    const perPage  = 12 * perHerma                                 // 12 master blocks / page
+    const offset  = (startHermaLabel.value - 1) * perHerma
+    const pages   = Math.ceil((total + offset) / perPage)
+    const lastPos = Math.min(12, Math.ceil((total + offset) / perHerma))
     return { total, pages, startPos: startHermaLabel.value, lastPos }
 })
 
@@ -365,22 +374,74 @@ const wrapSeq = (seq, maxChars = 14) => {
     return lines
 }
 
+// Existing DNA/RNA label content, drawn into a cell and scaled to the cell width.
+const renderDnaLabel = (doc, item, x, y, w, h) => {
+    const s = w / 24
+    const px = x + 0.8 * s
+    const maxW = w - 1.6 * s
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(6 * s); doc.setTextColor(10, 10, 10)
+    doc.text(doc.splitTextToSize(item.name || '', maxW)[0] || '', px, y + 2.0 * s)
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(3.5 * s); doc.setTextColor(100, 100, 100)
+    doc.text(item.code || '', px, y + 3.7 * s)
+    const mwDisplay = item.mw ? Math.round(item.mw) : ''
+    const concBase  = `${item.stock ?? ''} ${item.stockUnit || 'µM'}`.trim()
+    const concStr   = mwDisplay ? `${concBase}  |  ${mwDisplay} Da` : concBase
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(4 * s); doc.setTextColor(20, 20, 20)
+    doc.text(concStr, px, y + 5.1 * s)
+    const seq = cleanSeqForLabel(item.sequence)
+    if (seq) {
+        doc.setFont('courier', 'normal'); doc.setFontSize(3.5 * s); doc.setTextColor(40, 40, 40)
+        doc.splitTextToSize(seq, maxW).forEach((lineTxt, li) => {
+            const lineY = y + 6.7 * s + li * 1.5 * s
+            if (lineY < y + h - 0.4 * s) doc.text(lineTxt, px, lineY)
+        })
+    }
+}
+
+// Chemical / non-sequence label: name, conc | MW, code | CAS, location/sub, pH · buffer.
+const renderChemLabel = (doc, item, x, y, w, h) => {
+    const s = w / 24
+    const px = x + 0.8 * s
+    const maxW = w - 1.6 * s
+    let cy = y + 2.1 * s
+    const line = (txt, size, bold, color, gap) => {
+        if (!txt || cy > y + h - 0.4 * s) return
+        doc.setFont('helvetica', bold ? 'bold' : 'normal')
+        doc.setFontSize(size * s)
+        doc.setTextColor(color[0], color[1], color[2])
+        doc.text(doc.splitTextToSize(String(txt), maxW)[0] || '', px, cy)
+        cy += gap * s
+    }
+    const conc = (item.stock != null && item.stock !== '') ? `${item.stock} ${item.stockUnit || 'µM'}` : ''
+    const mw   = (item.mw || item.manualMw) ? `${Math.round(item.mw || item.manualMw)} Da` : ''
+    const loc  = [item.location, item.sublocation].filter(v => v != null && v !== '').join(' / ')
+    const phBuf = [
+        (item.pH != null && item.pH !== '') ? `pH ${item.pH}` : '',
+        item.buffer || ''
+    ].filter(Boolean).join('  ·  ')
+
+    line(item.name || '', 5.5, true, [10, 10, 10], 2.0)
+    line([conc, mw].filter(Boolean).join('   |   '), 4.2, false, [20, 20, 20], 1.7)
+    line([item.code ? `[${item.code}]` : '', item.cas ? `CAS ${item.cas}` : ''].filter(Boolean).join('   '), 3.4, false, [90, 90, 90], 1.5)
+    line(loc ? `Loc ${loc}` : '', 3.4, false, [40, 40, 40], 1.5)
+    line(phBuf, 3.4, false, [40, 40, 40], 1.5)
+}
+
 const generateLabelsPDF = () => {
     if (labelQueue.value.length === 0) return
 
     const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
 
-    // HERMA 4363 geometry (mm)
+    // HERMA 4363 geometry (mm). Cell size depends on the chosen label size; both share
+    // the same 4.5 mm die-cut origin so a large cell tiles exactly 2×2 small cells.
     const lw = 105, lh = 48
     const topMargin = 4, leftMargin = 0
     const hCols = 2
-    const tw = 24, th = 13
-    const tinyCols = 4, tinyRows = 3
-    const tinyPerHerma = tinyCols * tinyRows   // 12
-    const totalPerPage = hCols * 6 * tinyPerHerma  // 144
-    const padX = (lw - tinyCols * tw) / 2     // 4.5 mm
-    const padY = (lh - tinyRows * th) / 2     // 4.5 mm
-    const offset  = (startHermaLabel.value - 1) * tinyPerHerma
+    const { tw, th, cols, rows } = labelGeom.value
+    const perHerma = cols * rows
+    const totalPerPage = hCols * 6 * perHerma
+    const padX = 4.5, padY = 4.5
+    const offset  = (startHermaLabel.value - 1) * perHerma
     const xShift  = parseFloat(printerXShift.value) || 0
     const yShift  = parseFloat(printerYShift.value) || 0
 
@@ -396,17 +457,17 @@ const generateLabelsPDF = () => {
         const physI      = dataIdx + offset
         const page       = Math.floor(physI / totalPerPage)
         const pagePhysI  = physI % totalPerPage
-        const masterIdx  = Math.floor(pagePhysI / tinyPerHerma)
+        const masterIdx  = Math.floor(pagePhysI / perHerma)
         const hr         = Math.floor(masterIdx / hCols)
         const hc         = masterIdx % hCols
-        const tinyIdx    = pagePhysI % tinyPerHerma
-        const tr         = Math.floor(tinyIdx / tinyCols)
-        const tc         = tinyIdx % tinyCols
+        const cellIdx    = pagePhysI % perHerma
+        const cr         = Math.floor(cellIdx / cols)
+        const cc         = cellIdx % cols
 
         const masterX = leftMargin + hc * lw + xShift
         const masterY = topMargin  + hr * lh + yShift
-        const tinyX   = masterX + padX + tc * tw
-        const tinyY   = masterY + padY + tr * th
+        const cellX   = masterX + padX + cc * tw
+        const cellY   = masterY + padY + cr * th
 
         while (currentPage < page) { doc.addPage(); currentPage++ }
 
@@ -414,46 +475,12 @@ const generateLabelsPDF = () => {
         doc.setLineDash([0.4, 0.4])
         doc.setDrawColor(170, 170, 170)
         doc.setLineWidth(0.1)
-        doc.rect(tinyX, tinyY, tw, th)
+        doc.rect(cellX, cellY, tw, th)
         doc.setLineDash([])
 
-        const px   = tinyX + 0.8
-        const maxW = tw - 1.6   // 22.4 mm usable width
-
-        // Name — bold, 6 pt — largest element
-        const nameStr = item.name || ''
-        doc.setFont('helvetica', 'bold')
-        doc.setFontSize(6)
-        doc.setTextColor(10, 10, 10)
-        doc.text(doc.splitTextToSize(nameStr, maxW)[0] || '', px, tinyY + 2.0)
-
-        // Code — small, 3.5 pt, muted
-        doc.setFont('helvetica', 'normal')
-        doc.setFontSize(3.5)
-        doc.setTextColor(100, 100, 100)
-        doc.text(item.code || '', px, tinyY + 3.7)
-
-        // Conc | MW — 4 pt
-        const mwDisplay = item.mw ? Math.round(item.mw) : ''
-        const concBase  = `${item.stock ?? ''} ${item.stockUnit || 'µM'}`.trim()
-        const concStr   = mwDisplay ? `${concBase}  |  ${mwDisplay} Da` : concBase
-        doc.setFont('helvetica', 'normal')
-        doc.setFontSize(4)
-        doc.setTextColor(20, 20, 20)
-        doc.text(concStr, px, tinyY + 5.1)
-
-        // Sequence — courier 3.5 pt, one line if it fits, wraps only if needed
-        const seq = cleanSeqForLabel(item.sequence)
-        if (seq) {
-            doc.setFont('courier', 'normal')
-            doc.setFontSize(3.5)
-            doc.setTextColor(40, 40, 40)
-            const seqLines = doc.splitTextToSize(seq, maxW)
-            seqLines.forEach((line, li) => {
-                const lineY = tinyY + 6.7 + li * 1.5
-                if (lineY < tinyY + th - 0.4) doc.text(line, px, lineY)
-            })
-        }
+        const cls = item.itemClass || ''
+        if (cls === 'DNA' || cls === 'RNA') renderDnaLabel(doc, item, cellX, cellY, tw, th)
+        else renderChemLabel(doc, item, cellX, cellY, tw, th)
     })
 
     const dateStr = new Date().toISOString().split('T')[0]
@@ -513,6 +540,10 @@ const generateLabelsPDF = () => {
                     <label>pH</label>
                     <input type="number" step="any" v-model.number="viewingItem.pH" placeholder="e.g. 7.4" style="padding: 4px; width: 100%;">
                 </div>
+                <div class="input-group" style="margin: 0; flex: 1;">
+                    <label>Buffer</label>
+                    <input type="text" v-model="viewingItem.buffer" placeholder="e.g. 1× PBS" style="padding: 4px; width: 100%;">
+                </div>
             </div>
             <div class="input-group" style="margin-top: 12px;">
                 <label>Notes / Prep Info</label>
@@ -528,7 +559,7 @@ const generateLabelsPDF = () => {
 
         <!-- Header -->
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;">
-          <h3 style="margin: 0; color: var(--primary);"><i class="fas fa-tag"></i> Print DNA / RNA Labels — HERMA 4363</h3>
+          <h3 style="margin: 0; color: var(--primary);"><i class="fas fa-tag"></i> Print Labels — HERMA 4363</h3>
           <button class="danger small" @click="showLabelModal = false; labelQueue = []; labelSearch = ''"><i class="fas fa-times"></i></button>
         </div>
 
@@ -538,16 +569,16 @@ const generateLabelsPDF = () => {
           <!-- Left: item picker -->
           <div style="border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden;">
             <div style="padding: 12px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;">
-              <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;">DNA / RNA Inventory</div>
+              <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;">Inventory</div>
               <div class="search-box" style="margin: 0;">
                 <i class="fas fa-search"></i>
                 <input type="text" v-model="labelSearch" placeholder="Search code or name…">
               </div>
             </div>
             <div style="overflow-y: auto; flex: 1; padding: 6px 0;">
-              <div v-if="dnaRnaItems.length === 0" style="padding: 20px; text-align: center; opacity: 0.45; font-size: 0.82rem;">No DNA / RNA items found</div>
+              <div v-if="labelItems.length === 0" style="padding: 20px; text-align: center; opacity: 0.45; font-size: 0.82rem;">No items found</div>
               <div
-                v-for="item in dnaRnaItems"
+                v-for="item in labelItems"
                 :key="item.id"
                 @click="toggleLabelItem(item)"
                 style="display: flex; align-items: center; gap: 10px; padding: 8px 14px; cursor: pointer; border-bottom: 1px solid var(--bg); transition: background 0.12s;"
@@ -607,6 +638,24 @@ const generateLabelsPDF = () => {
 
           <!-- Right: settings -->
           <div style="display: flex; flex-direction: column; overflow-y: auto; padding: 14px;">
+
+            <!-- Label size -->
+            <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">Label Size</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 16px;">
+              <div
+                @click="labelSize = 'small'"
+                style="padding: 8px 6px; border-radius: 4px; border: 1.5px solid; text-align: center; font-size: 0.72rem; font-weight: 600; cursor: pointer; user-select: none;"
+                :style="{ borderColor: labelSize === 'small' ? 'var(--primary)' : 'var(--border)', background: labelSize === 'small' ? 'var(--primary)' : 'var(--panel-bg)', color: labelSize === 'small' ? 'white' : 'var(--text)' }"
+              >0.5 mL eppi<div style="font-size: 0.62rem; font-weight: 400; opacity: 0.75;">24 × 13 mm</div></div>
+              <div
+                @click="labelSize = 'large'"
+                style="padding: 8px 6px; border-radius: 4px; border: 1.5px solid; text-align: center; font-size: 0.72rem; font-weight: 600; cursor: pointer; user-select: none;"
+                :style="{ borderColor: labelSize === 'large' ? 'var(--primary)' : 'var(--border)', background: labelSize === 'large' ? 'var(--primary)' : 'var(--panel-bg)', color: labelSize === 'large' ? 'white' : 'var(--text)' }"
+              >Large (2×2)<div style="font-size: 0.62rem; font-weight: 400; opacity: 0.75;">48 × 26 mm</div></div>
+            </div>
+            <div style="font-size: 0.68rem; opacity: 0.55; margin-bottom: 16px; line-height: 1.5;">
+              DNA / RNA items keep their sequence layout; all other classes print name, conc, code, CAS, location, MW, pH &amp; buffer.
+            </div>
 
             <!-- HERMA picker -->
             <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">Start Position</div>

@@ -508,6 +508,16 @@ const generateLabelsPDF = () => {
                     <div><strong>CAS Number:</strong><br> <input type="text" v-model="viewingItem.cas" placeholder="e.g. 50-00-0" style="padding: 4px; margin-top: 4px; width: 100%;"></div>
                 </div>
             </template>
+            <div style="display: flex; gap: 12px; align-items: flex-end; margin-top: 15px;">
+                <div class="input-group" style="margin: 0; width: 110px;">
+                    <label>pH</label>
+                    <input type="number" step="any" v-model.number="viewingItem.pH" placeholder="e.g. 7.4" style="padding: 4px; width: 100%;">
+                </div>
+            </div>
+            <div class="input-group" style="margin-top: 12px;">
+                <label>Notes / Prep Info</label>
+                <textarea v-model="viewingItem.notes" rows="5" placeholder="Preparation details — total volume, buffer, fill-up water, pH, …" style="width: 100%; font-size: 0.8rem;"></textarea>
+            </div>
             <button @click="store.saveItemToCloud(viewingItem); viewingItem = null" style="margin-top: 20px; width: 100%;">Save & Close</button>
         </div>
     </div>

@@ -112,20 +112,42 @@ const bufferWarning = computed(() => {
     return ''
 })
 
+// Build the preparation summary stored on the inventory item's notes/info field.
+const buildStockNotes = () => {
+    const lines = ['Prepared with Standard Stock Calculator'];
+    if (stdTotalVolumeL.value) lines.push(`Total volume: ${fmtVol(stdTotalVolumeL.value)}`);
+    if (store.stdCalc.diluent === 'buffer') {
+        const src = store.inventory.find(i => i.id === store.stdCalc.bufferItemId);
+        if (store.stdCalc.bufferTargetConc)
+            lines.push(`Buffer conc: ${store.formatNum(store.stdCalc.bufferTargetConc)} ${store.stdCalc.bufferTargetUnit}${src ? ` (${src.name})` : ''}`);
+        if (bufferVolumeL.value != null)
+            lines.push(`Buffer volume: ${fmtVol(bufferVolumeL.value)} (from ${store.formatNum(store.stdCalc.bufferStockConc)} ${store.stdCalc.bufferStockUnit} stock)`);
+        if (fillWaterVolumeL.value != null)
+            lines.push(`Fill-up water: ${fmtVol(fillWaterVolumeL.value)}`);
+    } else {
+        lines.push('Diluent: water');
+        if (fillWaterVolumeL.value != null) lines.push(`Water volume: ${fmtVol(fillWaterVolumeL.value)}`);
+    }
+    if (store.stdCalc.pH != null && store.stdCalc.pH !== '') lines.push(`pH: ${store.stdCalc.pH}`);
+    return lines.join('\n');
+}
+
 // Save Method
 const saveStdToInventory = () => {
     const newItem = {
         id: 'std_' + crypto.randomUUID(),
-        code: store.stdCalc.saveCode || 'STD', 
-        cas: store.stdCalc.saveCas, 
-        itemClass: store.stdCalc.saveClass, 
-        name: store.stdCalc.saveName, 
-        stock: parseFloat(store.formatNum(store.stdCalc.conc)), 
-        stockUnit: stdConcUnitStr.value, 
-        location: '', 
-        sublocation: '', 
-        catalogNum: '', 
-        unitSize: '', 
+        code: store.stdCalc.saveCode || 'STD',
+        cas: store.stdCalc.saveCas,
+        itemClass: store.stdCalc.saveClass,
+        name: store.stdCalc.saveName,
+        stock: parseFloat(store.formatNum(store.stdCalc.conc)),
+        stockUnit: stdConcUnitStr.value,
+        location: '',
+        sublocation: '',
+        catalogNum: '',
+        unitSize: '',
+        notes: buildStockNotes(),
+        pH: (store.stdCalc.pH != null && store.stdCalc.pH !== '') ? store.stdCalc.pH : null,
         scope: saveScope.value
     };
     store.inventory.unshift(newItem);
@@ -200,11 +222,15 @@ const saveStdToInventory = () => {
         </div>
     </div>
 
-    <!-- Diluent: pure water or a buffer -->
-    <div style="display: flex; gap: 15px; align-items: center; margin-top: 12px; margin-bottom: 10px;">
+    <!-- Diluent: pure water or a buffer, plus pH -->
+    <div style="display: flex; gap: 15px; align-items: center; margin-top: 12px; margin-bottom: 10px; flex-wrap: wrap;">
         <span style="font-size: 0.8rem; font-weight: bold; opacity: 0.75;">Diluent:</span>
         <label class="checkbox-label"><input type="radio" value="water" v-model="store.stdCalc.diluent"> Water</label>
         <label class="checkbox-label"><input type="radio" value="buffer" v-model="store.stdCalc.diluent"> Buffer</label>
+        <div style="display: flex; align-items: center; gap: 6px; margin-left: auto;">
+            <span style="font-size: 0.8rem; font-weight: bold; opacity: 0.75;">pH:</span>
+            <input type="number" step="any" v-model.number="store.stdCalc.pH" placeholder="e.g. 7.4" style="width: 90px;">
+        </div>
     </div>
 
     <div v-if="store.stdCalc.diluent === 'buffer'" style="background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px;">

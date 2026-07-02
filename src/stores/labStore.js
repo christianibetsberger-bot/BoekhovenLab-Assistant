@@ -23,7 +23,7 @@ export const useLabStore = defineStore('lab', {
     classOptions: ['DNA', 'RNA', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10', 'C11', 'C12', 'C13+', 'Acid', 'Base', 'Dye', 'Chemical', 'Solvent', 'Enzyme', 'Buffer', 'Other'],
     
     // --- Calculators State ---
-    stdCalc: { type: 'solid', mw: null, mass: null, massUnit: 0.001, density: null, vol: null, volUnit: 0.001, conc: null, concUnit: 0.000001, saveCode: '', saveCas: '', saveName: '', saveClass: 'Chemical' },
+    stdCalc: { type: 'solid', mw: null, mass: null, massUnit: 0.001, density: null, vol: null, volUnit: 0.001, conc: null, concUnit: 0.000001, saveCode: '', saveCas: '', saveName: '', saveClass: 'Chemical', diluent: 'water', bufferItemId: '', bufferStockConc: null, bufferStockUnit: 'mM', bufferTargetConc: null, bufferTargetUnit: 'mM' },
     dnaCalc: { a260: null, sequence: '', manualMw: null, saveCode: '', saveName: '', saveClass: 'DNA', type: 'DNA', pathLength: 0.05 },
     
     inventory: [],

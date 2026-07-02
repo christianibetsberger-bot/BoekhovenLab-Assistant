@@ -30,24 +30,86 @@ const calculatedPureConc = computed(() => {
     return store.formatNum(molarity * 1e6) + ' µM';
 })
 
-const calculatedStdVolume = computed(() => {
-    if (!store.stdCalc.mw || !store.stdCalc.conc) return '0.000 µL';
+// Format a volume given in litres into a human-friendly string.
+const fmtVol = (L) => {
+    if (L == null || isNaN(L) || !isFinite(L)) return '—';
+    if (L >= 1) return store.formatNum(L) + ' L';
+    if (L >= 1e-3) return store.formatNum(L * 1e3) + ' mL';
+    if (L >= 1e-6) return store.formatNum(L * 1e6) + ' µL';
+    return store.formatNum(L * 1e9) + ' nL';
+}
+
+// Total required stock volume, as a raw number in litres (null if inputs incomplete).
+const stdTotalVolumeL = computed(() => {
+    if (!store.stdCalc.mw || !store.stdCalc.conc) return null;
     let massInGrams = 0;
     if (store.stdCalc.type === 'liquid') {
-        if (!store.stdCalc.vol || !store.stdCalc.density) return '0.000 µL';
+        if (!store.stdCalc.vol || !store.stdCalc.density) return null;
         massInGrams = (store.stdCalc.vol * store.stdCalc.volUnit * 1000) * store.stdCalc.density;
     } else {
-        if (!store.stdCalc.mass) return '0.000 µL';
+        if (!store.stdCalc.mass) return null;
         massInGrams = store.stdCalc.mass * store.stdCalc.massUnit;
     }
     const moles = massInGrams / store.stdCalc.mw;
     const concInMolar = store.stdCalc.conc * store.stdCalc.concUnit;
-    const volumeInLiters = moles / concInMolar;
-    if (volumeInLiters === Infinity || isNaN(volumeInLiters)) return 'Error';
-    if (volumeInLiters >= 1) return store.formatNum(volumeInLiters) + ' L';
-    if (volumeInLiters >= 1e-3) return store.formatNum(volumeInLiters * 1e3) + ' mL';
-    if (volumeInLiters >= 1e-6) return store.formatNum(volumeInLiters * 1e6) + ' µL';
-    return store.formatNum(volumeInLiters * 1e9) + ' nL';
+    const V = moles / concInMolar;
+    return (isFinite(V) && V > 0) ? V : null;
+})
+
+const calculatedStdVolume = computed(() => {
+    if (!store.stdCalc.mw || !store.stdCalc.conc) return '0.000 µL';
+    const V = stdTotalVolumeL.value;
+    return V == null ? '0.000 µL' : fmtVol(V);
+})
+
+// ── Buffer diluent ─────────────────────────────────────────────────────────────
+// Prepare the stock in buffer instead of pure water: take a concentrated buffer stock
+// and dilute it to the desired in-stock buffer concentration, filling the rest with water.
+const bufferItems = computed(() => store.inventory.filter(i => i.itemClass === 'Buffer'))
+
+const UNIT_MULT = { 'M': 1, 'mM': 0.001, 'µM': 0.000001, 'uM': 0.000001, 'nM': 1e-9, '×': 1, 'x': 1, 'X': 1 }
+const onBufferSelect = () => {
+    const item = store.inventory.find(i => i.id === store.stdCalc.bufferItemId)
+    if (item) {
+        store.stdCalc.bufferStockConc = item.stock ?? null
+        // Normalise the inventory unit string to one our selector offers.
+        const u = item.stockUnit || 'mM'
+        store.stdCalc.bufferStockUnit = ['M','mM','µM','nM','×'].includes(u) ? u : (u === 'uM' ? 'µM' : (UNIT_MULT[u] != null ? '×' : 'mM'))
+    }
+}
+
+const bufferStockConcM = computed(() => (store.stdCalc.bufferStockConc || 0) * (UNIT_MULT[store.stdCalc.bufferStockUnit] ?? 1))
+const bufferTargetConcM = computed(() => (store.stdCalc.bufferTargetConc || 0) * (UNIT_MULT[store.stdCalc.bufferTargetUnit] ?? 1))
+
+// Volume of the liquid compound itself (litres) — it occupies part of the total.
+const compoundVolumeL = computed(() =>
+    store.stdCalc.type === 'liquid' && store.stdCalc.vol ? store.stdCalc.vol * store.stdCalc.volUnit : 0
+)
+
+// Buffer stock volume needed = total × (desired buffer conc / buffer stock conc).
+const bufferVolumeL = computed(() => {
+    if (store.stdCalc.diluent !== 'buffer') return null
+    const Vt = stdTotalVolumeL.value
+    if (!Vt || !bufferStockConcM.value || !bufferTargetConcM.value) return null
+    return Vt * (bufferTargetConcM.value / bufferStockConcM.value)
+})
+
+// Water to fill up to the total volume (litres). Accounts for the liquid compound volume.
+const fillWaterVolumeL = computed(() => {
+    const Vt = stdTotalVolumeL.value
+    if (!Vt) return null
+    const buf = store.stdCalc.diluent === 'buffer' ? (bufferVolumeL.value || 0) : 0
+    return Vt - buf - compoundVolumeL.value
+})
+
+// Warnings: desired buffer conc can't exceed the stock, and buffer+compound can't exceed total.
+const bufferWarning = computed(() => {
+    if (store.stdCalc.diluent !== 'buffer' || !stdTotalVolumeL.value) return ''
+    if (bufferStockConcM.value && bufferTargetConcM.value && bufferTargetConcM.value > bufferStockConcM.value)
+        return 'Desired buffer concentration exceeds the buffer stock — dilution is impossible.'
+    if (fillWaterVolumeL.value != null && fillWaterVolumeL.value < -1e-15)
+        return 'Buffer (plus compound volume) exceeds the total volume — reduce the buffer concentration.'
+    return ''
 })
 
 // Save Method
@@ -138,9 +200,76 @@ const saveStdToInventory = () => {
         </div>
     </div>
 
+    <!-- Diluent: pure water or a buffer -->
+    <div style="display: flex; gap: 15px; align-items: center; margin-top: 12px; margin-bottom: 10px;">
+        <span style="font-size: 0.8rem; font-weight: bold; opacity: 0.75;">Diluent:</span>
+        <label class="checkbox-label"><input type="radio" value="water" v-model="store.stdCalc.diluent"> Water</label>
+        <label class="checkbox-label"><input type="radio" value="buffer" v-model="store.stdCalc.diluent"> Buffer</label>
+    </div>
+
+    <div v-if="store.stdCalc.diluent === 'buffer'" style="background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px;">
+        <div class="input-group" style="margin: 0;">
+            <label>Buffer (from inventory)</label>
+            <select v-model="store.stdCalc.bufferItemId" @change="onBufferSelect">
+                <option value="">— Manual entry —</option>
+                <option v-for="b in bufferItems" :key="b.id" :value="b.id">
+                    {{ b.code ? '[' + b.code + '] ' : '' }}{{ b.name }} ({{ store.formatNum(b.stock) }} {{ b.stockUnit || 'µM' }})
+                </option>
+            </select>
+        </div>
+        <div class="grid-2">
+            <div class="input-group" style="margin: 0;">
+                <label>Buffer stock conc</label>
+                <div class="input-with-select">
+                    <input type="number" step="any" v-model.number="store.stdCalc.bufferStockConc" placeholder="e.g. 10">
+                    <select v-model="store.stdCalc.bufferStockUnit">
+                        <option value="M">M</option>
+                        <option value="mM">mM</option>
+                        <option value="µM">µM</option>
+                        <option value="nM">nM</option>
+                        <option value="×">×</option>
+                    </select>
+                </div>
+            </div>
+            <div class="input-group" style="margin: 0;">
+                <label>Desired buffer conc in stock</label>
+                <div class="input-with-select">
+                    <input type="number" step="any" v-model.number="store.stdCalc.bufferTargetConc" placeholder="e.g. 1">
+                    <select v-model="store.stdCalc.bufferTargetUnit">
+                        <option value="M">M</option>
+                        <option value="mM">mM</option>
+                        <option value="µM">µM</option>
+                        <option value="nM">nM</option>
+                        <option value="×">×</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <p v-if="bufferWarning" style="margin: 0; font-size: 0.78rem; color: #ef4444; display: flex; align-items: center; gap: 6px;">
+            <i class="fas fa-triangle-exclamation"></i> {{ bufferWarning }}
+        </p>
+    </div>
+
     <div class="summary-panel" style="display: flex; align-items: center; justify-content: space-between; margin-top: 10px; margin-bottom: 15px;">
-        <strong><i class="fas fa-fill-drip" style="color: var(--primary)"></i> Req. Total Volume: </strong> 
+        <strong><i class="fas fa-fill-drip" style="color: var(--primary)"></i> Req. Total Volume: </strong>
         <span style="font-size: 1.4rem; color: var(--primary); font-weight: bold;">{{ calculatedStdVolume }}</span>
+    </div>
+
+    <!-- Buffer / water breakdown -->
+    <div v-if="store.stdCalc.diluent === 'buffer' && stdTotalVolumeL" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
+        <div style="background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; text-align: center;">
+            <div style="font-size: 0.72rem; opacity: 0.65; text-transform: uppercase; letter-spacing: 0.03em;">Buffer volume</div>
+            <div style="font-size: 1.15rem; font-weight: bold; color: var(--primary);">{{ fmtVol(bufferVolumeL) }}</div>
+            <div style="font-size: 0.68rem; opacity: 0.6;">from {{ store.formatNum(store.stdCalc.bufferStockConc) }} {{ store.stdCalc.bufferStockUnit }} stock</div>
+        </div>
+        <div style="background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; text-align: center;">
+            <div style="font-size: 0.72rem; opacity: 0.65; text-transform: uppercase; letter-spacing: 0.03em;">Fill-up water</div>
+            <div style="font-size: 1.15rem; font-weight: bold; color: var(--primary);"
+                 :style="{ color: (fillWaterVolumeL != null && fillWaterVolumeL < 0) ? '#ef4444' : 'var(--primary)' }">
+                {{ fmtVol(fillWaterVolumeL) }}
+            </div>
+            <div v-if="store.stdCalc.type === 'liquid' && compoundVolumeL" style="font-size: 0.68rem; opacity: 0.6;">after {{ fmtVol(compoundVolumeL) }} compound</div>
+        </div>
     </div>
 
     <div style="background: var(--panel-bg); padding: 15px; border: 1px solid var(--border); border-radius: var(--radius);">

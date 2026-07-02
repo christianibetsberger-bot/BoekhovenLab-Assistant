@@ -374,57 +374,101 @@ const wrapSeq = (seq, maxChars = 14) => {
     return lines
 }
 
-// Existing DNA/RNA label content, drawn into a cell and scaled to the cell width.
+// Vertical advance (mm) for a given point size, in a mm-unit jsPDF document.
+const lineMM = (pt) => pt * 0.352778 * 1.18
+
+// DNA/RNA label — bold wrapping name, then code, conc | MW, and the sequence (mono).
 const renderDnaLabel = (doc, item, x, y, w, h) => {
     const s = w / 24
-    const px = x + 0.8 * s
-    const maxW = w - 1.6 * s
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(6 * s); doc.setTextColor(10, 10, 10)
-    doc.text(doc.splitTextToSize(item.name || '', maxW)[0] || '', px, y + 2.0 * s)
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(3.5 * s); doc.setTextColor(100, 100, 100)
-    doc.text(item.code || '', px, y + 3.7 * s)
+    const px = x + 0.9 * s
+    const maxW = w - 1.8 * s
+    const bottom = y + h - 0.5 * s
+
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(6 * s); doc.setTextColor(12, 12, 12)
+    const nameLines = doc.splitTextToSize(item.name || '', maxW).slice(0, 2)
+    let cy = y + 2.1 * s
+    nameLines.forEach(ln => { doc.text(ln, px, cy); cy += lineMM(6 * s) })
+    cy += 0.3 * s
+
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(3.5 * s); doc.setTextColor(105, 105, 105)
+    if (item.code) { doc.text(String(item.code), px, cy); cy += lineMM(3.5 * s) }
+
     const mwDisplay = item.mw ? Math.round(item.mw) : ''
     const concBase  = `${item.stock ?? ''} ${item.stockUnit || 'µM'}`.trim()
     const concStr   = mwDisplay ? `${concBase}  |  ${mwDisplay} Da` : concBase
     doc.setFont('helvetica', 'normal'); doc.setFontSize(4 * s); doc.setTextColor(20, 20, 20)
-    doc.text(concStr, px, y + 5.1 * s)
+    if (concStr) { doc.text(concStr, px, cy); cy += lineMM(4 * s) + 0.3 * s }
+
     const seq = cleanSeqForLabel(item.sequence)
     if (seq) {
         doc.setFont('courier', 'normal'); doc.setFontSize(3.5 * s); doc.setTextColor(40, 40, 40)
-        doc.splitTextToSize(seq, maxW).forEach((lineTxt, li) => {
-            const lineY = y + 6.7 * s + li * 1.5 * s
-            if (lineY < y + h - 0.4 * s) doc.text(lineTxt, px, lineY)
+        doc.splitTextToSize(seq, maxW).forEach(lineTxt => {
+            if (cy < bottom) { doc.text(lineTxt, px, cy); cy += lineMM(3.5 * s) }
         })
     }
 }
 
-// Chemical / non-sequence label: name, conc | MW, code | CAS, location/sub, pH · buffer.
+// Chemical / non-sequence label — industry-style layout: bold wrapping compound name,
+// a separator rule, then labelled fields (conc, CAS, MW, location, pH/buffer) with a
+// monospace identifier code. Uses Helvetica for text and Courier for identifiers.
 const renderChemLabel = (doc, item, x, y, w, h) => {
     const s = w / 24
-    const px = x + 0.8 * s
-    const maxW = w - 1.6 * s
-    let cy = y + 2.1 * s
-    const line = (txt, size, bold, color, gap) => {
-        if (!txt || cy > y + h - 0.4 * s) return
-        doc.setFont('helvetica', bold ? 'bold' : 'normal')
-        doc.setFontSize(size * s)
-        doc.setTextColor(color[0], color[1], color[2])
-        doc.text(doc.splitTextToSize(String(txt), maxW)[0] || '', px, cy)
-        cy += gap * s
+    const px = x + 1.1 * s
+    const rightX = x + w - 1.1 * s
+    const codeReserve = item.code ? lineMM((s >= 1.5 ? 5.4 : 3.9)) + 0.8 * s : 0
+    const bottom = y + h - 0.6 * s - codeReserve
+    let cy = y + 2.7 * s
+
+    // Compound name — bold, wraps to fill the width (up to 2 lines small / 3 large)
+    const nameSize = (s >= 1.5 ? 8 : 6.2)
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(nameSize); doc.setTextColor(15, 15, 15)
+    const nameLines = doc.splitTextToSize(item.name || '', rightX - px).slice(0, s >= 1.5 ? 3 : 2)
+    nameLines.forEach(ln => { doc.text(ln, px, cy); cy += lineMM(nameSize) })
+
+    // Separator rule (large labels only; tiny labels stay compact)
+    cy += 0.6 * s
+    if (s >= 1.5) {
+        doc.setLineDash([]); doc.setDrawColor(45, 45, 45); doc.setLineWidth(0.13 * s)
+        doc.line(px, cy, rightX, cy)
+        cy += 1.9 * s
+    } else {
+        cy += 0.7 * s
     }
+
+    // Labelled data rows: muted key + value
+    const fieldSize = s >= 1.5 ? 5.6 : 3.7
+    const keyW = (s >= 1.5 ? 9 : 6.3) * s
+    const rowH = lineMM(fieldSize) + 0.35 * s
+    const field = (key, val, { mono = false, bold = false } = {}) => {
+        if (val == null || val === '' || cy > bottom) return
+        doc.setFontSize(fieldSize)
+        doc.setFont('helvetica', 'normal'); doc.setTextColor(125, 125, 125)
+        doc.text(key, px, cy)
+        doc.setFont(mono ? 'courier' : 'helvetica', bold ? 'bold' : 'normal'); doc.setTextColor(25, 25, 25)
+        const v = doc.splitTextToSize(String(val), rightX - (px + keyW))[0] || String(val)
+        doc.text(v, px + keyW, cy)
+        cy += rowH
+    }
+
     const conc = (item.stock != null && item.stock !== '') ? `${item.stock} ${item.stockUnit || 'µM'}` : ''
-    const mw   = (item.mw || item.manualMw) ? `${Math.round(item.mw || item.manualMw)} Da` : ''
+    const mw   = (item.mw || item.manualMw) ? `${store.formatNum ? store.formatNum(item.mw || item.manualMw) : Math.round(item.mw || item.manualMw)} Da` : ''
     const loc  = [item.location, item.sublocation].filter(v => v != null && v !== '').join(' / ')
     const phBuf = [
         (item.pH != null && item.pH !== '') ? `pH ${item.pH}` : '',
         item.buffer || ''
     ].filter(Boolean).join('  ·  ')
 
-    line(item.name || '', 5.5, true, [10, 10, 10], 2.0)
-    line([conc, mw].filter(Boolean).join('   |   '), 4.2, false, [20, 20, 20], 1.7)
-    line([item.code ? `[${item.code}]` : '', item.cas ? `CAS ${item.cas}` : ''].filter(Boolean).join('   '), 3.4, false, [90, 90, 90], 1.5)
-    line(loc ? `Loc ${loc}` : '', 3.4, false, [40, 40, 40], 1.5)
-    line(phBuf, 3.4, false, [40, 40, 40], 1.5)
+    field('CONC', conc, { bold: true })
+    field('CAS',  item.cas, { mono: true })
+    field('MW',   mw)
+    field('LOC',  loc)
+    field('BUF',  phBuf)
+
+    // Identifier code — monospace, anchored to the bottom like a catalog / lot number
+    if (item.code) {
+        doc.setFont('courier', 'bold'); doc.setFontSize(s >= 1.5 ? 5.4 : 3.9); doc.setTextColor(10, 10, 10)
+        doc.text(String(item.code), px, y + h - 1.1 * s)
+    }
 }
 
 const generateLabelsPDF = () => {

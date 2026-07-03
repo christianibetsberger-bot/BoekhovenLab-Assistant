@@ -412,6 +412,12 @@ const renderDnaLabel = (doc, item, x, y, w, h) => {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(4 * s); doc.setTextColor(20, 20, 20)
     if (concStr) { doc.text(concStr, px, cy); cy += lineMM(4 * s) + 0.3 * s }
 
+    const loc = [item.location, item.sublocation].filter(v => v != null && v !== '').join(' / ')
+    if (loc) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(3.3 * s); doc.setTextColor(90, 90, 90)
+        doc.text(doc.splitTextToSize(loc, maxW)[0], px, cy); cy += lineMM(3.3 * s) + 0.2 * s
+    }
+
     const seq = cleanSeqForLabel(item.sequence)
     if (seq) {
         doc.setFont('courier', 'normal'); doc.setFontSize(3.5 * s); doc.setTextColor(40, 40, 40)
@@ -467,18 +473,23 @@ const renderChemLabel = (doc, item, x, y, w, h) => {
     const conc = (item.stock != null && item.stock !== '') ? `${item.stock} ${item.stockUnit || 'µM'}` : ''
     const mw   = (item.mw || item.manualMw) ? `${store.formatNum ? store.formatNum(item.mw || item.manualMw) : Math.round(item.mw || item.manualMw)} Da` : ''
     const loc  = [item.location, item.sublocation].filter(v => v != null && v !== '').join(' / ')
-    const solventLine = [solventText(item), (item.pH != null && item.pH !== '') ? `pH ${item.pH}` : ''].filter(Boolean).join(', ')
+    // Measured pH (2 decimals) takes precedence over the nominal pH. jsPDF's core fonts
+    // don't carry ⁺/⁻ superscript glyphs, so use plain ASCII Na+ / Cl- on the label.
+    const phVal = (item.measuredPH != null && item.measuredPH !== '') ? Number(item.measuredPH).toFixed(2)
+                : (item.pH != null && item.pH !== '') ? item.pH : ''
+    const solventLine = [solventText(item), phVal ? `pH ${phVal}` : ''].filter(Boolean).join(', ')
     const saltLine = [
-        (item.naConc != null && item.naConc !== '') ? `Na⁺ ${item.naConc} mM` : '',
-        (item.clConc != null && item.clConc !== '') ? `Cl⁻ ${item.clConc} mM` : '',
+        (item.naConc != null && item.naConc !== '') ? `Na+ ${item.naConc} mM` : '',
+        (item.clConc != null && item.clConc !== '') ? `Cl- ${item.clConc} mM` : '',
     ].filter(Boolean).join(', ')
 
     field('CONC', conc, { bold: true })
+    field('LOC',  loc)
     field('SOLV', solventLine)
     field('SALT', saltLine)
-    field('LOC',  loc)
     field('MW',   mw)
     field('CAS',  item.cas, { mono: true })
+    field('LOT',  item.lotNum, { mono: true })
 
     // Identifier code — monospace, anchored to the bottom like a catalog / lot number
     if (item.code) {
@@ -589,8 +600,10 @@ const generateLabelsPDF = () => {
                     <p style="margin: 0;"><strong>Code:</strong> {{ viewingItem.code }}</p>
                 </div>
                 <div class="grid-2" style="background: var(--panel-bg); padding: 15px; border-radius: var(--radius); border: 1px solid var(--border); margin-top: 15px;">
+                    <div><strong>Location:</strong><br> <input type="text" v-model="viewingItem.location" placeholder="e.g. Freezer A" style="padding: 4px; margin-top: 4px; width: 100%;"></div>
                     <div><strong>Sub-location:</strong><br> <input type="text" v-model="viewingItem.sublocation" placeholder="e.g. Box 2" style="padding: 4px; margin-top: 4px; width: 100%;"></div>
                     <div><strong>Catalog Number:</strong><br> <input type="text" v-model="viewingItem.catalogNum" placeholder="e.g. C1234" style="padding: 4px; margin-top: 4px; width: 100%;"></div>
+                    <div><strong>Lot Number:</strong><br> <input type="text" v-model="viewingItem.lotNum" placeholder="e.g. L-2024-07" style="padding: 4px; margin-top: 4px; width: 100%;"></div>
                     <div><strong>Unit Size:</strong><br> <input type="text" v-model="viewingItem.unitSize" placeholder="e.g. 500g" style="padding: 4px; margin-top: 4px; width: 100%;"></div>
                     <div><strong>CAS Number:</strong><br> <input type="text" v-model="viewingItem.cas" placeholder="e.g. 50-00-0" style="padding: 4px; margin-top: 4px; width: 100%;"></div>
                 </div>
@@ -599,6 +612,12 @@ const generateLabelsPDF = () => {
                 <div class="input-group" style="margin: 0; width: 100px;">
                     <label>pH</label>
                     <input type="number" step="any" v-model.number="viewingItem.pH" placeholder="e.g. 7.4" style="padding: 4px; width: 100%;">
+                </div>
+                <div class="input-group" style="margin: 0; width: 120px;">
+                    <label>Measured pH</label>
+                    <input type="number" step="0.01" v-model.number="viewingItem.measuredPH"
+                        @change="viewingItem.measuredPH != null && viewingItem.measuredPH !== '' && (viewingItem.measuredPH = parseFloat(Number(viewingItem.measuredPH).toFixed(2)))"
+                        placeholder="e.g. 7.42" style="padding: 4px; width: 100%;">
                 </div>
                 <div class="input-group" style="margin: 0; width: 120px;">
                     <label>Dissolved in</label>

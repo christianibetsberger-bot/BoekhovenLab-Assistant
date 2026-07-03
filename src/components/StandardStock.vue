@@ -112,6 +112,34 @@ const bufferWarning = computed(() => {
     return ''
 })
 
+// ── pH adjustment salt load ─────────────────────────────────────────────────────
+// pH-adjusting with NaOH introduces Na⁺; with HCl introduces Cl⁻. The added ion ends up
+// in the final stock volume, so its concentration = (titrant conc × titrant volume) / Vtotal.
+// Salt-sensitive assays need this recorded.
+const naAddedM = computed(() => {
+    if (!store.stdCalc.phAdjusted) return 0
+    const Vt = stdTotalVolumeL.value
+    if (!Vt || !store.stdCalc.naohConc || !store.stdCalc.naohVol) return 0
+    const molesNaOH = (store.stdCalc.naohConc * (UNIT_MULT[store.stdCalc.naohConcUnit] ?? 1)) * (store.stdCalc.naohVol * store.stdCalc.naohVolUnit)
+    return molesNaOH / Vt
+})
+const clAddedM = computed(() => {
+    if (!store.stdCalc.phAdjusted) return 0
+    const Vt = stdTotalVolumeL.value
+    if (!Vt || !store.stdCalc.hclConc || !store.stdCalc.hclVol) return 0
+    const molesHCl = (store.stdCalc.hclConc * (UNIT_MULT[store.stdCalc.hclConcUnit] ?? 1)) * (store.stdCalc.hclVol * store.stdCalc.hclVolUnit)
+    return molesHCl / Vt
+})
+// Human-friendly molar-concentration formatter (mM by default, µM when tiny).
+const fmtConc = (M) => {
+    if (M == null || !isFinite(M) || M <= 0) return '—'
+    if (M >= 1) return store.formatNum(M) + ' M'
+    if (M >= 1e-3) return store.formatNum(M * 1e3) + ' mM'
+    return store.formatNum(M * 1e6) + ' µM'
+}
+const naConcMM = computed(() => naAddedM.value * 1e3)   // stored numerically in mM
+const clConcMM = computed(() => clAddedM.value * 1e3)
+
 // Build the preparation summary stored on the inventory item's notes/info field.
 const buildStockNotes = () => {
     const lines = ['Prepared with Standard Stock Calculator'];
@@ -129,6 +157,12 @@ const buildStockNotes = () => {
         if (fillWaterVolumeL.value != null) lines.push(`Water volume: ${fmtVol(fillWaterVolumeL.value)}`);
     }
     if (store.stdCalc.pH != null && store.stdCalc.pH !== '') lines.push(`pH: ${store.stdCalc.pH}`);
+    if (store.stdCalc.phAdjusted) {
+        const salts = [];
+        if (naAddedM.value > 0) salts.push(`Na⁺ ${fmtConc(naAddedM.value)} (NaOH)`);
+        if (clAddedM.value > 0) salts.push(`Cl⁻ ${fmtConc(clAddedM.value)} (HCl)`);
+        if (salts.length) lines.push(`pH-adjustment salt: ${salts.join(', ')}`);
+    }
     return lines.join('\n');
 }
 
@@ -160,6 +194,8 @@ const saveStdToInventory = () => {
         pH: (store.stdCalc.pH != null && store.stdCalc.pH !== '') ? store.stdCalc.pH : null,
         buffer: bufferStr,
         diluent: store.stdCalc.diluent,
+        naConc: (store.stdCalc.phAdjusted && naConcMM.value > 0) ? parseFloat(store.formatNum(naConcMM.value)) : null,
+        clConc: (store.stdCalc.phAdjusted && clConcMM.value > 0) ? parseFloat(store.formatNum(clConcMM.value)) : null,
         scope: saveScope.value
     };
     store.inventory.unshift(newItem);
@@ -285,6 +321,72 @@ const saveStdToInventory = () => {
         </div>
         <p v-if="bufferWarning" style="margin: 0; font-size: 0.78rem; color: #ef4444; display: flex; align-items: center; gap: 6px;">
             <i class="fas fa-triangle-exclamation"></i> {{ bufferWarning }}
+        </p>
+    </div>
+
+    <!-- pH adjustment: NaOH / HCl add Na⁺ / Cl⁻ salt to the stock -->
+    <div style="margin-bottom: 10px;">
+        <label class="checkbox-label" style="font-size: 0.85rem; font-weight: bold;">
+            <input type="checkbox" v-model="store.stdCalc.phAdjusted"> pH-adjusted with NaOH / HCl (calculate added salt)
+        </label>
+    </div>
+
+    <div v-if="store.stdCalc.phAdjusted" style="background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px;">
+        <p style="margin: 0; font-size: 0.75rem; opacity: 0.7;">
+            Enter the titrant concentration and the volume added while adjusting pH. The resulting Na⁺ / Cl⁻ concentration in the final stock is computed and saved with the stock.
+        </p>
+        <div class="grid-2">
+            <div class="input-group" style="margin: 0;">
+                <label>NaOH added (→ Na⁺)</label>
+                <div style="display: flex; gap: 6px;">
+                    <div class="input-with-select" style="flex: 1;">
+                        <input type="number" step="any" v-model.number="store.stdCalc.naohConc" placeholder="conc">
+                        <select v-model="store.stdCalc.naohConcUnit" style="width: 60px;">
+                            <option value="M">M</option>
+                            <option value="mM">mM</option>
+                        </select>
+                    </div>
+                    <div class="input-with-select" style="flex: 1;">
+                        <input type="number" step="any" v-model.number="store.stdCalc.naohVol" placeholder="vol">
+                        <select v-model="store.stdCalc.naohVolUnit" style="width: 60px;">
+                            <option :value="0.001">mL</option>
+                            <option :value="0.000001">µL</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="input-group" style="margin: 0;">
+                <label>HCl added (→ Cl⁻)</label>
+                <div style="display: flex; gap: 6px;">
+                    <div class="input-with-select" style="flex: 1;">
+                        <input type="number" step="any" v-model.number="store.stdCalc.hclConc" placeholder="conc">
+                        <select v-model="store.stdCalc.hclConcUnit" style="width: 60px;">
+                            <option value="M">M</option>
+                            <option value="mM">mM</option>
+                        </select>
+                    </div>
+                    <div class="input-with-select" style="flex: 1;">
+                        <input type="number" step="any" v-model.number="store.stdCalc.hclVol" placeholder="vol">
+                        <select v-model="store.stdCalc.hclVolUnit" style="width: 60px;">
+                            <option :value="0.001">mL</option>
+                            <option :value="0.000001">µL</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div v-if="stdTotalVolumeL && (naAddedM > 0 || clAddedM > 0)" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div style="background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; text-align: center;">
+                <div style="font-size: 0.72rem; opacity: 0.65; text-transform: uppercase; letter-spacing: 0.03em;">Na⁺ concentration</div>
+                <div style="font-size: 1.1rem; font-weight: bold; color: var(--primary);">{{ fmtConc(naAddedM) }}</div>
+            </div>
+            <div style="background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; text-align: center;">
+                <div style="font-size: 0.72rem; opacity: 0.65; text-transform: uppercase; letter-spacing: 0.03em;">Cl⁻ concentration</div>
+                <div style="font-size: 1.1rem; font-weight: bold; color: var(--primary);">{{ fmtConc(clAddedM) }}</div>
+            </div>
+        </div>
+        <p v-else-if="!stdTotalVolumeL" style="margin: 0; font-size: 0.75rem; color: #f59e0b;">
+            <i class="fas fa-info-circle"></i> Enter molar mass, amount and target concentration first to compute the total volume.
         </p>
     </div>
 

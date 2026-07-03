@@ -468,9 +468,14 @@ const renderChemLabel = (doc, item, x, y, w, h) => {
     const mw   = (item.mw || item.manualMw) ? `${store.formatNum ? store.formatNum(item.mw || item.manualMw) : Math.round(item.mw || item.manualMw)} Da` : ''
     const loc  = [item.location, item.sublocation].filter(v => v != null && v !== '').join(' / ')
     const solventLine = [solventText(item), (item.pH != null && item.pH !== '') ? `pH ${item.pH}` : ''].filter(Boolean).join(', ')
+    const saltLine = [
+        (item.naConc != null && item.naConc !== '') ? `Na⁺ ${item.naConc} mM` : '',
+        (item.clConc != null && item.clConc !== '') ? `Cl⁻ ${item.clConc} mM` : '',
+    ].filter(Boolean).join(', ')
 
     field('CONC', conc, { bold: true })
     field('SOLV', solventLine)
+    field('SALT', saltLine)
     field('LOC',  loc)
     field('MW',   mw)
     field('CAS',  item.cas, { mono: true })
@@ -607,9 +612,19 @@ const generateLabelsPDF = () => {
                     <input type="text" v-model="viewingItem.buffer" :disabled="viewingItem.diluent === 'water'" placeholder="e.g. 50 mM Tris, pH 7.5" style="padding: 4px; width: 100%;">
                 </div>
             </div>
+            <div style="display: flex; gap: 12px; align-items: flex-end; margin-top: 12px;">
+                <div class="input-group" style="margin: 0; flex: 1;">
+                    <label>Na⁺ from pH adj. (mM)</label>
+                    <input type="number" step="any" v-model.number="viewingItem.naConc" placeholder="e.g. 15" style="padding: 4px; width: 100%;">
+                </div>
+                <div class="input-group" style="margin: 0; flex: 1;">
+                    <label>Cl⁻ from pH adj. (mM)</label>
+                    <input type="number" step="any" v-model.number="viewingItem.clConc" placeholder="e.g. 10" style="padding: 4px; width: 100%;">
+                </div>
+            </div>
             <div class="input-group" style="margin-top: 12px;">
                 <label>Notes / Prep Info</label>
-                <textarea v-model="viewingItem.notes" rows="5" placeholder="Preparation details — total volume, buffer, fill-up water, pH, …" style="width: 100%; font-size: 0.8rem;"></textarea>
+                <textarea v-model="viewingItem.notes" rows="5" placeholder="Preparation details — total volume, buffer, fill-up water, pH, salt load, …" style="width: 100%; font-size: 0.8rem;"></textarea>
             </div>
             <button @click="store.saveItemToCloud(viewingItem); viewingItem = null" style="margin-top: 20px; width: 100%;">Save & Close</button>
         </div>
@@ -713,7 +728,7 @@ const generateLabelsPDF = () => {
               >{{ sz.name }}<div style="font-size: 0.62rem; font-weight: 400; opacity: 0.75;">{{ sz.tw }} × {{ sz.th }} mm · {{ sz.cols * sz.rows * 12 }}/pg</div></div>
             </div>
             <div style="font-size: 0.68rem; opacity: 0.55; margin-bottom: 16px; line-height: 1.5;">
-              DNA / RNA items keep their sequence layout; all other classes print name, conc, solvent/buffer, location, MW, CAS, pH &amp; code.
+              DNA / RNA items keep their sequence layout; all other classes print name, conc, solvent/buffer, Na⁺/Cl⁻ salt, location, MW, CAS, pH &amp; code.
             </div>
 
             <!-- HERMA picker -->

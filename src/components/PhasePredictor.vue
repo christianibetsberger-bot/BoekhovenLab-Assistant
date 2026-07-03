@@ -586,6 +586,14 @@
               <span v-if="boundaryData" style="font-size: 0.75rem; opacity: 0.7;">
                 {{ boundaryData.n_labeled }} pts · phases {{ boundaryData.phases_used?.join(', ') }}
               </span>
+              <div class="color-mode-toggle" title="Distinct hues for independent phases (coacervates, aggregates…); a light→dark intensity ramp for gradations of one phase. Clear is always red.">
+                <button type="button" :class="{ active: colorMode === 'categorical' }" @click="colorMode = 'categorical'">
+                  <i class="fas fa-palette"></i> Distinct
+                </button>
+                <button type="button" :class="{ active: colorMode === 'gradient' }" @click="colorMode = 'gradient'">
+                  <i class="fas fa-sliders"></i> Gradient
+                </button>
+              </div>
               <label v-if="boundaryData" class="checkbox-label">
                 <input type="checkbox" v-model="showBoundary" @change="renderPlot"> Show Phase Boundaries
               </label>
@@ -894,9 +902,31 @@ const phaseColors = {
 const phaseNames = {
     0: 'Clear (0)', 1: 'Phase 1', 2: 'Phase 2', 3: 'Phase 3', 4: 'Phase 4'
 };
+
+// Colour scheme for the data points.
+//  · 'categorical' — a distinct hue per phase (for independent phases: coacervates, aggregates…).
+//  · 'gradient'    — a single-hue intensity ramp across phases (for gradations of one phase).
+// RULES: Clear (phase 0) is ALWAYS red; no other phase may be red.
+const colorMode = ref('categorical');
+
+// Gradient ramp used for phases 1‥4 in 'gradient' mode. Runs light-teal → deep-violet,
+// deliberately avoiding red (reserved for Clear). Values are [r,g,b].
+const GRADIENT_START = [125, 211, 252]; // sky-300
+const GRADIENT_END   = [76, 29, 149];   // violet-900
+const gradientColorFor = (phase) => {
+    const maxP = 4;
+    const p = Math.min(Math.max(phase, 1), maxP);
+    const t = maxP > 1 ? (p - 1) / (maxP - 1) : 0;
+    const c = i => Math.round(GRADIENT_START[i] + (GRADIENT_END[i] - GRADIENT_START[i]) * t);
+    return `rgba(${c(0)}, ${c(1)}, ${c(2)}, 1)`;
+};
 const getPhaseColor = (phase, alpha = 1) => {
     if (phase === undefined || phase === null) return 'transparent';
-    let rgb = phaseColors[phase] || 'rgba(148, 163, 184, 1)'; 
+    let rgb;
+    if (phase === 0) rgb = 'rgba(239, 68, 68, 1)';          // Clear — always red
+    else if (phase === -1) rgb = 'rgba(59, 130, 246, 1)';    // Untested / AI target
+    else if (colorMode.value === 'gradient' && phase >= 1) rgb = gradientColorFor(phase);
+    else rgb = phaseColors[phase] || 'rgba(148, 163, 184, 1)';
     return rgb.replace('1)', `${alpha})`);
 };
 
@@ -1371,11 +1401,11 @@ const renderPlot = () => {
 
   const classTraces = {};
   for(let i=0; i<=4; i++) {
-      classTraces[i] = { type: 'scatter3d', mode: 'markers', x:[], y:[], z:[], text:[], name: phaseNames[i], marker: {color: phaseColors[i], size: 5, symbol: 'circle', line: {color: '#000', width: 1}} };
+      classTraces[i] = { type: 'scatter3d', mode: 'markers', x:[], y:[], z:[], text:[], name: phaseNames[i], marker: {color: getPhaseColor(i), size: 5, symbol: 'circle', line: {color: '#000', width: 1}} };
   }
   
   const traceUnknown = { type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], name: 'Untested', marker: { color: '#94a3b8', size: 2, symbol: 'circle' } };
-  const traceTarget = { type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], name: 'AI Target', marker: { color: phaseColors[-1], size: 4, symbol: 'cross', line: { color: '#fff', width: 1 } } };
+  const traceTarget = { type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], name: 'AI Target', marker: { color: getPhaseColor(-1), size: 4, symbol: 'cross', line: { color: '#fff', width: 1 } } };
 
   const allData = [...experiments.value, ...suggestions.value]
 
@@ -1422,7 +1452,7 @@ const renderPlot = () => {
           const maxProb = Math.max(...rawProb);
           if (maxProb < 0.3) return;
 
-          const baseColor = phaseColors[pId] || 'rgba(148, 163, 184, 1)';
+          const baseColor = getPhaseColor(pId);
           const transparentColor = baseColor.replace('1)', '0.0)');
           const cScale = [ [0, transparentColor], [1, baseColor] ];
 
@@ -1483,12 +1513,12 @@ const render2DPlot = () => {
   const classTraces = {}
   for (let i = 0; i <= 4; i++) {
     classTraces[i] = { type: 'scatter', mode: 'markers', x: [], y: [], text: [], name: phaseNames[i],
-      marker: { color: phaseColors[i], size: 8, symbol: 'circle', line: { color: '#fff', width: 0.5 } } }
+      marker: { color: getPhaseColor(i), size: 8, symbol: 'circle', line: { color: '#fff', width: 0.5 } } }
   }
   const traceUnknown = { type: 'scatter', mode: 'markers', x: [], y: [], text: [], name: 'Untested',
     marker: { color: '#94a3b8', size: 4, symbol: 'circle' } }
   const traceTarget = { type: 'scatter', mode: 'markers', x: [], y: [], text: [], name: 'AI Target',
-    marker: { color: phaseColors[-1], size: 7, symbol: 'cross', line: { color: '#fff', width: 1 } } }
+    marker: { color: getPhaseColor(-1), size: 7, symbol: 'cross', line: { color: '#fff', width: 1 } } }
 
   const allData = [...experiments.value, ...suggestions.value]
   allData.forEach(exp => {
@@ -1537,7 +1567,7 @@ const render2DPlot = () => {
       for (const i of sliceIdx) probMap[`${bxArr[i]}_${byArr[i]}`] = rawProb[i]
       const zGrid = uniqueY.map(yv => uniqueX.map(xv => probMap[`${xv}_${yv}`] ?? 0))
 
-      const baseColor = phaseColors[pId] || 'rgba(148, 163, 184, 1)'
+      const baseColor = getPhaseColor(pId)
       traces2d.unshift({
         type: 'heatmap',
         x: uniqueX,
@@ -1567,6 +1597,7 @@ const render2DPlot = () => {
 }
 
 watch([experiments, suggestions, config, currentDSlice], () => { renderPlot() }, { deep: true })
+watch(colorMode, () => { renderPlot() })
 
 // When the 4th component is toggled on, snap the D slice to the midpoint of its range.
 watch(() => config.value.enableCompD, (on) => {
@@ -2202,6 +2233,12 @@ onMounted(async () => {
 
 <style scoped>
 .module-card { display: flex; flex-direction: column; gap: 10px; }
+
+/* Point-colour mode toggle (Distinct hues vs. intensity Gradient) */
+.color-mode-toggle { display: inline-flex; border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px; overflow: hidden; }
+.color-mode-toggle button { background: transparent; border: none; padding: 3px 9px; font-size: 0.72rem; cursor: pointer; color: inherit; opacity: 0.7; display: flex; align-items: center; gap: 4px; }
+.color-mode-toggle button + button { border-left: 1px solid var(--border-color, #cbd5e1); }
+.color-mode-toggle button.active { background: var(--primary, #3b82f6); color: #fff; opacity: 1; }
 
 /* 2-Column Condensed Grid */
 .layout-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }

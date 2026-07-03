@@ -27,6 +27,9 @@ export const useLabStore = defineStore('lab', {
     dnaCalc: { a260: null, sequence: '', manualMw: null, saveCode: '', saveName: '', saveClass: 'DNA', type: 'DNA', pathLength: 0.05 },
     
     inventory: [],
+    // Predefined storage locations. Global ones are shared with everyone; Personal ones
+    // are only visible to their creator. Each: { id, name, scope, owner_id }.
+    locations: [],
     sourceLabwares: [
         { uuid: 'eda1c3ac-a089-4244-b0bc-9e5beb322475', name: '0.5 mL DNA LoBind microtube' },
         { uuid: '201812180800', name: '1.5 mL Fisherbrand Premium microtube' },
@@ -139,6 +142,9 @@ export const useLabStore = defineStore('lab', {
           this.archivedKinetics = allKin.filter(k => k.scope === 'Archived');
       }
 
+      // 7. Load predefined storage locations (global + own personal)
+      await this.loadCloudLocations();
+
       // Restore local workspace drafts — unsaved items and unsaved changes survive refresh
       const draftRaw = localStorage.getItem(`lab_local_drafts_${this.user.id}`);
       if (draftRaw) {
@@ -168,6 +174,56 @@ export const useLabStore = defineStore('lab', {
     async deleteItemFromCloud(itemId) {
       if (!this.user) return;
       await db.from('inventory').delete().eq('item_id', String(itemId));
+    },
+
+    // --- STORAGE LOCATIONS ---
+    // Locations the current user may pick: every Global one plus their own Personal ones.
+    visibleLocations() {
+      return this.locations
+        .filter(l => (l.scope || 'Global') === 'Global' || l.owner_id === this.user?.id)
+        .slice()
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    },
+
+    async loadCloudLocations() {
+      if (!this.user) return;
+      const { data } = await db.from('locations').select('*');
+      if (data) this.locations = data.map(row => { const o = row.item_data; o.owner_id = row.owner_id; return o; });
+    },
+
+    async saveLocationToCloud(loc) {
+      if (!this.user) return false;
+      const plain = JSON.parse(JSON.stringify(loc));
+      const payload = { item_id: String(plain.id), owner_id: this.user.id, scope: plain.scope || 'Global', item_data: plain };
+      const { error } = await db.from('locations').upsert(payload, { onConflict: 'item_id' });
+      if (error) { alert('Error saving location: ' + error.message); return false; }
+      return true;
+    },
+
+    async addLocation(name, scope = 'Global') {
+      name = (name || '').trim();
+      if (!name || !this.user) return;
+      // Avoid duplicates among the locations this user can already see.
+      if (this.visibleLocations().some(l => (l.name || '').toLowerCase() === name.toLowerCase())) return;
+      const loc = { id: 'loc_' + crypto.randomUUID(), name, scope, owner_id: this.user.id };
+      this.locations.push(loc);
+      await this.saveLocationToCloud(loc);
+    },
+
+    async deleteLocation(id) {
+      if (!this.user) return;
+      const { error } = await db.from('locations').delete().eq('item_id', String(id));
+      if (error) { alert('Permission denied: you can only delete your own locations.'); return; }
+      this.locations = this.locations.filter(l => l.id !== id);
+    },
+
+    // When a stock is promoted to Global, its Personal location (if the user owns it) is
+    // promoted to Global too, so the stock's location stays visible to everyone.
+    async promoteLocationToGlobal(name) {
+      if (!this.user || !name) return;
+      const loc = this.locations.find(l =>
+        l.name === name && (l.scope || 'Global') === 'Personal' && l.owner_id === this.user.id);
+      if (loc) { loc.scope = 'Global'; await this.saveLocationToCloud(loc); }
     },
 
     async saveToCloud(tableName, payloadData) {

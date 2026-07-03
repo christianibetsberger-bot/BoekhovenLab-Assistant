@@ -40,7 +40,30 @@ const updateManualSequence = (item) => {
 }
 
 const viewProperties = (item) => { viewingItem.value = item; }
-const toggleScope = (item) => { item.scope = (item.scope || 'Global') === 'Personal' ? 'Global' : 'Personal'; store.saveItemToCloud(item); }
+const toggleScope = (item) => {
+    item.scope = (item.scope || 'Global') === 'Personal' ? 'Global' : 'Personal';
+    // Promoting a stock to Global promotes its Personal location to Global too.
+    if (item.scope === 'Global' && item.location) store.promoteLocationToGlobal(item.location);
+    store.saveItemToCloud(item);
+}
+
+// --- Storage locations ---
+const locationOptions = computed(() => store.visibleLocations())
+const showLocationManager = ref(false)
+const newLocationName = ref('')
+const newLocationScope = ref('Global')
+const addNewLocation = async () => {
+    const name = newLocationName.value.trim()
+    if (!name) return
+    await store.addLocation(name, newLocationScope.value)
+    newLocationName.value = ''
+}
+const saveViewingItem = () => {
+    if (viewingItem.value.scope === 'Global' && viewingItem.value.location)
+        store.promoteLocationToGlobal(viewingItem.value.location)
+    store.saveItemToCloud(viewingItem.value)
+    viewingItem.value = null
+}
 const addInventoryItem = () => {
     const newItem = { id: 'inv_' + crypto.randomUUID(), code: 'NEW', cas: '', itemClass: 'Other', name: 'New Stock', stock: 100, stockUnit: 'µM', location: '', sequence: '', oligoType: 'DNA', manualMw: null, tm: 0, scope: inventoryMode.value };
     store.inventory.unshift(newItem);
@@ -600,7 +623,16 @@ const generateLabelsPDF = () => {
                     <p style="margin: 0;"><strong>Code:</strong> {{ viewingItem.code }}</p>
                 </div>
                 <div class="grid-2" style="background: var(--panel-bg); padding: 15px; border-radius: var(--radius); border: 1px solid var(--border); margin-top: 15px;">
-                    <div><strong>Location:</strong><br> <input type="text" v-model="viewingItem.location" placeholder="e.g. Freezer A" style="padding: 4px; margin-top: 4px; width: 100%;"></div>
+                    <div><strong>Location:</strong><br>
+                        <div style="display: flex; gap: 4px; margin-top: 4px;">
+                            <select v-model="viewingItem.location" style="padding: 4px; flex: 1; min-width: 0;">
+                                <option value="">— none —</option>
+                                <option v-if="viewingItem.location && !locationOptions.some(l => l.name === viewingItem.location)" :value="viewingItem.location">{{ viewingItem.location }}</option>
+                                <option v-for="l in locationOptions" :key="l.id" :value="l.name">{{ l.name }}{{ (l.scope || 'Global') === 'Personal' ? ' (personal)' : '' }}</option>
+                            </select>
+                            <button class="secondary small" @click="showLocationManager = true" title="Manage locations" style="padding: 4px 8px;"><i class="fas fa-cog"></i></button>
+                        </div>
+                    </div>
                     <div><strong>Sub-location:</strong><br> <input type="text" v-model="viewingItem.sublocation" placeholder="e.g. Box 2" style="padding: 4px; margin-top: 4px; width: 100%;"></div>
                     <div><strong>Catalog Number:</strong><br> <input type="text" v-model="viewingItem.catalogNum" placeholder="e.g. C1234" style="padding: 4px; margin-top: 4px; width: 100%;"></div>
                     <div><strong>Lot Number:</strong><br> <input type="text" v-model="viewingItem.lotNum" placeholder="e.g. L-2024-07" style="padding: 4px; margin-top: 4px; width: 100%;"></div>
@@ -645,7 +677,36 @@ const generateLabelsPDF = () => {
                 <label>Notes / Prep Info</label>
                 <textarea v-model="viewingItem.notes" rows="5" placeholder="Preparation details — total volume, buffer, fill-up water, pH, salt load, …" style="width: 100%; font-size: 0.8rem;"></textarea>
             </div>
-            <button @click="store.saveItemToCloud(viewingItem); viewingItem = null" style="margin-top: 20px; width: 100%;">Save & Close</button>
+            <button @click="saveViewingItem" style="margin-top: 20px; width: 100%;">Save & Close</button>
+        </div>
+    </div>
+
+    <!-- ── Location manager modal ─────────────────────────────────────────── -->
+    <div v-if="showLocationManager" style="position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1100;" @click.self="showLocationManager = false">
+        <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); width: 92%; max-width: 460px; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; padding: 20px;">
+            <h3 style="margin-top: 0; color: var(--primary);"><i class="fas fa-map-marker-alt"></i> Storage Locations</h3>
+            <p style="font-size: 0.78rem; opacity: 0.7; margin: 0 0 12px;">Global locations are shared with everyone; personal ones are visible only to you.</p>
+            <div style="display: flex; gap: 6px; align-items: flex-end; margin-bottom: 12px;">
+                <div class="input-group" style="margin: 0; flex: 1;">
+                    <label style="text-transform: none;">New location</label>
+                    <input type="text" v-model="newLocationName" placeholder="e.g. Freezer −20 °C" @keyup.enter="addNewLocation" style="padding: 5px; width: 100%;">
+                </div>
+                <select v-model="newLocationScope" style="padding: 6px;">
+                    <option value="Global">Global</option>
+                    <option value="Personal">Personal</option>
+                </select>
+                <button class="small" @click="addNewLocation" :disabled="!newLocationName.trim()" style="padding: 6px 12px;"><i class="fas fa-plus"></i> Add</button>
+            </div>
+            <div style="overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius);">
+                <div v-if="locationOptions.length === 0" style="padding: 12px; text-align: center; opacity: 0.6; font-size: 0.85rem;">No locations yet.</div>
+                <div v-for="l in locationOptions" :key="l.id" style="display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-bottom: 1px solid var(--border);">
+                    <span>{{ l.name }}
+                        <span :style="{ marginLeft: '6px', padding: '1px 6px', borderRadius: '3px', fontSize: '0.68rem', background: (l.scope||'Global')==='Global' ? 'rgba(59,130,246,0.18)' : 'rgba(148,163,184,0.18)' }">{{ (l.scope || 'Global') === 'Global' ? 'Global' : 'Personal' }}</span>
+                    </span>
+                    <button v-if="l.owner_id === store.user?.id" class="secondary small" @click="store.deleteLocation(l.id)" title="Delete (creator only)" style="padding: 3px 8px; color: #ef4444;"><i class="fas fa-trash"></i></button>
+                </div>
+            </div>
+            <button @click="showLocationManager = false" style="margin-top: 16px; width: 100%;">Done</button>
         </div>
     </div>
 
@@ -891,7 +952,13 @@ const generateLabelsPDF = () => {
                                 </select>
                             </div>
                         </td>
-                        <td><input type="text" v-model="item.location" placeholder="e.g., Box 1" @blur="store.saveItemToCloud(item)" style="width: 100px; padding: 6px;"></td>
+                        <td>
+                            <select v-model="item.location" @change="(item.scope === 'Global' && item.location ? store.promoteLocationToGlobal(item.location) : null), store.saveItemToCloud(item)" style="width: 110px; padding: 6px;">
+                                <option value="">— none —</option>
+                                <option v-if="item.location && !locationOptions.some(l => l.name === item.location)" :value="item.location">{{ item.location }}</option>
+                                <option v-for="l in locationOptions" :key="l.id" :value="l.name">{{ l.name }}</option>
+                            </select>
+                        </td>
                         <td style="white-space: nowrap;">
                             <button class="secondary small" @click="toggleScope(item)" :title="(item.scope || 'Global') === 'Personal' ? 'Move to Global' : 'Move to Personal'" style="margin-right: 5px;">
                                 <i class="fas" :class="(item.scope || 'Global') === 'Personal' ? 'fa-globe' : 'fa-user'"></i>
@@ -915,6 +982,9 @@ const generateLabelsPDF = () => {
             </button>
             <button @click="showLabelModal = true" style="flex-grow: 1; height: 40px;">
                 <i class="fas fa-tag"></i> Print Labels
+            </button>
+            <button @click="showLocationManager = true" style="flex-grow: 1; height: 40px;">
+                <i class="fas fa-map-marker-alt"></i> Locations
             </button>
             <input type="file" ref="excelUpload" @change="importInventory" accept=".xlsx, .xls, .csv, .txt" style="display: none;">
         </div>

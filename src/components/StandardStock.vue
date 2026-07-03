@@ -134,10 +134,16 @@ const buildStockNotes = () => {
 
 // Save Method
 const saveStdToInventory = () => {
-    const bufSrc = store.inventory.find(i => i.id === store.stdCalc.bufferItemId)
-    const bufferStr = (store.stdCalc.diluent === 'buffer' && store.stdCalc.bufferTargetConc)
-        ? `${store.formatNum(store.stdCalc.bufferTargetConc)} ${store.stdCalc.bufferTargetUnit}${bufSrc ? ' ' + bufSrc.name : ''}`
-        : null
+    // Record the buffer whenever the stock was prepared in buffer — capture whatever the
+    // user gave (concentration and/or the buffer's name) rather than requiring all of it.
+    let bufferStr = null
+    if (store.stdCalc.diluent === 'buffer') {
+        const bufSrc = store.inventory.find(i => i.id === store.stdCalc.bufferItemId)
+        const parts = []
+        if (store.stdCalc.bufferTargetConc) parts.push(`${store.formatNum(store.stdCalc.bufferTargetConc)} ${store.stdCalc.bufferTargetUnit}`)
+        if (bufSrc) parts.push(bufSrc.name)
+        bufferStr = parts.join(' ') || 'buffer'
+    }
     const newItem = {
         id: 'std_' + crypto.randomUUID(),
         code: store.stdCalc.saveCode || 'STD',
@@ -153,6 +159,7 @@ const saveStdToInventory = () => {
         notes: buildStockNotes(),
         pH: (store.stdCalc.pH != null && store.stdCalc.pH !== '') ? store.stdCalc.pH : null,
         buffer: bufferStr,
+        diluent: store.stdCalc.diluent,
         scope: saveScope.value
     };
     store.inventory.unshift(newItem);

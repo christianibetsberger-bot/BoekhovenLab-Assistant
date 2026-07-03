@@ -315,15 +315,18 @@ const printerXShift   = ref(0)    // mm
 const printerYShift   = ref(0)    // mm
 const labelSearch     = ref('')
 const labelDragFrom   = ref(null)
-const labelSize       = ref('small')   // 'small' = 0.5 mL eppi (24×13), 'large' = 2×2 (48×26)
+const labelSize       = ref('eppi05')
 
-// Label grid geometry within a HERMA 4363 master block, by chosen size.
-// Both sizes share the same die-cut origin so a large label tiles 2×2 small cells.
-const labelGeom = computed(() =>
-    labelSize.value === 'large'
-        ? { tw: 48, th: 26, cols: 2, rows: 1 }   // 2 per master
-        : { tw: 24, th: 13, cols: 4, rows: 3 }   // 12 per master
-)
+// Label formats for common tube types. Each tiles the HERMA 4363 master block's
+// 96×39 mm printable area exactly (whole numbers of the 24×13 mm die-cut cells),
+// so labels always line up with the sheet's cut lines.
+const LABEL_SIZES = {
+    eppi05:   { name: '0.5 mL eppi',  tw: 24, th: 13, cols: 4, rows: 3 },  // 12 / block
+    eppi15:   { name: '1.5 mL eppi',  tw: 48, th: 13, cols: 2, rows: 3 },  //  6 / block
+    falcon15: { name: '15 mL falcon', tw: 48, th: 39, cols: 2, rows: 1 },  //  2 / block
+    falcon50: { name: '50 mL falcon', tw: 96, th: 39, cols: 1, rows: 1 },  //  1 / block
+}
+const labelGeom = computed(() => LABEL_SIZES[labelSize.value] || LABEL_SIZES.eppi05)
 
 const labelItems = computed(() => {
     const term = labelSearch.value.toLowerCase()
@@ -377,15 +380,25 @@ const wrapSeq = (seq, maxChars = 14) => {
 // Vertical advance (mm) for a given point size, in a mm-unit jsPDF document.
 const lineMM = (pt) => pt * 0.352778 * 1.18
 
+// The in-well solvent string: buffer (name + conc) if dissolved in buffer, otherwise
+// "in water". Falls back to the buffer text / diluent flag on the item.
+const solventText = (item) => {
+    if (item.buffer && String(item.buffer).trim() !== '') return String(item.buffer).trim()
+    if (item.diluent === 'buffer') return 'buffer'
+    if (item.diluent === 'water') return 'in water'
+    return 'in water'
+}
+
 // DNA/RNA label — bold wrapping name, then code, conc | MW, and the sequence (mono).
+// Scales with the label HEIGHT (s = h / 13) so wide/short and tall formats render right.
 const renderDnaLabel = (doc, item, x, y, w, h) => {
-    const s = w / 24
+    const s = 1 + (h / 13 - 1) * 0.55   // gentle height scaling: eppi=1, falcon≈2.1
     const px = x + 0.9 * s
     const maxW = w - 1.8 * s
     const bottom = y + h - 0.5 * s
 
     doc.setFont('helvetica', 'bold'); doc.setFontSize(6 * s); doc.setTextColor(12, 12, 12)
-    const nameLines = doc.splitTextToSize(item.name || '', maxW).slice(0, 2)
+    const nameLines = doc.splitTextToSize(item.name || '', maxW).slice(0, s >= 1.5 ? 3 : 2)
     let cy = y + 2.1 * s
     nameLines.forEach(ln => { doc.text(ln, px, cy); cy += lineMM(6 * s) })
     cy += 0.3 * s
@@ -409,37 +422,37 @@ const renderDnaLabel = (doc, item, x, y, w, h) => {
 }
 
 // Chemical / non-sequence label — industry-style layout: bold wrapping compound name,
-// a separator rule, then labelled fields (conc, CAS, MW, location, pH/buffer) with a
-// monospace identifier code. Uses Helvetica for text and Courier for identifiers.
+// a separator rule (taller labels), labelled fields (conc, solvent, location, MW, CAS)
+// and a monospace identifier code. Scales with the label HEIGHT (s = h / 13).
 const renderChemLabel = (doc, item, x, y, w, h) => {
-    const s = w / 24
+    const s = 1 + (h / 13 - 1) * 0.55   // gentle height scaling: eppi=1, falcon≈2.1
     const big = s >= 1.5
     const px = x + 1.0 * s
     const rightX = x + w - 1.0 * s
-    const codeReserve = item.code ? lineMM(big ? 5.4 : 3.6) + (big ? 0.8 : 0.35) * s : 0
-    const bottom = y + h - (big ? 0.6 : 0.4) * s - codeReserve
-    let cy = y + (big ? 2.7 : 2.2) * s
+    const codeReserve = item.code ? lineMM(3.9 * s) + 0.4 * s : 0
+    const bottom = y + h - 0.5 * s - codeReserve
+    let cy = y + 2.2 * s
 
-    // Compound name — bold, wraps to fill the width (up to 2 lines small / 3 large)
-    const nameSize = big ? 8 : 5.6
+    // Compound name — bold, wraps to fill the width (up to 2 lines short / 3 tall)
+    const nameSize = 5.8 * s
     doc.setFont('helvetica', 'bold'); doc.setFontSize(nameSize); doc.setTextColor(15, 15, 15)
     const nameLines = doc.splitTextToSize(item.name || '', rightX - px).slice(0, big ? 3 : 2)
     nameLines.forEach(ln => { doc.text(ln, px, cy); cy += lineMM(nameSize) })
 
-    // Separator rule (large labels only; tiny labels stay compact)
-    cy += (big ? 0.6 : 0.25) * s
+    // Separator rule (taller labels only; short labels stay compact)
+    cy += (big ? 0.5 : 0.25) * s
     if (big) {
         doc.setLineDash([]); doc.setDrawColor(45, 45, 45); doc.setLineWidth(0.13 * s)
         doc.line(px, cy, rightX, cy)
-        cy += 1.9 * s
+        cy += 1.6 * s
     } else {
         cy += 0.3 * s
     }
 
     // Labelled data rows: muted key + value
-    const fieldSize = big ? 5.6 : 3.5
-    const keyW = (big ? 9 : 6.0) * s
-    const rowH = lineMM(fieldSize) + (big ? 0.35 : 0.12) * s
+    const fieldSize = 3.6 * s
+    const keyW = 6.5 * s
+    const rowH = lineMM(fieldSize) + 0.2 * s
     const field = (key, val, { mono = false, bold = false } = {}) => {
         if (val == null || val === '' || cy > bottom) return
         doc.setFontSize(fieldSize)
@@ -454,10 +467,7 @@ const renderChemLabel = (doc, item, x, y, w, h) => {
     const conc = (item.stock != null && item.stock !== '') ? `${item.stock} ${item.stockUnit || 'µM'}` : ''
     const mw   = (item.mw || item.manualMw) ? `${store.formatNum ? store.formatNum(item.mw || item.manualMw) : Math.round(item.mw || item.manualMw)} Da` : ''
     const loc  = [item.location, item.sublocation].filter(v => v != null && v !== '').join(' / ')
-    // Solvent line: buffer (name + concentration) if prepared in buffer, otherwise "in water".
-    // pH is appended when set. item.buffer already carries "<conc> <unit> <name>".
-    const solvent = (item.buffer && String(item.buffer).trim() !== '') ? String(item.buffer).trim() : 'in water'
-    const solventLine = [solvent, (item.pH != null && item.pH !== '') ? `pH ${item.pH}` : ''].filter(Boolean).join(', ')
+    const solventLine = [solventText(item), (item.pH != null && item.pH !== '') ? `pH ${item.pH}` : ''].filter(Boolean).join(', ')
 
     field('CONC', conc, { bold: true })
     field('SOLV', solventLine)
@@ -467,8 +477,8 @@ const renderChemLabel = (doc, item, x, y, w, h) => {
 
     // Identifier code — monospace, anchored to the bottom like a catalog / lot number
     if (item.code) {
-        doc.setFont('courier', 'bold'); doc.setFontSize(s >= 1.5 ? 5.4 : 3.9); doc.setTextColor(10, 10, 10)
-        doc.text(String(item.code), px, y + h - 1.1 * s)
+        doc.setFont('courier', 'bold'); doc.setFontSize(3.9 * s); doc.setTextColor(10, 10, 10)
+        doc.text(String(item.code), px, y + h - 1.0 * s)
     }
 }
 
@@ -581,13 +591,20 @@ const generateLabelsPDF = () => {
                 </div>
             </template>
             <div style="display: flex; gap: 12px; align-items: flex-end; margin-top: 15px;">
-                <div class="input-group" style="margin: 0; width: 110px;">
+                <div class="input-group" style="margin: 0; width: 100px;">
                     <label>pH</label>
                     <input type="number" step="any" v-model.number="viewingItem.pH" placeholder="e.g. 7.4" style="padding: 4px; width: 100%;">
                 </div>
+                <div class="input-group" style="margin: 0; width: 120px;">
+                    <label>Dissolved in</label>
+                    <select v-model="viewingItem.diluent" style="padding: 4px; width: 100%;">
+                        <option value="water">Water</option>
+                        <option value="buffer">Buffer</option>
+                    </select>
+                </div>
                 <div class="input-group" style="margin: 0; flex: 1;">
-                    <label>Buffer</label>
-                    <input type="text" v-model="viewingItem.buffer" placeholder="e.g. 1× PBS" style="padding: 4px; width: 100%;">
+                    <label>Buffer (name + conc)</label>
+                    <input type="text" v-model="viewingItem.buffer" :disabled="viewingItem.diluent === 'water'" placeholder="e.g. 50 mM Tris, pH 7.5" style="padding: 4px; width: 100%;">
                 </div>
             </div>
             <div class="input-group" style="margin-top: 12px;">
@@ -684,22 +701,19 @@ const generateLabelsPDF = () => {
           <!-- Right: settings -->
           <div style="display: flex; flex-direction: column; overflow-y: auto; padding: 14px;">
 
-            <!-- Label size -->
-            <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">Label Size</div>
+            <!-- Label size / tube format -->
+            <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">Tube / Label Size</div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 16px;">
               <div
-                @click="labelSize = 'small'"
+                v-for="(sz, key) in LABEL_SIZES"
+                :key="key"
+                @click="labelSize = key"
                 style="padding: 8px 6px; border-radius: 4px; border: 1.5px solid; text-align: center; font-size: 0.72rem; font-weight: 600; cursor: pointer; user-select: none;"
-                :style="{ borderColor: labelSize === 'small' ? 'var(--primary)' : 'var(--border)', background: labelSize === 'small' ? 'var(--primary)' : 'var(--panel-bg)', color: labelSize === 'small' ? 'white' : 'var(--text)' }"
-              >0.5 mL eppi<div style="font-size: 0.62rem; font-weight: 400; opacity: 0.75;">24 × 13 mm</div></div>
-              <div
-                @click="labelSize = 'large'"
-                style="padding: 8px 6px; border-radius: 4px; border: 1.5px solid; text-align: center; font-size: 0.72rem; font-weight: 600; cursor: pointer; user-select: none;"
-                :style="{ borderColor: labelSize === 'large' ? 'var(--primary)' : 'var(--border)', background: labelSize === 'large' ? 'var(--primary)' : 'var(--panel-bg)', color: labelSize === 'large' ? 'white' : 'var(--text)' }"
-              >Large (2×2)<div style="font-size: 0.62rem; font-weight: 400; opacity: 0.75;">48 × 26 mm</div></div>
+                :style="{ borderColor: labelSize === key ? 'var(--primary)' : 'var(--border)', background: labelSize === key ? 'var(--primary)' : 'var(--panel-bg)', color: labelSize === key ? 'white' : 'var(--text)' }"
+              >{{ sz.name }}<div style="font-size: 0.62rem; font-weight: 400; opacity: 0.75;">{{ sz.tw }} × {{ sz.th }} mm · {{ sz.cols * sz.rows * 12 }}/pg</div></div>
             </div>
             <div style="font-size: 0.68rem; opacity: 0.55; margin-bottom: 16px; line-height: 1.5;">
-              DNA / RNA items keep their sequence layout; all other classes print name, conc, code, CAS, location, MW, pH &amp; buffer.
+              DNA / RNA items keep their sequence layout; all other classes print name, conc, solvent/buffer, location, MW, CAS, pH &amp; code.
             </div>
 
             <!-- HERMA picker -->

@@ -94,12 +94,21 @@ const bufferVolumeL = computed(() => {
     return Vt * (bufferTargetConcM.value / bufferStockConcM.value)
 })
 
-// Water to fill up to the total volume (litres). Accounts for the liquid compound volume.
+// Total titrant volume (litres) added during pH adjustment — it occupies part of the total.
+const titrantVolumeL = computed(() => {
+    if (!store.stdCalc.phAdjusted) return 0
+    const naoh = (store.stdCalc.naohVol || 0) * store.stdCalc.naohVolUnit
+    const hcl = (store.stdCalc.hclVol || 0) * store.stdCalc.hclVolUnit
+    return naoh + hcl
+})
+
+// Water to fill up to the total volume (litres). Accounts for the liquid compound,
+// buffer and pH-adjustment titrant volumes.
 const fillWaterVolumeL = computed(() => {
     const Vt = stdTotalVolumeL.value
     if (!Vt) return null
     const buf = store.stdCalc.diluent === 'buffer' ? (bufferVolumeL.value || 0) : 0
-    return Vt - buf - compoundVolumeL.value
+    return Vt - buf - compoundVolumeL.value - titrantVolumeL.value
 })
 
 // Warnings: desired buffer conc can't exceed the stock, and buffer+compound can't exceed total.
@@ -214,7 +223,7 @@ const saveStdToInventory = () => {
     </div>
 
     <div class="input-group">
-        <label>Molar Mass (Da / g/mol)</label>
+        <label style="text-transform: none;">Molar Mass (Da / g/mol)</label>
         <input type="number" v-model.number="store.stdCalc.mw" placeholder="e.g. 500" step="any">
     </div>
     
@@ -332,12 +341,9 @@ const saveStdToInventory = () => {
     </div>
 
     <div v-if="store.stdCalc.phAdjusted" style="background: var(--panel-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px;">
-        <p style="margin: 0; font-size: 0.75rem; opacity: 0.7;">
-            Enter the titrant concentration and the volume added while adjusting pH. The resulting Na⁺ / Cl⁻ concentration in the final stock is computed and saved with the stock.
-        </p>
         <div class="grid-2">
             <div class="input-group" style="margin: 0;">
-                <label>NaOH added (→ Na⁺)</label>
+                <label style="text-transform: none;">NaOH added (→ Na⁺)</label>
                 <div style="display: flex; gap: 6px;">
                     <div class="input-with-select" style="flex: 1;">
                         <input type="number" step="any" v-model.number="store.stdCalc.naohConc" placeholder="conc">
@@ -356,7 +362,7 @@ const saveStdToInventory = () => {
                 </div>
             </div>
             <div class="input-group" style="margin: 0;">
-                <label>HCl added (→ Cl⁻)</label>
+                <label style="text-transform: none;">HCl added (→ Cl⁻)</label>
                 <div style="display: flex; gap: 6px;">
                     <div class="input-with-select" style="flex: 1;">
                         <input type="number" step="any" v-model.number="store.stdCalc.hclConc" placeholder="conc">

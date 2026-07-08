@@ -7,7 +7,15 @@ export default defineConfig({
   base: '/BoekhovenLab-Assistant/',
   
   plugins: [vue()],
-  
+
+  // Vitest reads this same config. Math/util tests are pure functions, so the
+  // lightweight `node` environment is enough (no jsdom dependency needed).
+  test: {
+    environment: 'node',
+    globals: true,
+    include: ['src/**/*.{test,spec}.js'],
+  },
+
   server: {
     // This proxy routes local frontend requests to your Python backend.
     // It is used during development but safely ignored in production.

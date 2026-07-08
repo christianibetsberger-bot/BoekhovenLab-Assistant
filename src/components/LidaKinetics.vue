@@ -67,6 +67,68 @@
         <div class="internal-section">
           <h3>1b. HPLC Import</h3>
 
+          <!-- Sequence library: name → strands, used to resolve named chromatograms -->
+          <div class="seq-lib">
+            <div class="seq-lib-head">
+              <button class="small" @click="seqLibShow = !seqLibShow" :class="{ active: seqLibShow }">
+                <i class="fas fa-dna"></i> Sequence Library
+                <span class="seq-lib-count">{{ seqLibrary.length }}</span>
+                <i class="fas" :class="seqLibShow ? 'fa-chevron-up' : 'fa-chevron-down'" style="margin-left:4px;"></i>
+              </button>
+              <span class="no-upper" style="opacity:0.7; font-size:0.78rem;">
+                Save names → sequences, then upload chromatograms like <code>CTI-117_Aalpha_4h….txt</code>.
+              </span>
+            </div>
+
+            <div v-if="seqLibShow" class="seq-lib-body">
+              <div class="seq-lib-toolbar">
+                <input ref="seqLibInput" type="file" accept=".csv,.tsv,.txt" style="display:none" @change="onSeqLibraryFileSelected" />
+                <button class="small success-btn" @click="$refs.seqLibInput.click()">
+                  <i class="fas fa-file-import"></i> Import list
+                </button>
+                <button class="small" @click="downloadSeqLibraryTemplate" title="CSV: Name, SeqAB, SeqAprimeBprime">
+                  <i class="fas fa-file-arrow-down"></i> Template
+                </button>
+                <div class="hplc-toolbar-spacer"></div>
+                <button v-if="seqLibrary.length" class="small danger-btn" @click="clearSeqLibrary">
+                  <i class="fas fa-trash"></i> Clear
+                </button>
+              </div>
+
+              <!-- Manual add -->
+              <div class="seq-lib-add">
+                <input v-model="seqLibDraft.name" placeholder="Name (Aalpha)" class="seq-lib-in name" />
+                <input v-model="seqLibDraft.seqAB" placeholder="AB sequence (ACGT)" class="seq-lib-in seq no-upper" />
+                <input v-model="seqLibDraft.seqABprime" placeholder="A'B' (blank = rev-comp)" class="seq-lib-in seq no-upper" />
+                <button class="small" @click="addSeqLibraryEntry"><i class="fas fa-plus"></i></button>
+              </div>
+
+              <div v-if="seqLibNote" class="section-info" style="margin:4px 0;">
+                <i class="fas fa-circle-info"></i> {{ seqLibNote }}
+              </div>
+
+              <table v-if="seqLibrary.length" class="seq-lib-table">
+                <thead>
+                  <tr><th>Name</th><th>AB</th><th>A'B'</th><th></th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="e in seqLibrary" :key="e.name">
+                    <td class="name">{{ e.name }}</td>
+                    <td class="seq mono" :title="e.seqAB">{{ e.seqAB }}</td>
+                    <td class="seq mono" :title="e.seqABprime">
+                      {{ e.seqABprime }}
+                      <i v-if="!e.isCanonicalRC" class="fas fa-triangle-exclamation" title="A'B' is not the reverse complement of AB" style="color:#f59e0b; margin-left:3px;"></i>
+                    </td>
+                    <td><button class="icon-btn" @click="removeSeqLibraryEntry(e.name)" title="Remove"><i class="fas fa-times"></i></button></td>
+                  </tr>
+                </tbody>
+              </table>
+              <div v-else class="no-upper" style="opacity:0.6; font-size:0.8rem; padding:4px 0;">
+                No sequences saved yet. Import a list or add one above.
+              </div>
+            </div>
+          </div>
+
           <div class="hplc-toolbar">
             <input ref="hplcFileInput" type="file" accept=".txt,.TXT" multiple style="display:none" @change="onHplcFileSelected" />
             <button class="small success-btn" :disabled="isProcessingHplc" @click="$refs.hplcFileInput.click()">
@@ -89,8 +151,11 @@
 
           <div class="hplc-schema">
             <span class="hplc-schema-example">
-              e.g. <code>ATCGATCG_AB_CGATCGAT_S1-30.txt</code>
-              <span class="no-upper" style="opacity:0.7;">— seq · _ReplicatorName_ · seq · S/U · rep · t (min) &nbsp;(AB, EB, Dzeta, …)</span>
+              e.g. <code>CTI-117_Aalpha_4h.txt</code>
+              <span class="no-upper" style="opacity:0.7;">— code · _SeqName_ · time (h/min); name resolved from library</span>
+              <br>
+              or <code>ATCGATCG_AB_CGATCGAT_S1-30.txt</code>
+              <span class="no-upper" style="opacity:0.7;">— seq · _ReplicatorName_ · seq · S/U · rep · t (min)</span>
             </span>
             <span v-if="isProcessingHplc" class="hplc-status"><i class="fas fa-spinner fa-spin"></i> {{ hplcProgress }}</span>
             <span v-else-if="hplcProgress" class="hplc-status">{{ hplcProgress }}</span>
@@ -1040,7 +1105,8 @@ import { ENDPOINTS } from '../services/kineticsBackend'
 import { fitKineticsLocal } from '../services/kineticsLocalFit'
 import { suggestNextLocal, predictSequenceLocal } from '../services/metisLocalService'
 import { processChromatograms, preloadHplcEngine } from '../services/hplcLocalService'
-import { parseChromeleonFilename, reverseComplement, HPLC_FILENAME_REGEX_SOURCE } from '../utils/hplcFilename'
+import { parseHplcFilename, reverseComplement, HPLC_FILENAME_REGEX_SOURCE } from '../utils/hplcFilename'
+import { parseSeqLibraryCsv } from '../utils/seqLibrary'
 import { areaToMicromolar, concentrationToConversion, dilutionFactorFromVial, DEFAULT_HPLC_PARAMS } from '../utils/hplcConcentration'
 import { calcSeqExtinction } from '../utils/seqUtils'
 import { esc } from '../utils/htmlSafe'
@@ -1170,6 +1236,95 @@ const hplcParams = computed(() => ({
 // Reactive: for each HPLC result, classify peaks against the current
 // product window and compute c(AB), c(A'B'), [R], conversion%.
 const hplcDerived = computed(() => hplcResults.value.map(r => deriveHplcRow(r)))
+
+// ── Sequence library (name → strands) ─────────────────────────────────────
+// Maps a sequence name (e.g. "Aalpha") to its two product strands so NAMED
+// chromatogram files (CTI-117_Aalpha_4h.txt) can be resolved to strands.
+// Persisted to localStorage so the library survives reloads.
+const SEQ_LIBRARY_KEY = 'lida_seq_library'
+const seqLibrary = ref([])            // [{ name, seqAB, seqABprime, isCanonicalRC }]
+const seqLibInput = ref(null)
+const seqLibNote = ref('')
+const seqLibShow = ref(false)
+const seqLibDraft = reactive({ name: '', seqAB: '', seqABprime: '' })
+
+// Case-insensitive lookup: name → entry.
+const seqLibraryMap = computed(() => {
+  const m = new Map()
+  for (const e of seqLibrary.value) m.set(e.name.toLowerCase(), e)
+  return m
+})
+
+function loadSeqLibrary() {
+  try {
+    const raw = localStorage.getItem(SEQ_LIBRARY_KEY)
+    if (raw) seqLibrary.value = JSON.parse(raw)
+  } catch { /* ignore corrupt cache */ }
+}
+function persistSeqLibrary() {
+  try { localStorage.setItem(SEQ_LIBRARY_KEY, JSON.stringify(seqLibrary.value)) } catch { /* quota */ }
+}
+watch(seqLibrary, persistSeqLibrary, { deep: true })
+
+// Merge new entries into the library; later entries with the same name win.
+function mergeSeqLibrary(entries) {
+  const byName = new Map(seqLibrary.value.map(e => [e.name.toLowerCase(), e]))
+  for (const e of entries) byName.set(e.name.toLowerCase(), e)
+  seqLibrary.value = [...byName.values()]
+}
+
+function onSeqLibraryFileSelected(e) {
+  const file = e.target.files?.[0]
+  e.target.value = ''
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = ev => {
+    const { entries, errors } = parseSeqLibraryCsv(String(ev.target.result || ''))
+    if (entries.length) mergeSeqLibrary(entries)
+    seqLibNote.value = entries.length
+      ? `Imported ${entries.length} sequence(s).` + (errors.length ? ` ${errors.length} row(s) skipped.` : '')
+      : (errors[0] || 'No sequences found.')
+  }
+  reader.readAsText(file)
+}
+
+function addSeqLibraryEntry() {
+  const name = seqLibDraft.name.trim()
+  const seqAB = seqLibDraft.seqAB.trim().toUpperCase()
+  let seqABprime = seqLibDraft.seqABprime.trim().toUpperCase()
+  if (!name || !/^[ACGT]+$/.test(seqAB)) {
+    seqLibNote.value = 'Enter a name and a valid AB sequence (ACGT).'
+    return
+  }
+  if (seqABprime && !/^[ACGT]+$/.test(seqABprime)) {
+    seqLibNote.value = "A'B' must be ACGT (leave blank for reverse complement)."
+    return
+  }
+  if (!seqABprime) seqABprime = reverseComplement(seqAB)
+  mergeSeqLibrary([{ name, seqAB, seqABprime, isCanonicalRC: reverseComplement(seqAB) === seqABprime }])
+  seqLibNote.value = `Saved "${name}".`
+  seqLibDraft.name = ''; seqLibDraft.seqAB = ''; seqLibDraft.seqABprime = ''
+}
+
+function removeSeqLibraryEntry(name) {
+  seqLibrary.value = seqLibrary.value.filter(e => e.name !== name)
+}
+function clearSeqLibrary() {
+  seqLibrary.value = []
+  seqLibNote.value = 'Library cleared.'
+}
+
+function downloadSeqLibraryTemplate() {
+  const rows = [
+    'Name,SeqAB,SeqAprimeBprime',
+    'Aalpha,ATCGATCGATCGATCGAT,ATCGATCGATCGATCGAT',
+    'Bbeta,GCTAGCTAGCTAGCTAGC,',   // blank A'B' → reverse complement is used
+  ]
+  const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob); a.download = 'lida-sequence-library.csv'
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href)
+}
 
 // Helpers used by the chromatogram gallery (Plotly refs keyed by filename).
 const hplcChartRefs = ref({})
@@ -1737,15 +1892,31 @@ async function onHplcFileSelected(e) {
   if (!fileList.length) return
 
   // Parse filenames first so we can drop bad ones before sending to the worker.
+  // NAMED-schema files (CTI-117_Aalpha_4h.txt) additionally get their strands
+  // resolved from the sequence library here.
   const good = []
   const skipped = []
   for (const f of fileList) {
-    const meta = parseChromeleonFilename(f.name)
+    const meta = parseHplcFilename(f.name)
     if (meta.error) {
       skipped.push({ name: f.name, reason: meta.error })
-    } else {
-      good.push({ file: f, meta })
+      continue
     }
+    if (meta.scheme === 'named') {
+      const entry = seqLibraryMap.value.get(meta.seqName.toLowerCase())
+      if (!entry) {
+        skipped.push({ name: f.name, reason: `Sequence "${meta.seqName}" is not in the library — import it in "Sequence Library" first.` })
+        continue
+      }
+      // Fill strand fields the derivation/grouping expects; the sample code
+      // doubles as the replicate id so runs of the same sequence group together.
+      meta.ABseq = entry.seqAB
+      meta.ABprimeSeq = entry.seqABprime
+      meta.isCanonicalRC = entry.isCanonicalRC
+      meta.replicate = meta.code
+      meta.condition = null
+    }
+    good.push({ file: f, meta })
   }
   hplcSkipped.value = skipped
 
@@ -1907,7 +2078,7 @@ function applyHplcResultsToDataset() {
       groupsByKey.set(key, {
         groupId: key,
         sequence: seq,
-        seqName: null,
+        seqName: r.meta.seqName || null,
         conditions: { ...conds },
         timeCourse: [],
         maxConversion: 0,
@@ -1918,6 +2089,7 @@ function applyHplcResultsToDataset() {
       repsByKey.set(key, new Map())
     }
     const grp = groupsByKey.get(key)
+    if (r.meta.seqName && !grp.seqName) grp.seqName = r.meta.seqName
     grp.timeCourse.push({
       time, conversion,
       concentration_uM: r.R_uM,
@@ -1974,14 +2146,14 @@ function discardHplcResults() {
 // File contents are a minimal valid header + a few dummy rows; the goal is to
 // show users the naming pattern, not to be a working test fixture.
 function downloadHplcTemplate() {
-  const name = 'ATCGATCG_AB_CGATCGAT_S1-30.txt'
+  const name = 'CTI-117_Aalpha_4h_05_UV_R_VIS_1.txt'
   const lines = []
   // Chromeleon exports have 43 header lines before data; we approximate with
   // a comment block + Chromeleon-style 'Time;Step;Value (mAU)' column header.
   lines.push('# LIDA HPLC chromatogram — filename template')
-  lines.push("# Schema: {seq1}_{ReplicatorName}_{seq2}_{S|U}{replicate}-{time}.txt")
-  lines.push("# ReplicatorName can be AB, EB, Dzeta, or any label starting with a letter.")
-  lines.push('# Example: seq1=ATCGATCG, ReplicatorName=AB, seq2=CGATCGAT, Seeded, rep 1, t=30 min')
+  lines.push("# Named schema:  {CODE}_{SeqName}_{time}{h|min}_...ignored....txt")
+  lines.push('# Example: code=CTI-117, SeqName=Aalpha (resolved from the Sequence Library), t=4 h')
+  lines.push("# Strand schema (also accepted): {seq1}_{ReplicatorName}_{seq2}_{S|U}{replicate}-{time}.txt")
   lines.push('# Replace this file with your Chromeleon UV/Vis .txt export.')
   for (let i = 0; i < 39; i++) lines.push('#')
   lines.push('Time (min)\tStep (s)\tValue (mAU)')
@@ -3057,6 +3229,7 @@ watch(exportBuildingBlocks, ({ aside, bside, asideComp, bsideComp }) => {
 }, { immediate: true })
 
 onMounted(() => {
+  loadSeqLibrary()
   nextTick(renderAll)
 })
 
@@ -3106,6 +3279,47 @@ onBeforeUnmount(() => {
 }
 .hplc-toolbar-spacer { flex: 1 1 auto; }
 .hplc-toolbar .small.active { background: #3b82f6; color: #fff; }
+
+/* ── Sequence library ─────────────────────────────────────── */
+.seq-lib {
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+}
+.seq-lib-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.seq-lib-head .small.active { background: #8b5cf6; color: #fff; }
+.seq-lib-head code { font-family: ui-monospace, Menlo, monospace; font-size: 0.72rem; }
+.seq-lib-count {
+  display: inline-block; min-width: 16px; text-align: center;
+  background: #8b5cf6; color: #fff; border-radius: 8px;
+  font-size: 0.68rem; padding: 0 5px; margin-left: 4px;
+}
+.seq-lib-body { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.seq-lib-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.seq-lib-add { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.seq-lib-in {
+  padding: 4px 6px; font-size: 0.78rem;
+  border: 1px solid var(--border-color, #e2e8f0); border-radius: 4px;
+  background: var(--input-bg, #fff); color: inherit;
+}
+.seq-lib-in.name { flex: 0 0 120px; }
+.seq-lib-in.seq { flex: 1 1 160px; font-family: ui-monospace, Menlo, monospace; }
+.seq-lib-table { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
+.seq-lib-table th, .seq-lib-table td {
+  text-align: left; padding: 3px 6px;
+  border-bottom: 1px solid var(--border-color, #eef1f5);
+}
+.seq-lib-table th { opacity: 0.65; font-weight: 600; }
+.seq-lib-table td.name { font-weight: 600; white-space: nowrap; }
+.seq-lib-table td.seq {
+  max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.seq-lib-table .mono { font-family: ui-monospace, Menlo, monospace; }
+.seq-lib-table .icon-btn {
+  background: none; border: none; cursor: pointer; opacity: 0.5; color: inherit;
+}
+.seq-lib-table .icon-btn:hover { opacity: 1; color: #ef4444; }
 
 .hplc-schema {
   display: flex; align-items: center; justify-content: space-between;

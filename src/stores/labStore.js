@@ -331,7 +331,7 @@ export const useLabStore = defineStore('lab', {
       return {
         topOrder:        ['labJournal'],
         leftOrder:       ['globalSettings', 'standardStock', 'sequenceCalc', 'archiveManager', 'inventoryManager', 'timeTracker'],
-        rightOrder:      ['reactionPlan', 'matrixPlanner', 'screeningPlanner', 'phasePredictor', 'lidaKinetics', 'wellPlateEditor'],
+        rightOrder:      ['reactionPlan', 'matrixPlanner', 'screeningPlanner', 'phasePredictor', 'lidaKinetics', 'dataFigures', 'wellPlateEditor'],
         minimized:       {},
         sidebarPosition: 'left',   // 'left' | 'right' | 'bottom'
         sidebarHidden:   {}        // id → true  (removed from sidebar but still in layout orders)

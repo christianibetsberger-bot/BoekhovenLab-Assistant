@@ -15,6 +15,7 @@ import MatrixPlanner from './components/MatrixPlanner.vue'
 import ScreeningPlanner from './components/ScreeningPlanner.vue'
 import PhasePredictor from './components/PhasePredictor.vue'
 import LidaKinetics from './components/LidaKinetics.vue'
+import DataFigures from './components/DataFigures.vue'
 import WellPlateEditor from './components/WellPlateEditor.vue'
 import ArchiveManager from './components/ArchiveManager.vue'
 import TimeTracker from './components/TimeTracker.vue'
@@ -38,6 +39,7 @@ const MODULE_META = {
   screeningPlanner: { label: 'Screening',   icon: 'fa-table-cells-large', component: markRaw(ScreeningPlanner) },
   phasePredictor:   { label: 'Phase Map',   icon: 'fa-brain',             component: markRaw(PhasePredictor) },
   lidaKinetics:     { label: 'LIDA Kinetics', icon: 'fa-dna',  svgIcon: lidaIcon, component: markRaw(LidaKinetics) },
+  dataFigures:      { label: 'Data & Figures', icon: 'fa-chart-line',      component: markRaw(DataFigures) },
   wellPlateEditor:  { label: 'Well Plate',  icon: 'fa-border-all',        component: markRaw(WellPlateEditor) },
   timeTracker:      { label: 'Time Tracker', icon: 'fa-clock',             component: markRaw(TimeTracker) },
 }

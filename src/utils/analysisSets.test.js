@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   BUILTIN_ANALYSIS_SETS, getAnalysisSetById, resolveParams,
   deriveHplcDnaRow, buildMatrix, timepointsOf, HPLC_DNA_DEFAULTS,
+  linearFit, interp, cfFit, dynamicCF, DEFAULT_GRADIENT, DEFAULT_CF_CALIBRATION,
 } from './analysisSets.js'
 import { areaToMicromolar } from './hplcConcentration.js'
 import { calcSeqExtinction } from './seqUtils.js'
@@ -46,21 +47,38 @@ describe('deriveHplcDnaRow', () => {
   }
   const meta = { seqName: 'Aalpha', code: 'CTI-117', timeMin: 240, seqAB: 'ATCGATCG', seqABprime: 'CGATCGAT' }
 
-  it('sums the product-window peaks and applies Beer-Lambert with product ε', () => {
+  const eps = calcSeqExtinction('ATCGATCG', 'DNA') + calcSeqExtinction('CGATCGAT', 'DNA')
+
+  it('applies the dynamic MeOH correction per peak (default) before quantifying', () => {
     const row = deriveHplcDnaRow(result, meta, HPLC_DNA_DEFAULTS)
-    const eps = calcSeqExtinction('ATCGATCG', 'DNA') + calcSeqExtinction('CGATCGAT', 'DNA')
+    const fit = cfFit(HPLC_DNA_DEFAULTS.cfCalibration)
+    const areaCorr = 2.0 / dynamicCF(6.6, HPLC_DNA_DEFAULTS.gradient, fit)
+                   + 1.0 / dynamicCF(6.9, HPLC_DNA_DEFAULTS.gradient, fit)
     const beer = {
       pathLength_cm: HPLC_DNA_DEFAULTS.pathLength_cm, flow_mL_min: HPLC_DNA_DEFAULTS.flow_mL_min,
       injection_uL: HPLC_DNA_DEFAULTS.injection_uL, aliquot_uL: HPLC_DNA_DEFAULTS.aliquot_uL,
-      vial_uL: HPLC_DNA_DEFAULTS.vial_uL, solventCorrection: HPLC_DNA_DEFAULTS.solventCorrection,
+      vial_uL: HPLC_DNA_DEFAULTS.vial_uL, solventCorrection: 1,
     }
     expect(row.epsilon).toBe(eps)
     expect(row.epsilonEstimated).toBe(false)
-    expect(row.productArea_mAU_min).toBeCloseTo(3.0, 9) // 2 + 1
-    expect(row.product_uM).toBeCloseTo(areaToMicromolar(3.0, eps, beer), 9)
+    expect(row.productArea_mAU_min).toBeCloseTo(3.0, 9)             // raw 2 + 1
+    expect(row.productAreaCorr_mAU_min).toBeCloseTo(areaCorr, 9)     // corrected < raw here
+    expect(row.product_uM).toBeCloseTo(areaToMicromolar(areaCorr, eps, beer), 9)
     expect(row.row).toBe('A')
     expect(row.col).toBe('alpha')
     expect(row.timeMin).toBe(240)
+  })
+
+  it('uses the flat solvent factor when dynamic correction is off', () => {
+    const params = { ...HPLC_DNA_DEFAULTS, useDynamicCF: false }
+    const row = deriveHplcDnaRow(result, meta, params)
+    const beer = {
+      pathLength_cm: params.pathLength_cm, flow_mL_min: params.flow_mL_min,
+      injection_uL: params.injection_uL, aliquot_uL: params.aliquot_uL,
+      vial_uL: params.vial_uL, solventCorrection: params.solventCorrection,
+    }
+    expect(row.productAreaCorr_mAU_min).toBeCloseTo(3.0, 9)          // no per-peak correction
+    expect(row.product_uM).toBeCloseTo(areaToMicromolar(3.0, eps, beer), 9)
   })
 
   it('classifies peaks by the product window', () => {
@@ -75,6 +93,33 @@ describe('deriveHplcDnaRow', () => {
     expect(row.epsilon).toBe(HPLC_DNA_DEFAULTS.defaultEpsilon)
     expect(row.epsilonEstimated).toBe(true)
     expect(row.product_uM).toBeGreaterThan(0)
+  })
+})
+
+describe('dynamic MeOH correction helpers', () => {
+  it('linearFit matches the least-squares line of the CF calibration', () => {
+    // np.polyfit over DEFAULT_CF_CALIBRATION → slope 0.018290, intercept 0.594100
+    const fit = linearFit(DEFAULT_CF_CALIBRATION.map(p => p[0]), DEFAULT_CF_CALIBRATION.map(p => p[1]))
+    expect(fit.slope).toBeCloseTo(0.018290, 6)
+    expect(fit.intercept).toBeCloseTo(0.594100, 6)
+  })
+
+  it('interp linearly interpolates and clamps at the ends (np.interp)', () => {
+    const xs = [0, 0.5, 10, 10.5], ys = [4, 4, 60, 60]
+    expect(interp(-1, xs, ys)).toBe(4)     // clamp low
+    expect(interp(100, xs, ys)).toBe(60)   // clamp high
+    expect(interp(0.5, xs, ys)).toBe(4)    // exact node
+    expect(interp(5.25, xs, ys)).toBeCloseTo(4 + (5.25 - 0.5) / (10 - 0.5) * 56, 9)
+  })
+
+  it('dynamicCF interpolates %B from the gradient then applies the CF line', () => {
+    const fit = cfFit(DEFAULT_CF_CALIBRATION)
+    // rt 6.6 → %B 39.9579 → CF 1.324930 (verified in Python)
+    expect(dynamicCF(6.6, DEFAULT_GRADIENT, fit)).toBeCloseTo(1.324930, 5)
+  })
+
+  it('dynamicCF returns 1 (no correction) for an empty gradient', () => {
+    expect(dynamicCF(6.6, [], cfFit(DEFAULT_CF_CALIBRATION))).toBe(1)
   })
 })
 

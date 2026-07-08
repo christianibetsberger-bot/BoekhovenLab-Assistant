@@ -31,6 +31,18 @@ export const GREEK_SYMBOL = {
   theta: 'θ', iota: 'ι', kappa: 'κ', lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ',
 }
 
+// Solvent gradient: [time (min), % Eluent B]. Eluent B is the MeOH-containing
+// eluent, so % B is effectively the % MeOH along the run (notebook GRADIENT_TABLE).
+export const DEFAULT_GRADIENT = [
+  [0.0, 4.0], [0.5, 4.0], [10.0, 60.0], [10.5, 60.0], [11.0, 7.0], [15.0, 7.0],
+]
+
+// MeOH correction-factor calibration: [% Eluent B, correction factor]. A line is
+// fit through these points and evaluated at each peak's % B (notebook CORRECTION_FACTOR_TABLE).
+export const DEFAULT_CF_CALIBRATION = [
+  [10.0, 0.820], [20.0, 0.898], [30.0, 1.180], [40.0, 1.265], [50.0, 1.551],
+]
+
 // Defaults ported from HPLCHeatmap.ipynb (CONFIGURATION & PARAMETERS + Beer-Lambert).
 export const HPLC_DNA_DEFAULTS = Object.freeze({
   // Peak detection (passed to hplcWorker)
@@ -47,11 +59,57 @@ export const HPLC_DNA_DEFAULTS = Object.freeze({
   injection_uL: 5.0,
   aliquot_uL: 1.5,
   vial_uL: 24.0,
-  solventCorrection: 1.31, // ≈ dynamic CF at the product elution window (notebook)
   defaultEpsilon: 180000,  // fallback product ε when strands aren't in the library
+  // Dynamic MeOH correction: interpolate % B from the gradient at each peak's RT,
+  // apply the linear CF(% B) fit, divide the area by it. `solventCorrection` is the
+  // flat fallback used when dynamic correction is off.
+  useDynamicCF: true,
+  gradient: DEFAULT_GRADIENT.map(p => [...p]),
+  cfCalibration: DEFAULT_CF_CALIBRATION.map(p => [...p]),
+  solventCorrection: 1.31,
   // Yield → conversion %
   rMax_uM: 2.8,
 })
+
+// Least-squares line fit y = slope·x + intercept (np.polyfit deg 1).
+export function linearFit(xs, ys) {
+  const n = Math.min(xs.length, ys.length)
+  if (n < 2) return { slope: 0, intercept: n ? ys[0] : 0 }
+  let sx = 0, sy = 0, sxx = 0, sxy = 0
+  for (let i = 0; i < n; i++) { sx += xs[i]; sy += ys[i]; sxx += xs[i] * xs[i]; sxy += xs[i] * ys[i] }
+  const d = n * sxx - sx * sx
+  if (d === 0) return { slope: 0, intercept: sy / n }
+  const slope = (n * sxy - sx * sy) / d
+  return { slope, intercept: (sy - slope * sx) / n }
+}
+
+// Piecewise-linear interpolation with end clamping (np.interp). `xs` ascending.
+export function interp(x, xs, ys) {
+  const n = xs.length
+  if (!n) return 0
+  if (x <= xs[0]) return ys[0]
+  if (x >= xs[n - 1]) return ys[n - 1]
+  let i = 1
+  while (i < n && xs[i] < x) i++
+  const x0 = xs[i - 1], x1 = xs[i], y0 = ys[i - 1], y1 = ys[i]
+  return x1 === x0 ? y0 : y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+}
+
+// Fit the CF calibration points once → {slope, intercept}.
+export function cfFit(cfCalibration) {
+  const pts = (cfCalibration || DEFAULT_CF_CALIBRATION).filter(p => p && p.length >= 2)
+  return linearFit(pts.map(p => +p[0]), pts.map(p => +p[1]))
+}
+
+// Dynamic MeOH correction factor at a retention time: % B from the gradient, then
+// the linear CF(% B). Returns 1 when disabled or degenerate (no correction).
+export function dynamicCF(rt, gradient, fit) {
+  const g = (gradient || DEFAULT_GRADIENT).filter(p => p && p.length >= 2)
+  if (!g.length || !fit) return 1
+  const pctB = interp(+rt, g.map(p => +p[0]), g.map(p => +p[1]))
+  const cf = pctB * fit.slope + fit.intercept
+  return cf > 0 ? cf : 1
+}
 
 // Param form schema — drives the tunables UI in DataFigures.vue.
 export const HPLC_DNA_PARAMS_SCHEMA = [
@@ -82,10 +140,9 @@ export const BUILTIN_ANALYSIS_SETS = Object.freeze([
     fileFormat: 'Chromeleon .txt export — 43-line header, tab-delimited, comma decimal',
     namingConvention: 'CTI-117_Aalpha_4h.txt  (code · SeqName · time[h/min])',
     filenameMatcher: 'named', // resolved via hplcFilename.parseHplcFilename
-    description:
-      'Peak detection + integration (scipy / hplc-py) then Beer-Lambert product ' +
-      'quantification and conversion %, aggregated into a row×column conversion ' +
-      'heatmap. Ported from the group HPLC heatmap notebook.',
+    // Capabilities that drive which controls/figures the module shows for this set.
+    hplcCorrection: true,             // gradient + MeOH correction editor
+    figures: ['heatmap', 'chromGallery'],
     paramsSchema: HPLC_DNA_PARAMS_SCHEMA,
     defaults: HPLC_DNA_DEFAULTS,
     resultColumns: [
@@ -144,11 +201,20 @@ export function deriveHplcDnaRow(result, meta, params) {
     .slice(0, 2)
   const productArea = products.reduce((s, pk) => s + (pk.area_mAU_min || 0), 0)
 
+  // Dynamic MeOH correction: divide each peak's area by CF(% B at its RT) before
+  // summing, so quantification tracks the gradient. Otherwise use the flat factor.
+  const fit = p.useDynamicCF ? cfFit(p.cfCalibration) : null
+  const productAreaCorr = p.useDynamicCF
+    ? products.reduce((s, pk) => s + (pk.area_mAU_min || 0) / dynamicCF(pk.rt, p.gradient, fit), 0)
+    : productArea
+
   const beer = {
     pathLength_cm: p.pathLength_cm, flow_mL_min: p.flow_mL_min, injection_uL: p.injection_uL,
-    aliquot_uL: p.aliquot_uL, vial_uL: p.vial_uL, solventCorrection: p.solventCorrection,
+    aliquot_uL: p.aliquot_uL, vial_uL: p.vial_uL,
+    // When dynamic CF already corrected the area, don't double-correct here.
+    solventCorrection: p.useDynamicCF ? 1 : p.solventCorrection,
   }
-  const product_uM = epsilon > 0 ? areaToMicromolar(productArea, epsilon, beer) : 0
+  const product_uM = epsilon > 0 ? areaToMicromolar(productAreaCorr, epsilon, beer) : 0
   const conversion_pct = concentrationToConversion(product_uM, p.rMax_uM)
 
   const seqName = m.seqName || (result.name || '').split('_')[1] || result.name
@@ -165,6 +231,7 @@ export function deriveHplcDnaRow(result, meta, params) {
     epsilon,
     epsilonEstimated,
     productArea_mAU_min: productArea,
+    productAreaCorr_mAU_min: productAreaCorr,
     product_uM,
     conversion_pct,
     peaks,

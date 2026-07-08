@@ -1,11 +1,6 @@
 <template>
   <div class="data-figures">
     <h2><i class="fas fa-chart-line"></i> Data &amp; Figures</h2>
-    <p class="df-intro">
-      Upload raw instrument data, run a shared <strong>analysis set</strong>, and get
-      publication-ready figures in one consistent lab style. HPLC-DNA is built in;
-      you can add your own Python analysis and publish it for everyone.
-    </p>
 
     <!-- ── 1 · Analysis set + params ─────────────────────────────────────── -->
     <section class="df-card">
@@ -30,18 +25,19 @@
         <span><i class="fas fa-file-lines"></i> {{ currentSet.fileFormat || '—' }}</span>
         <span><i class="fas fa-tag"></i> {{ currentSet.namingConvention || '—' }}</span>
       </div>
-      <p v-if="currentSet?.description" class="df-desc">{{ currentSet.description }}</p>
 
-      <!-- Params: generated form when the set declares a schema, else JSON. -->
+      <!-- Scalar params: generated from the set's schema, else JSON -->
       <div v-if="currentSchema.length" class="df-params">
         <div v-for="grp in paramGroups" :key="grp" class="df-param-group">
           <h4>{{ grp }}</h4>
           <div class="df-param-grid">
-            <label v-for="f in currentSchema.filter(x => (x.group || 'Parameters') === grp)" :key="f.key" class="df-field">
-              <span>{{ f.label }}<em v-if="f.unit"> ({{ f.unit }})</em></span>
-              <input v-if="f.type === 'boolean'" type="checkbox" v-model="params[f.key]" />
-              <input v-else type="number" :step="f.step || 'any'" v-model.number="params[f.key]" />
-            </label>
+            <template v-for="f in currentSchema.filter(x => (x.group || 'Parameters') === grp)" :key="f.key">
+              <label v-if="f.key !== 'solventCorrection' || !params.useDynamicCF" class="df-field">
+                <span>{{ f.label }}<em v-if="f.unit"> ({{ f.unit }})</em></span>
+                <input v-if="f.type === 'boolean'" type="checkbox" v-model="params[f.key]" />
+                <input v-else type="number" :step="f.step || 'any'" v-model.number="params[f.key]" />
+              </label>
+            </template>
           </div>
         </div>
       </div>
@@ -51,12 +47,55 @@
       </label>
     </section>
 
+    <!-- ── 1b · Gradient + MeOH correction (only for sets that use it) ────── -->
+    <section v-if="currentSet?.hplcCorrection" class="df-card">
+      <h3><i class="fas fa-wave-square"></i> Gradient &amp; MeOH correction</h3>
+      <label class="df-check inline"><input type="checkbox" v-model="params.useDynamicCF" />
+        Dynamic MeOH correction (interpolate % B at each peak, apply linear factor)</label>
+
+      <div class="df-tables">
+        <div class="df-mini">
+          <div class="df-mini-head">
+            <span>Gradient</span>
+            <button class="df-link" @click="addRow(params.gradient, [0, 0])">+ row</button>
+          </div>
+          <table class="df-table compact">
+            <thead><tr><th>Time / min</th><th>% Eluent B</th><th></th></tr></thead>
+            <tbody>
+              <tr v-for="(g, i) in params.gradient" :key="'g' + i">
+                <td><input type="number" step="0.1" v-model.number="g[0]" /></td>
+                <td><input type="number" step="0.1" v-model.number="g[1]" /></td>
+                <td><button class="df-link danger" @click="params.gradient.splice(i, 1)">×</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="df-mini" :class="{ dim: !params.useDynamicCF }">
+          <div class="df-mini-head">
+            <span>MeOH correction factor</span>
+            <button class="df-link" @click="addRow(params.cfCalibration, [0, 1])">+ row</button>
+          </div>
+          <table class="df-table compact">
+            <thead><tr><th>% Eluent B</th><th>Factor</th><th></th></tr></thead>
+            <tbody>
+              <tr v-for="(c, i) in params.cfCalibration" :key="'c' + i">
+                <td><input type="number" step="1" v-model.number="c[0]" /></td>
+                <td><input type="number" step="0.001" v-model.number="c[1]" /></td>
+                <td><button class="df-link danger" @click="params.cfCalibration.splice(i, 1)">×</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="df-fit">CF = {{ fitInfo.slope.toFixed(4) }} · %B + {{ fitInfo.intercept.toFixed(4) }}</div>
+        </div>
+      </div>
+    </section>
+
     <!-- ── 2 · Upload + run ──────────────────────────────────────────────── -->
     <section class="df-card">
       <h3><i class="fas fa-upload"></i> Raw data</h3>
       <div class="df-drop" @dragover.prevent @drop.prevent="onDrop">
         <i class="fas fa-cloud-arrow-up"></i>
-        <span>Drop files here or</span>
         <input ref="fileInput" type="file" multiple @change="onFilesSelected" />
       </div>
       <div v-if="goodFiles.length || skipped.length" class="df-filelist">
@@ -67,14 +106,12 @@
         </div>
       </div>
 
-      <!-- Trust gate for other users' Python before it runs in your browser. -->
       <div v-if="needsTrust" class="df-trust">
         <i class="fas fa-shield-halved"></i>
         <div>
-          <strong>This analysis runs {{ currentSet.owner_id === store.user?.id ? 'your' : 'someone else\'s' }} Python in your browser.</strong>
-          It executes in a sandbox (no page access), but review the code before running a shared set.
+          <strong>Runs {{ currentSet.owner_id === store.user?.id ? 'your' : "another user's" }} Python in a browser sandbox.</strong>
           <details><summary>Show code</summary><pre class="df-code-view">{{ currentSet.code }}</pre></details>
-          <label class="df-check"><input type="checkbox" v-model="trustChecked" /> I have reviewed and trust this analysis set</label>
+          <label class="df-check"><input type="checkbox" v-model="trustChecked" /> Reviewed &amp; trusted</label>
         </div>
       </div>
 
@@ -88,7 +125,10 @@
 
     <!-- ── 3 · Results table ─────────────────────────────────────────────── -->
     <section v-if="tableRows.length" class="df-card">
-      <h3><i class="fas fa-table"></i> Results <span class="df-count">{{ tableRows.length }}</span></h3>
+      <h3>
+        <i class="fas fa-table"></i> Results <span class="df-count">{{ tableRows.length }}</span>
+        <span v-if="anyEstimatedEpsilon" class="df-chip" title="Strands not in the sequence library — default ε used">approx ε</span>
+      </h3>
       <div class="df-table-wrap">
         <table class="df-table">
           <thead>
@@ -101,14 +141,10 @@
           </tbody>
         </table>
       </div>
-      <p v-if="anyEstimatedEpsilon" class="df-note">
-        <i class="fas fa-circle-info"></i> Some samples used a default extinction coefficient
-        (strands not found in your sequence library) — concentrations are approximate.
-      </p>
     </section>
 
-    <!-- ── 4 · Figures ───────────────────────────────────────────────────── -->
-    <section v-if="tableRows.length" class="df-card">
+    <!-- ── 4 · Figures (only what this set produces) ─────────────────────── -->
+    <section v-if="tableRows.length && setFigures.length" class="df-card">
       <h3><i class="fas fa-image"></i> Figures</h3>
       <div class="df-row">
         <label class="df-field">
@@ -123,15 +159,49 @@
             <option v-for="p in allPalettes" :key="p.id" :value="p.id">{{ p.name }}</option>
           </select>
         </label>
+        <button class="df-btn" @click="styleOpen = !styleOpen">
+          <i class="fas" :class="styleOpen ? 'fa-chevron-up' : 'fa-sliders'"></i> Plot style
+        </button>
       </div>
 
-      <div v-if="isHplcDna" class="df-figtabs">
-        <button :class="{ active: figureTab === 'heatmap' }" @click="figureTab = 'heatmap'">Heatmap</button>
-        <button :class="{ active: figureTab === 'gallery' }" @click="figureTab = 'gallery'">Chromatograms</button>
+      <!-- Plot-style editor — drives both the Plotly preview and the export -->
+      <div v-if="styleOpen" class="df-style">
+        <div class="df-param-grid">
+          <label class="df-field"><span>Font</span><input v-model="workingPreset.font" /></label>
+          <label class="df-field"><span>Font size (pt)</span><input type="number" v-model.number="workingPreset.fontSize" /></label>
+          <label class="df-field"><span>Width (in)</span><input type="number" step="0.5" v-model.number="workingPreset.sizeInches[0]" /></label>
+          <label class="df-field"><span>Height (in)</span><input type="number" step="0.5" v-model.number="workingPreset.sizeInches[1]" /></label>
+          <label class="df-field"><span>DPI</span><input type="number" v-model.number="workingPreset.dpi" /></label>
+          <label class="df-field"><span>Axis separator</span>
+            <select v-model="workingPreset.axisSep"><option value=" | "> | </option><option value=" / "> / </option></select>
+          </label>
+          <label class="df-field"><span>Legend size</span><input type="number" v-model.number="workingPreset.legend.fontSize" /></label>
+          <label class="df-field"><span>Band opacity</span><input type="number" step="0.05" min="0" max="1" v-model.number="workingPreset.band.alpha" /></label>
+        </div>
+        <div class="df-toggles">
+          <label class="df-check inline"><input type="checkbox" v-model="workingPreset.spines.top" /> Top spine</label>
+          <label class="df-check inline"><input type="checkbox" v-model="workingPreset.spines.right" /> Right spine</label>
+          <label class="df-check inline"><input type="checkbox" v-model="workingPreset.grid" /> Grid</label>
+          <label class="df-check inline"><input type="checkbox" v-model="workingPreset.legend.show" /> Legend</label>
+          <label class="df-check inline"><input type="checkbox" v-model="workingPreset.legend.frame" /> Legend frame</label>
+        </div>
+        <div class="df-row">
+          <label class="df-field grow"><span>Save preset as</span><input v-model="presetName" :placeholder="workingPreset.name" /></label>
+          <label class="df-field"><span>Scope</span>
+            <select v-model="presetScope"><option>Personal</option><option>Global</option></select>
+          </label>
+          <button class="df-btn primary" :disabled="!store.user" @click="savePreset"><i class="fas fa-save"></i> Save style</button>
+          <span v-if="presetMsg" class="df-progress">{{ presetMsg }}</span>
+        </div>
       </div>
 
-      <!-- Heatmap -->
-      <div v-show="figureTab === 'heatmap' && isHplcDna" class="df-figure">
+      <div v-if="setFigures.length > 1" class="df-figtabs">
+        <button v-for="f in setFigures" :key="f" :class="{ active: figureTab === f }" @click="figureTab = f">
+          {{ FIGURE_LABELS[f] || f }}
+        </button>
+      </div>
+
+      <div v-show="figureTab === 'heatmap'" class="df-figure">
         <div class="df-row">
           <label class="df-field">
             <span>Value</span>
@@ -150,29 +220,24 @@
         <div ref="heatEl" class="df-plot"></div>
       </div>
 
-      <!-- Chromatogram gallery -->
-      <div v-show="figureTab === 'gallery' && isHplcDna" class="df-gallery">
+      <div v-show="figureTab === 'chromGallery'" class="df-gallery">
         <div v-for="r in tableRows" :key="r.name" class="df-gallery-item"
              :ref="el => setGalleryRef(r.name, el)"></div>
       </div>
 
-      <div v-if="isHplcDna" class="df-actions">
-        <button class="df-btn" :disabled="exportBusy" @click="exportFigure('png')"><i class="fas fa-file-image"></i> Export PNG</button>
-        <button class="df-btn" :disabled="exportBusy" @click="exportFigure('svg')"><i class="fas fa-bezier-curve"></i> Export SVG</button>
-        <button class="df-btn" :disabled="exportBusy" @click="exportFigure('pdf')"><i class="fas fa-file-pdf"></i> Export PDF</button>
+      <div class="df-actions">
+        <button class="df-btn" :disabled="exportBusy" @click="exportFigure('png')"><i class="fas fa-file-image"></i> PNG</button>
+        <button class="df-btn" :disabled="exportBusy" @click="exportFigure('svg')"><i class="fas fa-bezier-curve"></i> SVG</button>
+        <button class="df-btn" :disabled="exportBusy" @click="exportFigure('pdf')"><i class="fas fa-file-pdf"></i> PDF</button>
         <span v-if="exportProgress" class="df-progress">{{ exportProgress }}</span>
       </div>
-      <p v-else class="df-note">
-        <i class="fas fa-circle-info"></i> Interactive figures and publication export for custom
-        Python sets are coming next — for now the analysed table above is available to save.
-      </p>
       <div v-if="exportImg" class="df-export-preview">
         <img v-if="exportImg.format !== 'pdf'" :src="exportImg.dataUrl" alt="publication figure" />
         <a :href="exportImg.dataUrl" :download="exportFilename">Download {{ exportImg.format.toUpperCase() }}</a>
       </div>
     </section>
 
-    <!-- ── 5 · Save / publish dataset ────────────────────────────────────── -->
+    <!-- ── 5 · Save dataset ──────────────────────────────────────────────── -->
     <section v-if="tableRows.length" class="df-card">
       <h3><i class="fas fa-cloud-arrow-up"></i> Save dataset</h3>
       <div class="df-row">
@@ -181,44 +246,45 @@
           <select v-model="datasetScope"><option>Personal</option><option>Global</option></select>
         </label>
         <button class="df-btn primary" :disabled="!store.user || !datasetName" @click="saveDataset"><i class="fas fa-save"></i> Save</button>
+        <span v-if="saveMsg" class="df-progress">{{ saveMsg }}</span>
       </div>
-      <span v-if="saveMsg" class="df-progress">{{ saveMsg }}</span>
     </section>
 
-    <!-- ── 6 · Analysis-set manager ──────────────────────────────────────── -->
+    <!-- ── 6 · Analysis-set manager (copy-paste your code) ───────────────── -->
     <section class="df-card">
       <h3 class="df-collapse" @click="managerOpen = !managerOpen">
         <i class="fas" :class="managerOpen ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
-        Create / share an analysis set
+        Analysis set — paste code &amp; share
       </h3>
       <div v-if="managerOpen" class="df-manager">
-        <p class="df-desc">
-          Define a Python analysis everyone can reuse. It must define
-          <code>analyze(files, params)</code> returning
-          <code>{{ '{ columns, rows, traces }' }}</code>.
-        </p>
         <div class="df-row">
           <label class="df-field grow"><span>Name</span><input v-model="editor.name" placeholder="e.g. UV-Vis kinetics" /></label>
+          <label class="df-field"><span>Runtime</span>
+            <select v-model="editor.runtime">
+              <option value="pyodide">In-browser (Pyodide)</option>
+              <option value="backend">Server (Docker) — soon</option>
+            </select>
+          </label>
           <label class="df-field"><span>Scope</span>
             <select v-model="editor.scope"><option>Personal</option><option>Global</option></select>
           </label>
         </div>
         <div class="df-row">
           <label class="df-field grow"><span>Instrument</span><input v-model="editor.instrument" placeholder="e.g. Tecan Spark" /></label>
-          <label class="df-field grow"><span>File format</span><input v-model="editor.fileFormat" placeholder="e.g. CSV export, 2 header rows" /></label>
+          <label class="df-field grow"><span>File format</span><input v-model="editor.fileFormat" placeholder="e.g. CSV, 2 header rows" /></label>
         </div>
         <div class="df-row">
           <label class="df-field grow"><span>Naming convention</span><input v-model="editor.namingConvention" placeholder="e.g. {run}_{sample}_{time}.csv" /></label>
-          <label class="df-field grow"><span>Extra pip packages (comma-sep)</span><input v-model="editor.packages" placeholder="e.g. openpyxl" /></label>
+          <label class="df-field grow"><span>Extra pip packages</span><input v-model="editor.packages" placeholder="comma-separated, e.g. openpyxl" /></label>
         </div>
         <label class="df-field"><span>Default params (JSON)</span>
           <textarea v-model="editor.defaultsJson" rows="3" class="df-code"></textarea>
         </label>
-        <label class="df-field"><span>Python code</span>
-          <textarea v-model="editor.code" rows="14" class="df-code df-code-lg" spellcheck="false"></textarea>
+        <label class="df-field"><span>Python — must define analyze(files, params)</span>
+          <textarea v-model="editor.code" rows="18" class="df-code df-code-lg" spellcheck="false"></textarea>
         </label>
         <div class="df-actions">
-          <button class="df-btn" @click="seedTemplate"><i class="fas fa-wand-magic-sparkles"></i> Insert template</button>
+          <button class="df-btn" @click="seedTemplate"><i class="fas fa-paste"></i> Paste-in template</button>
           <button class="df-btn primary" :disabled="!store.user || !editor.name || !editor.code" @click="saveSet">
             <i class="fas fa-save"></i> {{ editor.id ? 'Update' : 'Save' }} set
           </button>
@@ -228,7 +294,7 @@
 
         <div v-if="myCustomSets.length" class="df-myset-list">
           <div v-for="s in myCustomSets" :key="s.id" class="df-myset">
-            <span>{{ s.name }} · {{ s.scope }}</span>
+            <span>{{ s.name }} · {{ s.scope }} · {{ s.runtime || 'pyodide' }}</span>
             <span class="df-myset-actions">
               <button class="df-link" @click="editSet(s)">Edit</button>
               <button class="df-link danger" @click="removeSet(s)">Delete</button>
@@ -251,7 +317,7 @@ import {
 } from '../services/dataFiguresService'
 import {
   BUILTIN_ANALYSIS_SETS, getAnalysisSetById, resolveParams,
-  deriveHplcDnaRow, buildMatrix, timepointsOf,
+  deriveHplcDnaRow, buildMatrix, timepointsOf, cfFit,
 } from '../utils/analysisSets'
 import { BOEKHOVEN_PALETTE, hexToRgba } from '../utils/palette'
 import {
@@ -260,57 +326,52 @@ import {
 } from '../utils/plotStyle'
 
 const store = useLabStore()
+const FIGURE_LABELS = { heatmap: 'Heatmap', chromGallery: 'Chromatograms', xy: 'XY' }
 
 // ── Analysis sets ────────────────────────────────────────────────────────────
 const builtinSets = BUILTIN_ANALYSIS_SETS
-const customSets = ref([])            // from Supabase, kind 'analysis_set'
+const customSets = ref([])
 const selectedSetId = ref(builtinSets[0].id)
-
 const visibleCustomSets = computed(() =>
   customSets.value.filter(s => s.scope === 'Global' || s.owner_id === store.user?.id))
 const myCustomSets = computed(() => customSets.value.filter(s => s.owner_id === store.user?.id))
-const currentSet = computed(() =>
-  getAnalysisSetById(selectedSetId.value, customSets.value))
+const currentSet = computed(() => getAnalysisSetById(selectedSetId.value, customSets.value))
 const isHplcDna = computed(() => currentSet.value?.builtinKey === 'hplc-dna')
+const setFigures = computed(() => currentSet.value?.figures || [])
 
 const currentSchema = computed(() => currentSet.value?.paramsSchema || [])
-const paramGroups = computed(() =>
-  [...new Set(currentSchema.value.map(f => f.group || 'Parameters'))])
+const paramGroups = computed(() => [...new Set(currentSchema.value.map(f => f.group || 'Parameters'))])
 
 const params = reactive({})
 const paramsJson = ref('{}')
-
 function loadDefaults(set) {
   for (const k of Object.keys(params)) delete params[k]
-  Object.assign(params, set?.defaults || {})
+  // Deep clone so editing gradient/CF tables never mutates the frozen defaults.
+  Object.assign(params, JSON.parse(JSON.stringify(set?.defaults || {})))
   paramsJson.value = JSON.stringify(set?.defaults || {}, null, 2)
 }
 watch(currentSet, (s) => loadDefaults(s), { immediate: true })
 
+const fitInfo = computed(() => cfFit(params.cfCalibration || []))
+function addRow(arr, row) { if (Array.isArray(arr)) arr.push([...row]) }
+
 // ── Uploaded files ───────────────────────────────────────────────────────────
 const fileInput = ref(null)
-const goodFiles = ref([])   // [{ file, meta }]
+const goodFiles = ref([])
 const skipped = ref([])
 const seqLibraryMap = ref(new Map())
-
 function loadSeqLibrary() {
   try {
     const raw = localStorage.getItem('lida_seq_library')
-    const entries = raw ? JSON.parse(raw) : []
-    seqLibraryMap.value = new Map(entries.map(e => [e.name.toLowerCase(), e]))
+    seqLibraryMap.value = new Map((raw ? JSON.parse(raw) : []).map(e => [e.name.toLowerCase(), e]))
   } catch { seqLibraryMap.value = new Map() }
 }
-
 function onFilesSelected(e) { ingestFiles(Array.from(e.target.files || [])); e.target.value = '' }
 function onDrop(e) { ingestFiles(Array.from(e.dataTransfer?.files || [])) }
-
 function ingestFiles(fileList) {
   if (!fileList.length) return
-  const good = []
-  const bad = []
+  const good = [], bad = []
   for (const f of fileList) {
-    // For the builtin HPLC-DNA set, resolve the filename + sequence up front so
-    // bad names never reach the worker. Other sets take files as-is.
     if (isHplcDna.value) {
       const meta = parseHplcFilename(f.name)
       if (meta.error) { bad.push({ name: f.name, reason: meta.error }); continue }
@@ -334,29 +395,26 @@ function ingestFiles(fileList) {
 // ── Trust gate for shared Python ─────────────────────────────────────────────
 const trustChecked = ref(false)
 const ackSets = ref(new Set(JSON.parse(localStorage.getItem('datafig_ack_sets') || '[]')))
-const needsTrust = computed(() =>
-  currentSet.value?.kind === 'python' && !ackSets.value.has(currentSet.value.id))
-
+const needsTrust = computed(() => currentSet.value?.kind === 'python' && !ackSets.value.has(currentSet.value.id))
 const canRun = computed(() =>
-  !isRunning.value && goodFiles.value.length > 0 &&
-  (!needsTrust.value || trustChecked.value))
+  !isRunning.value && goodFiles.value.length > 0 && (!needsTrust.value || trustChecked.value))
 
 // ── Run ──────────────────────────────────────────────────────────────────────
 const isRunning = ref(false)
 const progress = ref('')
-const rawResults = ref([])          // hplc worker results (builtin)
-const pythonResult = ref(null)      // { columns, rows, traces } (python sets)
-
+const rawResults = ref([])
+const pythonResult = ref(null)
 async function runAnalysis() {
+  if (currentSet.value?.kind === 'python' && currentSet.value.runtime === 'backend') {
+    progress.value = 'Server (Docker) runtime is not wired up yet — set the runtime to In-browser.'
+    return
+  }
   isRunning.value = true
   progress.value = 'Reading files…'
   rawResults.value = []
   pythonResult.value = null
   try {
-    const files = await Promise.all(goodFiles.value.map(async ({ file }) => ({
-      name: file.name, text: await file.text(),
-    })))
-
+    const files = await Promise.all(goodFiles.value.map(async ({ file }) => ({ name: file.name, text: await file.text() })))
     if (isHplcDna.value) {
       const wp = {
         scanMin: +params.scanMin, scanMax: +params.scanMax, prominence: +params.prominence,
@@ -366,12 +424,9 @@ async function runAnalysis() {
       const results = await processChromatograms(files, wp, m => (progress.value = m))
       rawResults.value = results.map((r, i) => ({ ...r, meta: goodFiles.value[i]?.meta }))
     } else {
-      // Custom Python set. Persist trust acknowledgement on first successful run.
       const p = currentSchema.value.length ? { ...params } : safeJson(paramsJson.value, {})
-      const pkgs = (currentSet.value.packages || '')
-        .split(',').map(s => s.trim()).filter(Boolean)
-      pythonResult.value = await runPythonAnalysis(
-        currentSet.value.code, files, p, pkgs, m => (progress.value = m))
+      const pkgs = (currentSet.value.packages || '').split(',').map(s => s.trim()).filter(Boolean)
+      pythonResult.value = await runPythonAnalysis(currentSet.value.code, files, p, pkgs, m => (progress.value = m))
       acknowledgeTrust(currentSet.value.id)
     }
     progress.value = `Done — ${files.length} file(s) processed.`
@@ -381,7 +436,6 @@ async function runAnalysis() {
     isRunning.value = false
   }
 }
-
 function acknowledgeTrust(id) {
   ackSets.value.add(id)
   localStorage.setItem('datafig_ack_sets', JSON.stringify([...ackSets.value]))
@@ -394,13 +448,10 @@ const derivedRows = computed(() => {
   return rawResults.value.map(r => deriveHplcDnaRow(r, r.meta, rp))
 })
 const tableRows = computed(() => derivedRows.value)
-const columns = computed(() => {
-  if (!isHplcDna.value) return pythonResult.value?.columns || []
-  return currentSet.value?.resultColumns || []
-})
+const columns = computed(() =>
+  isHplcDna.value ? (currentSet.value?.resultColumns || []) : (pythonResult.value?.columns || []))
 const anyEstimatedEpsilon = computed(() => isHplcDna.value && derivedRows.value.some(r => r.epsilonEstimated))
 const timepoints = computed(() => timepointsOf(derivedRows.value))
-
 function fmtCell(v) {
   if (v == null) return ''
   if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(2)
@@ -416,7 +467,37 @@ const allPresets = computed(() => [DEFAULT_PRESET, ...customPresets.value])
 const selectedPaletteId = ref(BOEKHOVEN_PALETTE.id)
 const selectedPresetId = ref(DEFAULT_PRESET.id)
 const currentPalette = computed(() => allPalettes.value.find(p => p.id === selectedPaletteId.value) || BOEKHOVEN_PALETTE)
-const currentPreset = computed(() => resolvePreset(allPresets.value.find(p => p.id === selectedPresetId.value) || DEFAULT_PRESET))
+
+// Editable working copy of the selected preset — drives preview + export live.
+const styleOpen = ref(false)
+const presetName = ref('')
+const presetScope = ref('Personal')
+const presetMsg = ref('')
+const workingPreset = reactive(JSON.parse(JSON.stringify(resolvePreset(DEFAULT_PRESET))))
+function loadPreset(p) { Object.assign(workingPreset, JSON.parse(JSON.stringify(resolvePreset(p)))) }
+watch(selectedPresetId, (id) => {
+  const p = allPresets.value.find(x => x.id === id)
+  if (p) { loadPreset(p); presetName.value = '' }
+})
+const currentPreset = computed(() => resolvePreset(workingPreset))
+
+async function savePreset() {
+  presetMsg.value = 'Saving…'
+  try {
+    const base = JSON.parse(JSON.stringify(workingPreset))
+    const isBuiltin = workingPreset.id === DEFAULT_PRESET.id
+    const obj = {
+      ...base, kind: 'plot_preset', scope: presetScope.value,
+      name: presetName.value || workingPreset.name,
+      id: isBuiltin ? ('preset_' + uuid()) : workingPreset.id,
+      builtin: false,
+    }
+    await saveItem(obj, store.user.id)
+    await loadCustom()
+    selectedPresetId.value = obj.id
+    presetMsg.value = 'Saved.'
+  } catch (err) { presetMsg.value = `Save failed: ${err?.message || err}` }
+}
 
 // ── Interactive figures (Plotly) ─────────────────────────────────────────────
 const figureTab = ref('heatmap')
@@ -425,11 +506,11 @@ const heatmapTime = ref(null)
 const heatEl = ref(null)
 const galleryRefs = ref({})
 function setGalleryRef(name, el) { if (el) galleryRefs.value[name] = el }
-
+watch(setFigures, (f) => { if (f.length && !f.includes(figureTab.value)) figureTab.value = f[0] }, { immediate: true })
 watch(timepoints, (tps) => { if (heatmapTime.value == null && tps.length) heatmapTime.value = tps[tps.length - 1] })
 
 function renderHeatmap() {
-  if (!heatEl.value || !isHplcDna.value) return
+  if (!heatEl.value || !setFigures.value.includes('heatmap')) return
   const rows = derivedRows.value
   if (!rows.length) { Plotly.purge(heatEl.value); return }
   const value = heatmapValue.value
@@ -437,8 +518,7 @@ function renderHeatmap() {
   const m = buildMatrix(rows, { value, timeMin: tp })
   const vmax = value === 'conversion_pct' ? 100 : Math.max(...m.z.flat().filter(v => v != null), 0.001)
   const { layout, colorscale } = boekhovenHeatmapLayout(currentPreset.value, currentPalette.value, {
-    isDark: store.isDarkMode,
-    x: { quantity: 'Sequence column' }, y: { quantity: 'Row' },
+    isDark: store.isDarkMode, x: { quantity: 'Sequence column' }, y: { quantity: 'Row' },
     title: value === 'conversion_pct' ? 'Conversion' : 'Product concentration',
   })
   const annotations = []
@@ -460,7 +540,7 @@ function renderHeatmap() {
 }
 
 function renderGallery() {
-  if (!isHplcDna.value) return
+  if (!setFigures.value.includes('chromGallery')) return
   const pal = currentPalette.value
   const lineColor = store.isDarkMode ? '#e2e8f0' : '#0f172a'
   for (const r of derivedRows.value) {
@@ -491,17 +571,15 @@ function renderGallery() {
     Plotly.react(el, traces, layout, { responsive: true, displayModeBar: false })
   }
 }
-
 function renderFigures() { nextTick(() => { renderHeatmap(); renderGallery() }) }
-watch([derivedRows, selectedPresetId, selectedPaletteId, figureTab, heatmapValue, heatmapTime,
-  () => store.isDarkMode], renderFigures)
+watch([derivedRows, selectedPaletteId, figureTab, heatmapValue, heatmapTime, () => store.isDarkMode], renderFigures)
+watch(workingPreset, renderFigures, { deep: true })
 
 // ── matplotlib publication export ────────────────────────────────────────────
 const exportBusy = ref(false)
 const exportProgress = ref('')
 const exportImg = ref(null)
 const exportFilename = computed(() => `figure_${figureTab.value}.${exportImg.value?.format || 'png'}`)
-
 function buildExportSpec() {
   const pal = currentPalette.value
   if (figureTab.value === 'heatmap') {
@@ -519,9 +597,7 @@ function buildExportSpec() {
   const panels = derivedRows.value.map(r => ({
     name: r.name, t: r.trace?.t || [], s: r.trace?.s || [],
     title: `${r.seqName || r.name} · ${r.product_uM.toFixed(2)} µM`,
-    shades: (r.peaks || []).filter(p => p.peakClass === 'product').map(p => ({
-      x0: p.rt - 0.18, x1: p.rt + 0.18, color: pal.control,
-    })),
+    shades: (r.peaks || []).filter(p => p.peakClass === 'product').map(p => ({ x0: p.rt - 0.18, x1: p.rt + 0.18, color: pal.control })),
     vlines: [params.productMin, params.productMax],
   }))
   return { type: 'chromGallery', data: {
@@ -529,15 +605,13 @@ function buildExportSpec() {
     xlabel: axisTitle('t', 'min', currentPreset.value), ylabel: axisTitle('signal', 'mAU', currentPreset.value),
   } }
 }
-
 async function exportFigure(format) {
   exportBusy.value = true
-  exportProgress.value = 'Preparing Python renderer…'
+  exportProgress.value = 'Preparing renderer…'
   exportImg.value = null
   try {
     const styleCode = matplotlibStyleCode(currentPreset.value, currentPalette.value)
-    const spec = buildExportSpec()
-    exportImg.value = await renderFigure(styleCode, spec, format, null, m => (exportProgress.value = m))
+    exportImg.value = await renderFigure(styleCode, buildExportSpec(), format, null, m => (exportProgress.value = m))
     exportProgress.value = ''
   } catch (err) {
     exportProgress.value = `Export failed: ${err?.message || err}`
@@ -554,8 +628,7 @@ async function saveDataset() {
   saveMsg.value = 'Saving…'
   try {
     const obj = {
-      id: 'dfset_' + (globalThis.crypto?.randomUUID?.() || Date.now().toString(36)),
-      kind: 'dataset', scope: datasetScope.value, name: datasetName.value,
+      id: 'dfset_' + uuid(), kind: 'dataset', scope: datasetScope.value, name: datasetName.value,
       analysisSetId: selectedSetId.value, params: { ...params },
       columns: columns.value, rows: tableRows.value,
       figure: { presetId: selectedPresetId.value, paletteId: selectedPaletteId.value, tab: figureTab.value, heatmapValue: heatmapValue.value },
@@ -570,31 +643,37 @@ async function saveDataset() {
 const managerOpen = ref(false)
 const managerMsg = ref('')
 const editor = reactive({
-  id: '', name: '', scope: 'Personal', instrument: '', fileFormat: '',
+  id: '', name: '', scope: 'Personal', runtime: 'pyodide', instrument: '', fileFormat: '',
   namingConvention: '', packages: '', defaultsJson: '{}', code: '',
 })
 function resetEditor() {
-  Object.assign(editor, { id: '', name: '', scope: 'Personal', instrument: '', fileFormat: '', namingConvention: '', packages: '', defaultsJson: '{}', code: '' })
+  Object.assign(editor, { id: '', name: '', scope: 'Personal', runtime: 'pyodide', instrument: '', fileFormat: '', namingConvention: '', packages: '', defaultsJson: '{}', code: '' })
 }
 function seedTemplate() {
-  editor.code = `def analyze(files, params):
-    """files: [{'name','text'}]  params: dict from 'Default params'.
-    Return {'columns': [...], 'rows': [...], 'traces': {name: {'t': [...], 's': [...]}}}.
-    """
-    import io
-    rows = []
-    traces = {}
+  editor.code = `# Paste your existing analysis below, then adapt analyze() to call it.
+# Contract: analyze(files, params) -> {'columns': [...], 'rows': [...], 'traces': {name: {'t': [...], 's': [...]}}}
+#   files  = [{'name': str, 'text': str}]
+#   params = your "Default params" dict (edit above)
+import numpy as np
+import pandas as pd
+from io import StringIO
+
+# --- paste your existing helper functions here, unchanged ---
+def read_file(text):
+    # e.g. Chromeleon export: 43 header lines, tab-delimited, comma decimal
+    df = pd.read_csv(StringIO(text), sep='\\t', decimal=',', skiprows=43,
+                     header=None, names=['time', 'step', 'signal'], usecols=[0, 1, 2])
+    return df.apply(pd.to_numeric, errors='coerce').dropna()
+
+# --- required entry point ---
+def analyze(files, params):
+    rows, traces = [], {}
     for f in files:
-        # Example: parse a simple 2-column CSV of x,y and report the max y.
-        ys = []
-        for line in f['text'].splitlines()[1:]:
-            parts = line.replace(',', ' ').split()
-            if len(parts) >= 2:
-                try: ys.append(float(parts[1]))
-                except ValueError: pass
-        rows.append({'file': f['name'], 'max': max(ys) if ys else 0})
+        df = read_file(f['text'])
+        rows.append({'file': f['name'], 'max_signal': float(df['signal'].max())})
+        traces[f['name']] = {'t': df['time'].tolist(), 's': df['signal'].tolist()}
     return {
-        'columns': [{'key': 'file', 'label': 'File'}, {'key': 'max', 'label': 'Max', 'unit': 'AU'}],
+        'columns': [{'key': 'file', 'label': 'File'}, {'key': 'max_signal', 'label': 'Max', 'unit': 'mAU'}],
         'rows': rows,
         'traces': traces,
     }
@@ -603,8 +682,8 @@ function seedTemplate() {
 function editSet(s) {
   managerOpen.value = true
   Object.assign(editor, {
-    id: s.id, name: s.name, scope: s.scope, instrument: s.instrument || '',
-    fileFormat: s.fileFormat || '', namingConvention: s.namingConvention || '',
+    id: s.id, name: s.name, scope: s.scope, runtime: s.runtime || 'pyodide',
+    instrument: s.instrument || '', fileFormat: s.fileFormat || '', namingConvention: s.namingConvention || '',
     packages: s.packages || '', defaultsJson: JSON.stringify(s.defaults || {}, null, 2), code: s.code || '',
   })
 }
@@ -612,9 +691,8 @@ async function saveSet() {
   managerMsg.value = 'Saving…'
   try {
     const obj = {
-      id: editor.id || ('aset_' + (globalThis.crypto?.randomUUID?.() || Date.now().toString(36))),
-      kind: 'python', scope: editor.scope, name: editor.name,
-      instrument: editor.instrument, fileFormat: editor.fileFormat,
+      id: editor.id || ('aset_' + uuid()), kind: 'python', scope: editor.scope, runtime: editor.runtime,
+      name: editor.name, instrument: editor.instrument, fileFormat: editor.fileFormat,
       namingConvention: editor.namingConvention, packages: editor.packages,
       defaults: safeJson(editor.defaultsJson, {}), code: editor.code,
     }
@@ -631,72 +709,66 @@ async function removeSet(s) {
 }
 
 // ── Load shared items ────────────────────────────────────────────────────────
+function uuid() { return globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2) }
 async function loadCustom() {
   const items = await listItems()
   customSets.value = items.filter(i => i.kind === 'python')
   customPalettes.value = items.filter(i => i.kind === 'palette')
   customPresets.value = items.filter(i => i.kind === 'plot_preset')
 }
-
-onMounted(() => {
-  loadSeqLibrary()
-  loadCustom()
-})
+onMounted(() => { loadSeqLibrary(); loadCustom() })
 </script>
 
 <style scoped>
 .data-figures { max-width: 1100px; }
-.df-intro { color: var(--text); opacity: 0.8; font-size: 0.9rem; margin: 4px 0 16px; }
-.df-card {
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 16px; margin-bottom: 16px;
-}
-.df-card h3 { margin-bottom: 12px; }
+.df-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+.df-card h3 { margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
 .df-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
 .df-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; }
 .df-field.grow { flex: 1; min-width: 180px; }
 .df-field > span { font-weight: 600; opacity: 0.75; }
 .df-field em { opacity: 0.6; font-style: normal; }
-.df-meta { display: flex; flex-wrap: wrap; gap: 16px; font-size: 0.75rem; opacity: 0.75; margin-top: 10px; }
-.df-desc { font-size: 0.8rem; opacity: 0.8; margin: 8px 0; }
+.df-meta { display: flex; flex-wrap: wrap; gap: 16px; font-size: 0.75rem; opacity: 0.75; margin: 10px 0; }
 .df-params { margin-top: 12px; }
 .df-param-group h4 { margin: 12px 0 6px; }
 .df-param-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 
-.df-drop {
-  display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
-  border: 2px dashed var(--border); border-radius: var(--radius); padding: 22px; text-align: center;
-  color: var(--text); opacity: 0.85; font-size: 0.85rem;
-}
+.df-check.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; }
+.df-tables { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 12px; }
+.df-mini { min-width: 220px; }
+.df-mini.dim { opacity: 0.5; }
+.df-mini-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.78rem; margin-bottom: 4px; }
+.df-table.compact th, .df-table.compact td { padding: 2px 4px; }
+.df-table.compact input { width: 74px; padding: 4px; }
+.df-fit { margin-top: 6px; font-size: 0.74rem; font-family: ui-monospace, monospace; opacity: 0.85; }
+
+.df-drop { display: flex; align-items: center; justify-content: center; gap: 12px; border: 2px dashed var(--border); border-radius: var(--radius); padding: 18px; }
 .df-drop i { font-size: 1.4rem; color: var(--primary); }
 .df-filelist { margin-top: 10px; font-size: 0.8rem; }
 .df-file-ok { color: #10b981; font-weight: 600; }
 .df-file-skip { color: #f59e0b; margin-top: 6px; }
 .df-file-skip ul { margin: 4px 0 0 20px; opacity: 0.8; }
 
-.df-trust {
-  display: flex; gap: 12px; margin-top: 14px; padding: 12px;
-  border: 1px solid #f59e0b; border-radius: var(--radius); background: rgba(245, 158, 11, 0.08); font-size: 0.82rem;
-}
+.df-trust { display: flex; gap: 12px; margin-top: 14px; padding: 12px; border: 1px solid #f59e0b; border-radius: var(--radius); background: rgba(245, 158, 11, 0.08); font-size: 0.82rem; }
 .df-trust > i { color: #f59e0b; font-size: 1.2rem; }
 .df-check { display: block; margin-top: 8px; font-weight: 600; }
 .df-code-view { max-height: 220px; overflow: auto; background: var(--input-bg); padding: 8px; border-radius: 6px; font-size: 0.72rem; }
 
 .df-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
-.df-btn {
-  background: var(--input-bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 8px 14px; cursor: pointer; font-weight: 600; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px;
-}
+.df-btn { background: var(--input-bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 14px; cursor: pointer; font-weight: 600; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px; }
 .df-btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
 .df-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .df-progress { font-size: 0.78rem; opacity: 0.8; }
-.df-count { background: var(--primary); color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 0.7rem; margin-left: 6px; }
+.df-count { background: var(--primary); color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 0.7rem; }
+.df-chip { background: rgba(245, 158, 11, 0.18); color: #b45309; border-radius: 999px; padding: 1px 8px; font-size: 0.68rem; font-weight: 600; }
 
 .df-table-wrap { overflow-x: auto; }
 .df-table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
 .df-table th, .df-table td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
 .df-table th { background: var(--input-bg); }
-.df-note { font-size: 0.76rem; opacity: 0.8; margin-top: 8px; }
+
+.df-style { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--input-bg); }
+.df-toggles { display: flex; flex-wrap: wrap; gap: 14px; margin: 12px 0; }
 
 .df-figtabs { display: flex; gap: 6px; margin: 12px 0; }
 .df-figtabs button { background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 14px; cursor: pointer; font-size: 0.8rem; }
@@ -711,7 +783,7 @@ onMounted(() => {
 .df-collapse { cursor: pointer; user-select: none; }
 .df-manager { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
 .df-code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.76rem; }
-.df-code-lg { min-height: 220px; }
+.df-code-lg { min-height: 260px; }
 .df-myset-list { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
 .df-myset { display: flex; justify-content: space-between; padding: 4px 0; font-size: 0.8rem; }
 .df-myset-actions { display: flex; gap: 10px; }

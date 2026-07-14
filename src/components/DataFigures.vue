@@ -26,17 +26,48 @@
         <span><i class="fas fa-tag"></i> {{ currentSet.namingConvention || '—' }}</span>
       </div>
 
-      <!-- Scalar params: generated from the set's schema, else JSON -->
+      <!-- Tunables rendered generically from the set's schema (any widget the set
+           declares — numbers, toggles, tables like the gradient, …). If a set
+           ships no schema, one is inferred from its default-params shape. -->
       <div v-if="currentSchema.length" class="df-params">
         <div v-for="grp in paramGroups" :key="grp" class="df-param-group">
-          <h4>{{ grp }}</h4>
-          <div class="df-param-grid">
-            <template v-for="f in currentSchema.filter(x => (x.group || 'Parameters') === grp)" :key="f.key">
-              <label v-if="f.key !== 'solventCorrection' || !params.useDynamicCF" class="df-field">
-                <span>{{ f.label }}<em v-if="f.unit"> ({{ f.unit }})</em></span>
-                <input v-if="f.type === 'boolean'" type="checkbox" v-model="params[f.key]" />
-                <input v-else type="number" :step="f.step || 'any'" v-model.number="params[f.key]" />
-              </label>
+          <h4 v-if="grp !== 'Parameters' || paramGroups.length > 1">{{ grp }}</h4>
+          <div class="df-fields">
+            <template v-for="f in fieldsInGroup(grp)" :key="f.key">
+              <template v-if="fieldVisible(f)">
+                <label v-if="f.type === 'boolean'" class="df-check inline">
+                  <input type="checkbox" v-model="params[f.key]" /> {{ f.label }}
+                </label>
+                <label v-else-if="f.type === 'select'" class="df-field">
+                  <span>{{ f.label }}</span>
+                  <select v-model="params[f.key]"><option v-for="o in f.options" :key="o" :value="o">{{ o }}</option></select>
+                </label>
+                <label v-else-if="f.type === 'text'" class="df-field">
+                  <span>{{ f.label }}</span><input v-model="params[f.key]" />
+                </label>
+                <div v-else-if="f.type === 'table'" class="df-mini">
+                  <div class="df-mini-head">
+                    <span>{{ f.label }}</span>
+                    <button class="df-link" @click="addTableRow(f)">+ row</button>
+                  </div>
+                  <table class="df-table compact">
+                    <thead><tr><th v-for="c in f.columns" :key="c.label">{{ c.label }}</th><th></th></tr></thead>
+                    <tbody>
+                      <tr v-for="(row, i) in (params[f.key] || [])" :key="i">
+                        <td v-for="(c, ci) in f.columns" :key="ci">
+                          <input type="number" :step="c.step || 'any'" v-model.number="row[ci]" />
+                        </td>
+                        <td><button class="df-link danger" @click="params[f.key].splice(i, 1)">×</button></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div v-else-if="f.type === 'readout'" class="df-fit">{{ readoutText(f) }}</div>
+                <label v-else class="df-field">
+                  <span>{{ f.label }}<em v-if="f.unit"> ({{ f.unit }})</em></span>
+                  <input type="number" :step="f.step || 'any'" v-model.number="params[f.key]" />
+                </label>
+              </template>
             </template>
           </div>
         </div>
@@ -45,50 +76,6 @@
         <span>Parameters (JSON)</span>
         <textarea v-model="paramsJson" rows="4" class="df-code"></textarea>
       </label>
-    </section>
-
-    <!-- ── 1b · Gradient + MeOH correction (only for sets that use it) ────── -->
-    <section v-if="currentSet?.hplcCorrection" class="df-card">
-      <h3><i class="fas fa-wave-square"></i> Gradient &amp; MeOH correction</h3>
-      <label class="df-check inline"><input type="checkbox" v-model="params.useDynamicCF" />
-        Dynamic MeOH correction (interpolate % B at each peak, apply linear factor)</label>
-
-      <div class="df-tables">
-        <div class="df-mini">
-          <div class="df-mini-head">
-            <span>Gradient</span>
-            <button class="df-link" @click="addRow(params.gradient, [0, 0])">+ row</button>
-          </div>
-          <table class="df-table compact">
-            <thead><tr><th>Time / min</th><th>% Eluent B</th><th></th></tr></thead>
-            <tbody>
-              <tr v-for="(g, i) in params.gradient" :key="'g' + i">
-                <td><input type="number" step="0.1" v-model.number="g[0]" /></td>
-                <td><input type="number" step="0.1" v-model.number="g[1]" /></td>
-                <td><button class="df-link danger" @click="params.gradient.splice(i, 1)">×</button></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="df-mini" :class="{ dim: !params.useDynamicCF }">
-          <div class="df-mini-head">
-            <span>MeOH correction factor</span>
-            <button class="df-link" @click="addRow(params.cfCalibration, [0, 1])">+ row</button>
-          </div>
-          <table class="df-table compact">
-            <thead><tr><th>% Eluent B</th><th>Factor</th><th></th></tr></thead>
-            <tbody>
-              <tr v-for="(c, i) in params.cfCalibration" :key="'c' + i">
-                <td><input type="number" step="1" v-model.number="c[0]" /></td>
-                <td><input type="number" step="0.001" v-model.number="c[1]" /></td>
-                <td><button class="df-link danger" @click="params.cfCalibration.splice(i, 1)">×</button></td>
-              </tr>
-            </tbody>
-          </table>
-          <div class="df-fit">CF = {{ fitInfo.slope.toFixed(4) }} · %B + {{ fitInfo.intercept.toFixed(4) }}</div>
-        </div>
-      </div>
     </section>
 
     <!-- ── 2 · Upload + run ──────────────────────────────────────────────── -->
@@ -277,14 +264,22 @@
           <label class="df-field grow"><span>Naming convention</span><input v-model="editor.namingConvention" placeholder="e.g. {run}_{sample}_{time}.csv" /></label>
           <label class="df-field grow"><span>Extra pip packages</span><input v-model="editor.packages" placeholder="comma-separated, e.g. openpyxl" /></label>
         </div>
-        <label class="df-field"><span>Default params (JSON)</span>
-          <textarea v-model="editor.defaultsJson" rows="3" class="df-code"></textarea>
-        </label>
+        <div class="df-row">
+          <label class="df-field grow"><span>Default params (JSON)</span>
+            <textarea v-model="editor.defaultsJson" rows="3" class="df-code"></textarea>
+          </label>
+          <label class="df-field grow"><span>Controls schema (JSON, optional — else inferred)</span>
+            <textarea v-model="editor.schemaJson" rows="3" class="df-code"></textarea>
+          </label>
+        </div>
         <label class="df-field"><span>Python — must define analyze(files, params)</span>
           <textarea v-model="editor.code" rows="18" class="df-code df-code-lg" spellcheck="false"></textarea>
         </label>
         <div class="df-actions">
           <button class="df-btn" @click="seedTemplate"><i class="fas fa-paste"></i> Paste-in template</button>
+          <button class="df-btn" :disabled="!editor.code || detecting" @click="detectFromCode">
+            <i class="fas fa-wand-magic-sparkles"></i> Detect interface from code
+          </button>
           <button class="df-btn primary" :disabled="!store.user || !editor.name || !editor.code" @click="saveSet">
             <i class="fas fa-save"></i> {{ editor.id ? 'Update' : 'Save' }} set
           </button>
@@ -313,11 +308,11 @@ import { useLabStore } from '../stores/labStore'
 import { parseHplcFilename } from '../utils/hplcFilename'
 import { processChromatograms } from '../services/hplcLocalService'
 import {
-  listItems, saveItem, deleteItem, runPythonAnalysis, renderFigure,
+  listItems, saveItem, deleteItem, runPythonAnalysis, renderFigure, describeAnalysis,
 } from '../services/dataFiguresService'
 import {
   BUILTIN_ANALYSIS_SETS, getAnalysisSetById, resolveParams,
-  deriveHplcDnaRow, buildMatrix, timepointsOf, cfFit,
+  deriveHplcDnaRow, buildMatrix, timepointsOf, schemaFor, linearFit,
 } from '../utils/analysisSets'
 import { BOEKHOVEN_PALETTE, hexToRgba } from '../utils/palette'
 import {
@@ -339,21 +334,36 @@ const currentSet = computed(() => getAnalysisSetById(selectedSetId.value, custom
 const isHplcDna = computed(() => currentSet.value?.builtinKey === 'hplc-dna')
 const setFigures = computed(() => currentSet.value?.figures || [])
 
-const currentSchema = computed(() => currentSet.value?.paramsSchema || [])
+// Explicit schema if the set ships one, else inferred from its defaults' shape.
+const currentSchema = computed(() => schemaFor(currentSet.value))
 const paramGroups = computed(() => [...new Set(currentSchema.value.map(f => f.group || 'Parameters'))])
+function fieldsInGroup(grp) { return currentSchema.value.filter(f => (f.group || 'Parameters') === grp) }
+// A field shows unless a showIf condition on another param is unmet.
+function fieldVisible(f) { return !f.showIf || params[f.showIf.key] === f.showIf.equals }
+function addTableRow(f) {
+  if (!Array.isArray(params[f.key])) params[f.key] = []
+  params[f.key].push((f.columns || [{}, {}]).map(() => 0))
+}
+// A 'readout' field: compute a value from another field and format it.
+function readoutText(f) {
+  if (f.as === 'linearFit') {
+    const tbl = params[f.from] || []
+    const fit = linearFit(tbl.map(r => +r[0]), tbl.map(r => +r[1]))
+    return (f.format || '{slope} {intercept}')
+      .replace('{slope}', fit.slope.toFixed(4)).replace('{intercept}', fit.intercept.toFixed(4))
+  }
+  return ''
+}
 
 const params = reactive({})
 const paramsJson = ref('{}')
 function loadDefaults(set) {
   for (const k of Object.keys(params)) delete params[k]
-  // Deep clone so editing gradient/CF tables never mutates the frozen defaults.
+  // Deep clone so editing table fields (gradient/CF) never mutates the frozen defaults.
   Object.assign(params, JSON.parse(JSON.stringify(set?.defaults || {})))
   paramsJson.value = JSON.stringify(set?.defaults || {}, null, 2)
 }
 watch(currentSet, (s) => loadDefaults(s), { immediate: true })
-
-const fitInfo = computed(() => cfFit(params.cfCalibration || []))
-function addRow(arr, row) { if (Array.isArray(arr)) arr.push([...row]) }
 
 // ── Uploaded files ───────────────────────────────────────────────────────────
 const fileInput = ref(null)
@@ -642,34 +652,58 @@ async function saveDataset() {
 // ── Analysis-set manager ─────────────────────────────────────────────────────
 const managerOpen = ref(false)
 const managerMsg = ref('')
+const detecting = ref(false)
 const editor = reactive({
   id: '', name: '', scope: 'Personal', runtime: 'pyodide', instrument: '', fileFormat: '',
-  namingConvention: '', packages: '', defaultsJson: '{}', code: '',
+  namingConvention: '', packages: '', defaultsJson: '{}', schemaJson: '', code: '',
 })
 function resetEditor() {
-  Object.assign(editor, { id: '', name: '', scope: 'Personal', runtime: 'pyodide', instrument: '', fileFormat: '', namingConvention: '', packages: '', defaultsJson: '{}', code: '' })
+  Object.assign(editor, { id: '', name: '', scope: 'Personal', runtime: 'pyodide', instrument: '', fileFormat: '', namingConvention: '', packages: '', defaultsJson: '{}', schemaJson: '', code: '' })
+}
+
+// Run the code once and read a self-declared interface (PARAMS / SCHEMA) from it,
+// so a pasted script can bring its own controls without us knowing its internals.
+async function detectFromCode() {
+  detecting.value = true
+  managerMsg.value = 'Reading interface from code…'
+  try {
+    const pkgs = (editor.packages || '').split(',').map(s => s.trim()).filter(Boolean)
+    const { schema, params } = await describeAnalysis(editor.code, pkgs, m => (managerMsg.value = m))
+    if (params && Object.keys(params).length) editor.defaultsJson = JSON.stringify(params, null, 2)
+    if (Array.isArray(schema) && schema.length) editor.schemaJson = JSON.stringify(schema, null, 2)
+    managerMsg.value = schema || params
+      ? 'Interface detected.'
+      : 'No PARAMS/SCHEMA found — controls will be inferred from Default params.'
+  } catch (err) {
+    managerMsg.value = `Detect failed: ${err?.message || err}`
+  } finally {
+    detecting.value = false
+  }
 }
 function seedTemplate() {
-  editor.code = `# Paste your existing analysis below, then adapt analyze() to call it.
+  editor.code = `# Paste your existing analysis below, then define analyze(files, params).
 # Contract: analyze(files, params) -> {'columns': [...], 'rows': [...], 'traces': {name: {'t': [...], 's': [...]}}}
-#   files  = [{'name': str, 'text': str}]
+#   files  = [{'name': str, 'text': str}]   (the uploaded files)
 #   params = your "Default params" dict (edit above)
+#
+# HARDCODED PATHS JUST WORK: any pd.read_csv("/…/CTI-117_Aalpha_4h.txt") or
+# open(path) is auto-redirected to the uploaded file whose FILENAME matches — so
+# you can paste notebook code with its own BASE/file_paths and only add analyze().
+# glob("*.txt") and os.listdir() also see the uploads. Upload the files your code
+# names.
 import numpy as np
 import pandas as pd
-from io import StringIO
 
-# --- paste your existing helper functions here, unchanged ---
-def read_file(text):
-    # e.g. Chromeleon export: 43 header lines, tab-delimited, comma decimal
-    df = pd.read_csv(StringIO(text), sep='\\t', decimal=',', skiprows=43,
+def read_chromatogram(path):
+    # your existing reader — reads by path; the shim maps it to the upload
+    df = pd.read_csv(path, sep='\\t', decimal=',', skiprows=43,
                      header=None, names=['time', 'step', 'signal'], usecols=[0, 1, 2])
     return df.apply(pd.to_numeric, errors='coerce').dropna()
 
-# --- required entry point ---
 def analyze(files, params):
     rows, traces = [], {}
     for f in files:
-        df = read_file(f['text'])
+        df = read_chromatogram(f['name'])          # or your own file_paths list
         rows.append({'file': f['name'], 'max_signal': float(df['signal'].max())})
         traces[f['name']] = {'t': df['time'].tolist(), 's': df['signal'].tolist()}
     return {
@@ -684,17 +718,20 @@ function editSet(s) {
   Object.assign(editor, {
     id: s.id, name: s.name, scope: s.scope, runtime: s.runtime || 'pyodide',
     instrument: s.instrument || '', fileFormat: s.fileFormat || '', namingConvention: s.namingConvention || '',
-    packages: s.packages || '', defaultsJson: JSON.stringify(s.defaults || {}, null, 2), code: s.code || '',
+    packages: s.packages || '', defaultsJson: JSON.stringify(s.defaults || {}, null, 2),
+    schemaJson: s.paramsSchema ? JSON.stringify(s.paramsSchema, null, 2) : '', code: s.code || '',
   })
 }
 async function saveSet() {
   managerMsg.value = 'Saving…'
   try {
+    const schema = safeJson(editor.schemaJson, null)
     const obj = {
       id: editor.id || ('aset_' + uuid()), kind: 'python', scope: editor.scope, runtime: editor.runtime,
       name: editor.name, instrument: editor.instrument, fileFormat: editor.fileFormat,
       namingConvention: editor.namingConvention, packages: editor.packages,
       defaults: safeJson(editor.defaultsJson, {}), code: editor.code,
+      ...(Array.isArray(schema) && schema.length ? { paramsSchema: schema } : {}),
     }
     await saveItem(obj, store.user.id)
     await loadCustom()
@@ -732,6 +769,13 @@ onMounted(() => { loadSeqLibrary(); loadCustom() })
 .df-params { margin-top: 12px; }
 .df-param-group h4 { margin: 12px 0 6px; }
 .df-param-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+/* Generic schema renderer: numbers/toggles flow inline; tables wrap to full width. */
+.df-fields { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; }
+.df-fields > .df-field { min-width: 150px; }
+.df-fields > .df-check.inline { flex-basis: 100%; }
+.df-fields > .df-mini { flex: 1 1 100%; }
+@media (min-width: 640px) { .df-fields > .df-mini { flex: 1 1 300px; } }
+.df-fields > .df-fit { flex-basis: 100%; }
 
 .df-check.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; }
 .df-tables { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 12px; }

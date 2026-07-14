@@ -30,7 +30,7 @@ const installedPackages = new Set()
 // Harness Python: runs the user's analyze() and renders builtin figure types.
 // Kept free of app-specific logic so any Analysis Set can plug in.
 const HARNESS_CODE = `
-import json, base64, io
+import json, base64, io, os, builtins, glob as _glob, fnmatch
 import numpy as np
 
 # matplotlib with the non-interactive Agg backend so savefig() works headless.
@@ -40,10 +40,101 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 
 
+# ── Uploaded-file shim ───────────────────────────────────────────────────────
+# Pasted notebook code usually reads from hardcoded disk paths (BASE + name).
+# Those paths don't exist in Pyodide, so we materialise every uploaded file in a
+# virtual dir and redirect any file read to the upload whose *filename* matches —
+# so hardcoded absolute paths keep working without the user editing them. Reads
+# that hit a real existing path are left untouched.
+UPLOAD_DIR = '/uploads'
+_UPLOADS = {}                       # basename -> text
+_REAL_OPEN = builtins.open
+_REAL_EXISTS = os.path.exists
+_REAL_LISTDIR = os.listdir
+_REAL_GLOB = _glob.glob
+_SHIM_INSTALLED = False
+
+
+def _as_path(p):
+    return os.fspath(p) if hasattr(p, '__fspath__') else str(p)
+
+
+def _resolve_path(path):
+    p = _as_path(path)
+    try:
+        if _REAL_EXISTS(p):
+            return p
+    except Exception:
+        pass
+    base = os.path.basename(p)
+    return os.path.join(UPLOAD_DIR, base) if base in _UPLOADS else p
+
+
+def _patched_open(file, *a, **k):
+    if isinstance(file, (str, bytes)) or hasattr(file, '__fspath__'):
+        file = _resolve_path(file)
+    return _REAL_OPEN(file, *a, **k)
+
+
+def _patched_exists(path):
+    try:
+        if _REAL_EXISTS(path):
+            return True
+    except Exception:
+        pass
+    try:
+        return os.path.basename(_as_path(path)) in _UPLOADS
+    except Exception:
+        return False
+
+
+def _patched_listdir(path='.'):
+    try:
+        if _REAL_EXISTS(path):
+            return _REAL_LISTDIR(path)
+    except Exception:
+        pass
+    return list(_UPLOADS.keys())          # any missing dir -> show the uploads
+
+
+def _patched_glob(pattern, *a, **k):
+    res = _REAL_GLOB(pattern, *a, **k)
+    if res:
+        return res
+    pat = os.path.basename(_as_path(pattern))
+    return [os.path.join(UPLOAD_DIR, n) for n in _UPLOADS if fnmatch.fnmatch(n, pat)]
+
+
+def _install_upload_shim(files):
+    global _SHIM_INSTALLED
+    _UPLOADS.clear()
+    try:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+    except Exception:
+        pass
+    for f in files:
+        name = os.path.basename(f.get('name', '') or '')
+        if not name:
+            continue
+        _UPLOADS[name] = f.get('text', '')
+        try:
+            with _REAL_OPEN(os.path.join(UPLOAD_DIR, name), 'w') as fh:
+                fh.write(_UPLOADS[name])
+        except Exception:
+            pass
+    if not _SHIM_INSTALLED:
+        builtins.open = _patched_open
+        os.path.exists = _patched_exists
+        os.listdir = _patched_listdir
+        _glob.glob = _patched_glob
+        _SHIM_INSTALLED = True
+
+
 def run_analyze(user_ns, files_json, params_json):
     """Call the user set's analyze(files, params) and validate the contract."""
     files = json.loads(files_json)
     params = json.loads(params_json)
+    _install_upload_shim(files)         # make hardcoded paths resolve to uploads
     fn = user_ns.get('analyze')
     if not callable(fn):
         raise ValueError("Analysis code must define analyze(files, params).")
@@ -56,6 +147,22 @@ def run_analyze(user_ns, files_json, params_json):
     if not isinstance(out['rows'], list):
         raise ValueError("analyze() 'rows' must be a list.")
     return json.dumps(out)
+
+
+def describe_interface(user_ns):
+    """Introspect an analysis set's code for a self-declared interface.
+    A set may define module-level PARAMS (defaults dict) and/or SCHEMA (widget
+    list) — we return whatever is present so the UI can build controls from the
+    code itself, without the app knowing what the code does."""
+    def _py(x):
+        try:
+            return x.to_py()      # PyProxy dict/list → JS-native
+        except Exception:
+            return x
+    params = user_ns.get('PARAMS')
+    if params is None:
+        params = user_ns.get('DEFAULTS')
+    return json.dumps({'schema': _py(user_ns.get('SCHEMA')), 'params': _py(params)})
 
 
 def _seq_cmap(colors):
@@ -210,6 +317,17 @@ self.onmessage = async (e) => {
       const resultJson = runInUserNamespace(msg.code || '', (ns) => runAnalyze(ns, filesJson, paramsJson))
       runAnalyze.destroy()
       self.postMessage({ type: 'result', id: msg.id, result: JSON.parse(resultJson) })
+      return
+    }
+
+    if (msg.type === 'describe') {
+      await init()
+      await ensurePackages(msg.packages)
+      self.postMessage({ type: 'progress', stage: 'describing', text: 'Reading interface…' })
+      const describe = pyodide.globals.get('describe_interface')
+      const out = runInUserNamespace(msg.code || '', (ns) => describe(ns))
+      describe.destroy()
+      self.postMessage({ type: 'described', id: msg.id, result: JSON.parse(out) })
       return
     }
 

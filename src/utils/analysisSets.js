@@ -111,7 +111,14 @@ export function dynamicCF(rt, gradient, fit) {
   return cf > 0 ? cf : 1
 }
 
-// Param form schema — drives the tunables UI in DataFigures.vue.
+// Param/UI schema — a declarative list of widgets the module renders generically.
+// Field types: 'number' | 'boolean' | 'select' | 'text' | 'table' | 'readout'.
+//   table   → value is an array of numeric rows; `columns` give the headers.
+//   readout → display-only; computes from another field (e.g. the CF line fit).
+//   showIf  → { key, equals } conditional visibility, so sub-editors like the
+//             gradient only appear when they apply (here: dynamic correction on).
+// Any set — built-in or uploaded — is rendered purely from a schema like this,
+// so the module never needs to know what a given set does.
 export const HPLC_DNA_PARAMS_SCHEMA = [
   { group: 'Peak detection', key: 'scanMin', label: 'Scan start', unit: 'min', type: 'number', step: 0.1 },
   { group: 'Peak detection', key: 'scanMax', label: 'Scan end', unit: 'min', type: 'number', step: 0.1 },
@@ -120,14 +127,60 @@ export const HPLC_DNA_PARAMS_SCHEMA = [
   { group: 'Peak detection', key: 'productMin', label: 'Product window start', unit: 'min', type: 'number', step: 0.1 },
   { group: 'Peak detection', key: 'productMax', label: 'Product window end', unit: 'min', type: 'number', step: 0.1 },
   { group: 'Peak detection', key: 'useHplcPy', label: 'Use hplc-py fit', type: 'boolean' },
+
+  { group: 'MeOH correction', key: 'useDynamicCF', label: 'Dynamic MeOH correction', type: 'boolean' },
+  { group: 'MeOH correction', key: 'gradient', label: 'Gradient', type: 'table',
+    columns: [{ label: 'Time / min', step: 0.1 }, { label: '% Eluent B', step: 0.1 }],
+    showIf: { key: 'useDynamicCF', equals: true } },
+  { group: 'MeOH correction', key: 'cfCalibration', label: 'Correction factor', type: 'table',
+    columns: [{ label: '% Eluent B', step: 1 }, { label: 'Factor', step: 0.001 }],
+    showIf: { key: 'useDynamicCF', equals: true } },
+  { group: 'MeOH correction', key: '_cfFit', type: 'readout', from: 'cfCalibration', as: 'linearFit',
+    format: 'CF = {slope} · %B + {intercept}', showIf: { key: 'useDynamicCF', equals: true } },
+  { group: 'MeOH correction', key: 'solventCorrection', label: 'Flat solvent factor', type: 'number', step: 0.01,
+    showIf: { key: 'useDynamicCF', equals: false } },
+
   { group: 'Quantification', key: 'pathLength_cm', label: 'Path length', unit: 'cm', type: 'number', step: 0.1 },
   { group: 'Quantification', key: 'flow_mL_min', label: 'Flow rate', unit: 'mL/min', type: 'number', step: 0.05 },
   { group: 'Quantification', key: 'injection_uL', label: 'Injection volume', unit: 'µL', type: 'number', step: 0.5 },
   { group: 'Quantification', key: 'aliquot_uL', label: 'Sample aliquot', unit: 'µL', type: 'number', step: 0.5 },
   { group: 'Quantification', key: 'vial_uL', label: 'Vial total volume', unit: 'µL', type: 'number', step: 0.5 },
-  { group: 'Quantification', key: 'solventCorrection', label: 'Solvent correction', type: 'number', step: 0.01 },
   { group: 'Quantification', key: 'rMax_uM', label: 'Max theoretical yield', unit: 'µM', type: 'number', step: 0.1 },
 ]
+
+// Title-case a snake_case / camelCase key for an inferred label.
+function humanize(k) {
+  return String(k).replace(/_/g, ' ').replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/^./, c => c.toUpperCase())
+}
+
+// Derive a schema from the *shape* of a defaults dict — so an uploaded set gets a
+// usable interface with zero declaration: numbers → number inputs, booleans →
+// checkboxes, strings → text, arrays of numeric rows → editable tables. This is
+// the fallback when a set doesn't ship its own `paramsSchema`.
+export function inferSchema(defaults) {
+  const out = []
+  for (const [key, val] of Object.entries(defaults || {})) {
+    if (typeof val === 'boolean') out.push({ key, label: humanize(key), type: 'boolean' })
+    else if (typeof val === 'number') out.push({ key, label: humanize(key), type: 'number', step: 'any' })
+    else if (typeof val === 'string') out.push({ key, label: humanize(key), type: 'text' })
+    else if (Array.isArray(val) && val.length && Array.isArray(val[0])) {
+      out.push({
+        key, label: humanize(key), type: 'table',
+        columns: val[0].map((_, i) => ({ label: 'c' + (i + 1), step: 'any' })),
+      })
+    }
+    // objects / arrays of scalars fall through — the JSON editor still covers them.
+  }
+  return out
+}
+
+// The schema to render for a set: its explicit schema, else one inferred from
+// its defaults. Central so both the picker form and the manager agree.
+export function schemaFor(set) {
+  if (set?.paramsSchema?.length) return set.paramsSchema
+  return inferSchema(set?.defaults || {})
+}
 
 export const BUILTIN_ANALYSIS_SETS = Object.freeze([
   {
@@ -140,8 +193,8 @@ export const BUILTIN_ANALYSIS_SETS = Object.freeze([
     fileFormat: 'Chromeleon .txt export — 43-line header, tab-delimited, comma decimal',
     namingConvention: 'CTI-117_Aalpha_4h.txt  (code · SeqName · time[h/min])',
     filenameMatcher: 'named', // resolved via hplcFilename.parseHplcFilename
-    // Capabilities that drive which controls/figures the module shows for this set.
-    hplcCorrection: true,             // gradient + MeOH correction editor
+    // Which figures this set produces (drives the figure tabs/export). The tunable
+    // controls come entirely from paramsSchema below.
     figures: ['heatmap', 'chromGallery'],
     paramsSchema: HPLC_DNA_PARAMS_SCHEMA,
     defaults: HPLC_DNA_DEFAULTS,

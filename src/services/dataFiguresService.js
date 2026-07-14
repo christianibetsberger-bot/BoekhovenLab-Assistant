@@ -61,6 +61,25 @@ export async function runPythonAnalysis(code, files, params, packages, onProgres
   })
 }
 
+// Introspect an analysis set's code for a self-declared interface (module-level
+// PARAMS / SCHEMA). Resolves with { schema, params } (either may be null).
+export async function describeAnalysis(code, packages, onProgress) {
+  await ensureReady(onProgress)
+  const id = nextRequestId++
+  const w = getWorker()
+  return new Promise((resolve, reject) => {
+    const handler = (e) => {
+      const msg = e.data
+      if (msg.type === 'progress' && onProgress) { onProgress(msg.text); return }
+      if (msg.id !== id) return
+      if (msg.type === 'described') { w.removeEventListener('message', handler); resolve(msg.result) }
+      if (msg.type === 'error') { w.removeEventListener('message', handler); reject(new Error(msg.message)) }
+    }
+    w.addEventListener('message', handler)
+    w.postMessage({ type: 'describe', id, code, packages })
+  })
+}
+
 // Render a publication figure via matplotlib. `styleCode` from
 // plotStyle.matplotlibStyleCode; `spec` = { type, data }. Resolves with a
 // data URL ready for <img> / download.

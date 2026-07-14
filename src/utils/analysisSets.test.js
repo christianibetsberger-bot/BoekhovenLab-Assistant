@@ -3,6 +3,7 @@ import {
   BUILTIN_ANALYSIS_SETS, getAnalysisSetById, resolveParams,
   deriveHplcDnaRow, buildMatrix, timepointsOf, HPLC_DNA_DEFAULTS,
   linearFit, interp, cfFit, dynamicCF, DEFAULT_GRADIENT, DEFAULT_CF_CALIBRATION,
+  inferSchema, schemaFor,
 } from './analysisSets.js'
 import { areaToMicromolar } from './hplcConcentration.js'
 import { calcSeqExtinction } from './seqUtils.js'
@@ -93,6 +94,40 @@ describe('deriveHplcDnaRow', () => {
     expect(row.epsilon).toBe(HPLC_DNA_DEFAULTS.defaultEpsilon)
     expect(row.epsilonEstimated).toBe(true)
     expect(row.product_uM).toBeGreaterThan(0)
+  })
+})
+
+describe('inferSchema / schemaFor', () => {
+  it('infers a widget per default from its value type', () => {
+    const s = inferSchema({ n: 1.5, flag: true, name: 'x', tbl: [[0, 0], [1, 2]] })
+    const byKey = Object.fromEntries(s.map(f => [f.key, f]))
+    expect(byKey.n.type).toBe('number')
+    expect(byKey.flag.type).toBe('boolean')
+    expect(byKey.name.type).toBe('text')
+    expect(byKey.tbl.type).toBe('table')
+    expect(byKey.tbl.columns).toHaveLength(2)
+  })
+
+  it('humanizes keys into labels', () => {
+    const s = inferSchema({ path_length_cm: 0.7, useDynamicCF: true })
+    const byKey = Object.fromEntries(s.map(f => [f.key, f]))
+    expect(byKey.path_length_cm.label).toBe('Path length cm')
+    expect(byKey.useDynamicCF.label).toBe('Use Dynamic CF')
+  })
+
+  it('schemaFor prefers an explicit paramsSchema, else infers from defaults', () => {
+    const explicit = [{ key: 'x', type: 'number' }]
+    expect(schemaFor({ paramsSchema: explicit, defaults: { y: 1 } })).toBe(explicit)
+    const inferred = schemaFor({ defaults: { a: 1 } })
+    expect(inferred[0]).toMatchObject({ key: 'a', type: 'number' })
+  })
+
+  it('the built-in HPLC set renders its gradient/CF as tables gated on useDynamicCF', () => {
+    const set = getAnalysisSetById('builtin:hplc-dna-heatmap')
+    const byKey = Object.fromEntries(schemaFor(set).map(f => [f.key, f]))
+    expect(byKey.gradient.type).toBe('table')
+    expect(byKey.cfCalibration.showIf).toEqual({ key: 'useDynamicCF', equals: true })
+    expect(byKey.solventCorrection.showIf).toEqual({ key: 'useDynamicCF', equals: false })
   })
 })
 

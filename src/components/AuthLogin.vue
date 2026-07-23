@@ -18,7 +18,7 @@ const signIn = async () => {
 </script>
 
 <template>
-  <div class="card full-width-header" style="max-width: 400px; margin: 100px auto; text-align: center;">
+  <div class="card full-width-header" style="width: calc(100% - 32px); max-width: 400px; margin: 100px auto; text-align: center;">
     <h2 style="justify-content: center;"><i class="fas fa-lock"></i> Lab Login</h2>
     <p style="font-size: 0.85rem; opacity: 0.8;">Sign in to access your inventory.</p>
     <div class="input-group">

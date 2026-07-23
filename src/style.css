@@ -1,5 +1,12 @@
 * {
     box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+html {
+    /* Stop iOS Safari from inflating text when rotating to landscape */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 
 :root {
@@ -191,6 +198,34 @@ th { font-weight: 600; background-color: var(--input-bg); opacity: 0.9; text-tra
 
     /* Stacks internal two-column inputs safely */
     .grid-2 {
-        grid-template-columns: 1fr; 
+        grid-template-columns: 1fr;
     }
+}
+
+/* ══ Mobile / iPhone Safari (breakpoint must match matchMedia in App.vue) ══ */
+@media (max-width: 820px) {
+    /* iOS Safari auto-zooms into any focused input with font-size < 16px,
+       which leaves the page zoomed-in and mis-scaled. 16px prevents that. */
+    input[type="number"], input[type="text"], input[type="date"],
+    input[type="email"], input[type="password"], input[type="search"],
+    select, textarea {
+        font-size: 16px;
+    }
+
+    button, select, input { touch-action: manipulation; }
+
+    /* Wide data tables scroll within the card instead of stretching the page */
+    .card table {
+        display: block;
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* Comfortable touch targets */
+    button.small { padding: 8px 12px; }
+
+    .summary-panel { grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .journal-sidebar { max-height: 200px; }
 }

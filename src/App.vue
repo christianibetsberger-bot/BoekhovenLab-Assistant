@@ -312,6 +312,24 @@ const allModuleIds = computed(() =>
   Object.keys(MODULE_META).filter(id => !layoutMeta.value.sidebarHidden?.[id] && !isModuleHiddenForUser(id))
 )
 
+// ── Mobile mode — one module at a time with a bottom tab bar ───────────────
+// The desktop grid (mouse drag/resize, hover sidebar) is unusable on touch,
+// so small screens get a dedicated single-module layout instead.
+const isMobile = ref(false)
+const activeMobileId = ref(null)
+const MOB_KEY = computed(() => store.user?.id ? `mob_${store.user.id}` : null)
+
+const currentMobileId = computed(() => {
+  if (activeMobileId.value && allModuleIds.value.includes(activeMobileId.value)) return activeMobileId.value
+  return allModuleIds.value[0] ?? null
+})
+
+function setMobileModule(id) {
+  activeMobileId.value = id
+  if (MOB_KEY.value) localStorage.setItem(MOB_KEY.value, id)
+  window.scrollTo({ top: 0 })
+}
+
 // Modules removed from sidebar (can be re-added via redock panel)
 const removedModuleIds = computed(() =>
   Object.keys(layoutMeta.value.sidebarHidden || {}).filter(id => layoutMeta.value.sidebarHidden[id])
@@ -640,6 +658,7 @@ async function initSession(user) {
   loadLayoutMeta()
   loadGridLayout()
   loadSidebarGroups()
+  if (MOB_KEY.value) activeMobileId.value = localStorage.getItem(MOB_KEY.value)
 }
 
 onMounted(() => {
@@ -655,6 +674,12 @@ onMounted(() => {
   onResize()
   window.addEventListener('resize', onResize)
   onUnmounted(() => window.removeEventListener('resize', onResize))
+  // Mobile breakpoint — must match the @media queries in style.css
+  const mq = window.matchMedia('(max-width: 820px)')
+  const updateMq = () => { isMobile.value = mq.matches }
+  updateMq()
+  mq.addEventListener('change', updateMq)
+  onUnmounted(() => mq.removeEventListener('change', updateMq))
 })
 
 const signOut = async () => { await db.auth.signOut(); window.location.reload() }
@@ -682,8 +707,8 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
 
     <template v-else>
 
-      <!-- Auto-hide sidebar dock -->
-      <nav class="module-sidebar" :class="`pos-${sidebarPosition}`"
+      <!-- Auto-hide sidebar dock (desktop only — hover-based, unusable on touch) -->
+      <nav v-if="!isMobile" class="module-sidebar" :class="`pos-${sidebarPosition}`"
         @dragover.prevent="sbGroupMemberDragOver"
         @drop.prevent="sbSidebarBackgroundDrop"
       >
@@ -865,16 +890,23 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
       </Teleport>
 
       <!-- Main content -->
-      <div class="app-main">
+      <div class="app-main" :class="{ 'mobile-main': isMobile }">
 
-        <div class="top-bar">
+        <div class="top-bar" :class="{ 'mobile-top-bar': isMobile }">
           <TopBarClock v-if="visibleTimeTracker" />
           <span class="user-info"><i class="fas fa-user-circle"></i> {{ store.user.email }}</span>
           <button class="small danger" @click="signOut"><i class="fas fa-sign-out-alt"></i> Log Out</button>
         </div>
 
+        <!-- Mobile: one module at a time, natural document flow -->
+        <div v-if="isMobile" class="mobile-module">
+          <KeepAlive>
+            <component v-if="currentMobileId" :is="MODULE_META[currentMobileId].component" :key="currentMobileId" />
+          </KeepAlive>
+        </div>
+
         <!-- Free-placement 12-column grid workspace -->
-        <div ref="gridContainer" class="grid-workspace" :style="{ height: containerHeight + 'px' }">
+        <div v-else ref="gridContainer" class="grid-workspace" :style="{ height: containerHeight + 'px' }">
           <template v-for="item in gridLayout" :key="item.i">
             <div
               v-if="!isModuleHiddenForUser(item.i)"
@@ -903,6 +935,23 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
         </div>
       </div>
 
+      <!-- Mobile bottom tab bar — always visible, horizontally scrollable -->
+      <nav v-if="isMobile" class="mobile-nav">
+        <button
+          v-for="id in allModuleIds"
+          :key="id"
+          class="mobile-nav-btn"
+          :class="{ 'is-current': id === currentMobileId }"
+          @click="setMobileModule(id)"
+        >
+          <div class="sidebar-icon mobile-nav-icon">
+            <span v-if="MODULE_META[id].svgIcon" class="sidebar-svg" v-html="MODULE_META[id].svgIcon"></span>
+            <i v-else class="fas" :class="MODULE_META[id].icon"></i>
+          </div>
+          <span class="mobile-nav-label">{{ MODULE_META[id].label }}</span>
+        </button>
+      </nav>
+
     </template>
   </div>
 </template>
@@ -913,7 +962,7 @@ body { padding: 0 !important; margin: 0 !important; }
 /* #app is the Vue mount point inside <body>. Must fill full viewport width. */
 #app { width: 100%; }
 
-#body-wrapper { display: flex; min-height: 100vh; width: 100%; }
+#body-wrapper { display: flex; min-height: 100vh; min-height: 100dvh; width: 100%; }
 
 /* ══ Sidebar dock — Liquid Glass, three positions ══ */
 .module-sidebar {
@@ -1490,4 +1539,76 @@ body { padding: 0 !important; margin: 0 !important; }
   transition: opacity 0.12s;
 }
 .sg-chip-remove:hover { opacity: 1; color: #e03535; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   MOBILE LAYOUT (≤ 820px — breakpoint must match matchMedia in script)
+   ══════════════════════════════════════════════════════════════════════ */
+
+.mobile-main {
+  padding: 10px 0 calc(96px + env(safe-area-inset-bottom));
+  padding-left: calc(12px + env(safe-area-inset-left));
+  padding-right: calc(12px + env(safe-area-inset-right));
+  gap: 12px;
+}
+
+.mobile-top-bar { flex-wrap: wrap; row-gap: 8px; }
+.mobile-top-bar .user-info {
+  min-width: 0; flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  justify-content: flex-end;
+}
+/* Time-tracker pill: allow its controls to wrap instead of overflowing the viewport */
+.mobile-top-bar .tbc { flex-wrap: wrap; max-width: 100%; border-radius: 14px; }
+
+/* Same container as .grid-module so the @container card-header rules apply */
+.mobile-module { container-type: inline-size; }
+.mobile-module .card { margin-bottom: 16px; }
+
+/* ── Bottom tab bar ── */
+.mobile-nav {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 500;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  overflow-x: auto; overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px calc(8px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left));
+  background: rgba(235, 235, 245, 0.78);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-top: 1px solid rgba(255,255,255,0.45);
+  box-shadow: 0 -6px 30px rgba(0,0,0,0.12);
+  scrollbar-width: none;
+}
+.mobile-nav::-webkit-scrollbar { display: none; }
+.dark-mode .mobile-nav {
+  background: rgba(12, 12, 22, 0.82);
+  border-top-color: rgba(255,255,255,0.08);
+  box-shadow: 0 -6px 30px rgba(0,0,0,0.50);
+}
+
+.mobile-nav-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  background: transparent; border: none; box-shadow: none;
+  padding: 2px 4px;
+  flex-shrink: 0;
+  min-width: 58px;
+  text-transform: none; letter-spacing: 0;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.mobile-nav-btn:hover { filter: none; }
+
+.mobile-nav-icon { width: 40px; height: 40px; }
+.mobile-nav-btn:not(.is-current) .mobile-nav-icon { opacity: 0.42; filter: saturate(0.4); }
+
+.mobile-nav-label {
+  font-size: 0.56rem; font-weight: 600;
+  color: var(--text); opacity: 0.60;
+  max-width: 62px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mobile-nav-btn.is-current .mobile-nav-label { opacity: 1; color: var(--primary); }
 </style>

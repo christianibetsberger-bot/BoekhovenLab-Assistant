@@ -38,8 +38,8 @@ const MODULE_META = {
   matrixPlanner:    { label: 'Matrix',      icon: 'fa-table-cells',       component: markRaw(MatrixPlanner) },
   screeningPlanner: { label: 'Screening',   icon: 'fa-table-cells-large', component: markRaw(ScreeningPlanner) },
   phasePredictor:   { label: 'Phase Map',   icon: 'fa-brain',             component: markRaw(PhasePredictor) },
-  lidaKinetics:     { label: 'LIDA Kinetics', icon: 'fa-dna',  svgIcon: lidaIcon, component: markRaw(LidaKinetics) },
-  dataFigures:      { label: 'Data & Figures', icon: 'fa-chart-line',      component: markRaw(DataFigures) },
+  lidaKinetics:     { label: 'LIDA Kinetics', icon: 'fa-dna',  svgIcon: lidaIcon, alpha: true, component: markRaw(LidaKinetics) },
+  dataFigures:      { label: 'Data & Figures', icon: 'fa-chart-line', alpha: true, component: markRaw(DataFigures) },
   wellPlateEditor:  { label: 'Well Plate',  icon: 'fa-border-all',        component: markRaw(WellPlateEditor) },
   timeTracker:      { label: 'Time Tracker', icon: 'fa-clock',             component: markRaw(TimeTracker) },
 }
@@ -324,11 +324,16 @@ const currentMobileId = computed(() => {
   return allModuleIds.value[0] ?? null
 })
 
-function setMobileModule(id) {
+function setMobileModule(id, e) {
   activeMobileId.value = id
   if (MOB_KEY.value) localStorage.setItem(MOB_KEY.value, id)
   window.scrollTo({ top: 0 })
+  // Center the tapped tab in the scrollable bottom bar
+  e?.currentTarget?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
 }
+
+// Compact identity for the mobile top bar — just the mailbox name
+const mobileEmailLabel = computed(() => (store.user?.email || '').split('@')[0])
 
 // Modules removed from sidebar (can be re-added via redock panel)
 const removedModuleIds = computed(() =>
@@ -701,7 +706,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
 </script>
 
 <template>
-  <div id="body-wrapper" :class="{ 'dark-mode': store.isDarkMode }">
+  <div id="body-wrapper" :class="{ 'dark-mode': store.isDarkMode, 'mobile-ui': isMobile }">
 
     <AuthLogin v-if="!store.user" />
 
@@ -736,6 +741,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                 <span class="sidebar-remove" @click.stop="removeFromSidebar(item.id)" title="Remove from sidebar">
                   <i class="fas fa-xmark"></i>
                 </span>
+                <span v-if="MODULE_META[item.id].alpha" class="alpha-badge" title="Alpha version">α</span>
                 <div class="sidebar-icon">
                   <span v-if="MODULE_META[item.id].svgIcon" class="sidebar-svg" v-html="MODULE_META[item.id].svgIcon"></span>
                   <i v-else class="fas" :class="MODULE_META[item.id].icon"></i>
@@ -785,6 +791,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                     @dragover.stop.prevent="sbDragOver(memberId, $event)"
                     @drop.stop.prevent="sbDrop(memberId, $event)"
                   >
+                    <span v-if="MODULE_META[memberId]?.alpha" class="alpha-badge" title="Alpha version">α</span>
                     <div class="sidebar-icon sg-member-icon">
                       <span v-if="MODULE_META[memberId]?.svgIcon" class="sidebar-svg" v-html="MODULE_META[memberId].svgIcon"></span>
                       <i v-else class="fas" :class="MODULE_META[memberId]?.icon"></i>
@@ -894,8 +901,8 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
 
         <div class="top-bar" :class="{ 'mobile-top-bar': isMobile }">
           <TopBarClock v-if="visibleTimeTracker" />
-          <span class="user-info"><i class="fas fa-user-circle"></i> {{ store.user.email }}</span>
-          <button class="small danger" @click="signOut"><i class="fas fa-sign-out-alt"></i> Log Out</button>
+          <span class="user-info"><i class="fas fa-user-circle"></i> {{ isMobile ? mobileEmailLabel : store.user.email }}</span>
+          <button class="small danger" @click="signOut"><i class="fas fa-sign-out-alt"></i><span class="logout-label">Log Out</span></button>
         </div>
 
         <!-- Mobile: one module at a time, natural document flow -->
@@ -942,8 +949,9 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
           :key="id"
           class="mobile-nav-btn"
           :class="{ 'is-current': id === currentMobileId }"
-          @click="setMobileModule(id)"
+          @click="setMobileModule(id, $event)"
         >
+          <span v-if="MODULE_META[id].alpha" class="alpha-badge alpha-badge--nav" title="Alpha version">α</span>
           <div class="sidebar-icon mobile-nav-icon">
             <span v-if="MODULE_META[id].svgIcon" class="sidebar-svg" v-html="MODULE_META[id].svgIcon"></span>
             <i v-else class="fas" :class="MODULE_META[id].icon"></i>
@@ -1079,6 +1087,23 @@ body { padding: 0 !important; margin: 0 !important; }
   z-index: 10; cursor: pointer; line-height: 1;
 }
 .sidebar-btn:hover .sidebar-remove { opacity: 1; pointer-events: auto; }
+
+/* ── Alpha-version badge — small yellow circle with α on dock tiles ── */
+.alpha-badge {
+  position: absolute;
+  top: -3px; left: -3px;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #ffd83d, #f0b90b);
+  color: rgba(60, 42, 0, 0.92);
+  font-size: 0.62rem;
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  line-height: 1;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.45);
+  z-index: 11;
+  pointer-events: none;
+}
 
 /* ── Icon tile — translucent primary-color squircle ── */
 .sidebar-icon {
@@ -1551,12 +1576,33 @@ body { padding: 0 !important; margin: 0 !important; }
   gap: 12px;
 }
 
-.mobile-top-bar { flex-wrap: wrap; row-gap: 8px; }
+/* ── Sticky frosted top bar ── */
+.mobile-top-bar {
+  flex-wrap: wrap; row-gap: 8px;
+  position: sticky;
+  top: 0;
+  z-index: 400;
+  margin: -10px calc(-12px - env(safe-area-inset-right)) 0 calc(-12px - env(safe-area-inset-left));
+  padding: calc(10px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 10px calc(12px + env(safe-area-inset-left));
+  background: rgba(235, 235, 245, 0.80);
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  border-bottom: 1px solid rgba(120,120,140,0.16);
+}
+.dark-mode .mobile-top-bar {
+  background: rgba(12, 12, 22, 0.82);
+  border-bottom-color: rgba(255,255,255,0.07);
+}
+
+/* Compact identity chip + icon-only logout */
 .mobile-top-bar .user-info {
   min-width: 0; flex: 1;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   justify-content: flex-end;
+  font-size: 0.82rem;
 }
+.mobile-ui .logout-label { display: none; }
+
 /* Time-tracker pill: allow its controls to wrap instead of overflowing the viewport */
 .mobile-top-bar .tbc { flex-wrap: wrap; max-width: 100%; border-radius: 14px; }
 
@@ -1595,14 +1641,21 @@ body { padding: 0 !important; margin: 0 !important; }
   padding: 2px 4px;
   flex-shrink: 0;
   min-width: 58px;
+  position: relative;
   text-transform: none; letter-spacing: 0;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
+/* Anchor the alpha badge to the centered 40px icon's top-left corner */
+.mobile-nav-btn .alpha-badge--nav { top: -2px; left: calc(50% - 24px); }
 .mobile-nav-btn:hover { filter: none; }
 
 .mobile-nav-icon { width: 40px; height: 40px; }
 .mobile-nav-btn:not(.is-current) .mobile-nav-icon { opacity: 0.42; filter: saturate(0.4); }
+.mobile-nav-btn.is-current .mobile-nav-icon {
+  transform: translateY(-3px) scale(1.06);
+  box-shadow: 0 8px 18px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.26);
+}
 
 .mobile-nav-label {
   font-size: 0.56rem; font-weight: 600;

@@ -229,3 +229,66 @@ th { font-weight: 600; background-color: var(--input-bg); opacity: 0.9; text-tra
 
     .journal-sidebar { max-height: 200px; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   MOBILE DESIGN SYSTEM
+   Applied only in mobile mode — App.vue sets `mobile-ui` on #body-wrapper.
+   Rounded, touch-first restyling of the shared components; desktop keeps
+   the user-configurable --radius look.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Cards: soft rounded surfaces with a slimmer accent */
+.mobile-ui .card {
+    border-radius: 18px;
+    border-top-width: 3px;
+    padding: 18px 14px;
+    box-shadow: 0 2px 14px rgba(0,0,0,0.05);
+}
+.mobile-ui h2 { font-size: 1.15rem; }
+
+/* Inputs: taller, rounded, thumb-friendly */
+.mobile-ui .input-group { margin-bottom: 13px; }
+.mobile-ui .input-group label { font-size: 0.72rem; letter-spacing: 0.4px; }
+.mobile-ui input[type="number"], .mobile-ui input[type="text"], .mobile-ui input[type="date"],
+.mobile-ui input[type="email"], .mobile-ui input[type="password"], .mobile-ui input[type="search"],
+.mobile-ui select, .mobile-ui textarea {
+    padding: 12px 14px;
+    border-radius: 12px;
+}
+.mobile-ui select { background-position-x: calc(100% - 10px); padding-right: 34px; }
+.mobile-ui input[type="color"] { height: 44px; border-radius: 12px; }
+
+/* Joined input+unit pairs keep their shared seam square */
+.mobile-ui .input-with-select input  { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.mobile-ui .input-with-select select { border-top-left-radius: 0;  border-bottom-left-radius: 0; }
+
+.mobile-ui .search-box input { padding-left: 38px; }
+.mobile-ui .search-box i { top: 16px; left: 13px; }
+
+/* Checkboxes & radios: bigger targets, theme-colored */
+.mobile-ui input[type="checkbox"], .mobile-ui input[type="radio"] {
+    width: 18px; height: 18px;
+    accent-color: var(--primary);
+    flex-shrink: 0;
+}
+.mobile-ui .checkbox-list { border-radius: 12px; }
+.mobile-ui .checkbox-list label { margin-bottom: 10px; }
+
+/* Buttons: rounded, ~44px touch height */
+.mobile-ui button { border-radius: 12px; padding: 11px 15px; }
+.mobile-ui button.small { border-radius: 10px; padding: 9px 13px; font-size: 0.78rem; }
+.mobile-ui .rtf-btn { width: 38px; height: 38px; border-radius: 10px; padding: 0; }
+
+/* Tables: a touch more breathing room per row */
+.mobile-ui table { font-size: 0.82rem; }
+.mobile-ui th, .mobile-ui td { padding: 10px 8px; }
+
+/* Panels */
+.mobile-ui .summary-panel { border-radius: 14px; padding: 12px; }
+.mobile-ui .summary-box { border-radius: 12px; }
+.mobile-ui .journal-container { border-radius: 14px; }
+.mobile-ui .journal-editor { padding: 14px; }
+.mobile-ui .journal-item { padding: 14px; border-radius: 10px; }
+.mobile-ui .journal-textarea { border-radius: 12px; }
+.mobile-ui .plate-container { border-radius: 14px; }
+.mobile-ui .well-editor-panel { border-radius: 14px; }

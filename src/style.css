@@ -214,13 +214,19 @@ th { font-weight: 600; background-color: var(--input-bg); opacity: 0.9; text-tra
 
     button, select, input { touch-action: manipulation; }
 
-    /* Wide data tables scroll within the card instead of stretching the page */
-    .card table {
+    /* Wide data tables pan horizontally at a readable size instead of
+       squeezing columns into slivers. Applies to every table — module
+       tables and user-content tables inside the journal editor alike. */
+    table {
         display: block;
         max-width: 100%;
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
     }
+    /* Headers keep their natural width and define the column grid */
+    th { white-space: nowrap; }
+    /* Columns can never collapse below a readable floor */
+    th, td { min-width: 72px; }
 
     /* Comfortable touch targets */
     button.small { padding: 8px 12px; }
@@ -280,8 +286,11 @@ th { font-weight: 600; background-color: var(--input-bg); opacity: 0.9; text-tra
 .mobile-ui .rtf-btn { width: 38px; height: 38px; border-radius: 10px; padding: 0; }
 
 /* Tables: a touch more breathing room per row */
-.mobile-ui table { font-size: 0.82rem; }
 .mobile-ui th, .mobile-ui td { padding: 10px 8px; }
+
+/* The journal editor is a contenteditable div, so the 16px input rule above
+   misses it — without this iOS Safari zoom-jumps the page when it's focused */
+.mobile-ui .rtf-editor { font-size: 16px; }
 
 /* Panels */
 .mobile-ui .summary-panel { border-radius: 14px; padding: 12px; }

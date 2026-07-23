@@ -1,9 +1,10 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import * as XLSX from 'xlsx'
 import { jsPDF } from 'jspdf'
 import { calcSeqExtinction, calcSeqMw, calcSeqTm, calcSeqGc } from '../utils/seqUtils'
+import qrcode from '../utils/qrcode.mjs'
 
 const store = useLabStore()
 
@@ -13,6 +14,33 @@ const importTargetMode = ref('Global')
 const inventorySearch = ref('')
 const viewingItem = ref(null)
 const excelUpload = ref(null)
+
+// ── QR deep links ─────────────────────────────────────────────────────────────
+// Every label QR encodes a URL to this deployment with the item code, so
+// scanning it with the phone camera opens the app on the item (App.vue parses
+// the ?qr= parameter into store.pendingQrCode; it is resolved below).
+const qrUrlForItem = (item) => {
+    const base = (window.location.origin + window.location.pathname).replace(/index\.html?$/, '')
+    return `${base}?qr=${encodeURIComponent(item.code || item.id)}`
+}
+
+const resolvePendingQr = () => {
+    const code = store.pendingQrCode
+    if (!code || !store.inventoryLoaded) return
+    store.pendingQrCode = null
+    const found = store.inventory.find(i =>
+        (i.code && String(i.code).toLowerCase() === code.toLowerCase()) || i.id === code)
+    if (found) {
+        inventoryMode.value = (found.scope || 'Global') === 'Personal' ? 'Personal' : 'Global'
+        viewingItem.value = found
+    } else if (confirm(`No inventory item with code "${code}".\n\nAdd it as a new compound?`)) {
+        const newItem = { id: 'inv_' + crypto.randomUUID(), code, cas: '', itemClass: 'Other', name: 'Scanned compound', stock: 100, stockUnit: 'µM', location: '', sequence: '', oligoType: 'DNA', manualMw: null, tm: 0, scope: inventoryMode.value }
+        store.inventory.unshift(newItem)
+        store.saveItemToCloud(newItem)
+        viewingItem.value = newItem
+    }
+}
+watch(() => [store.pendingQrCode, store.inventoryLoaded], resolvePendingQr, { immediate: true })
 
 // --- Local Computed ---
 const filteredInventory = computed(() => {
@@ -339,6 +367,7 @@ const printerYShift   = ref(0)    // mm
 const labelSearch     = ref('')
 const labelDragFrom   = ref(null)
 const labelSize       = ref('eppi05')
+const labelQrMode     = ref('with')   // 'off' | 'with' (text + QR) | 'only' (just QR + code)
 
 // Label formats for common tube types. Each tiles the HERMA 4363 master block's
 // 96×39 mm printable area exactly (whole numbers of the 24×13 mm die-cut cells),
@@ -521,6 +550,47 @@ const renderChemLabel = (doc, item, x, y, w, h) => {
     }
 }
 
+// Draw a QR code as crisp vector rects into the jsPDF document.
+// `size` is the full square including a 2-module quiet zone on each side.
+const drawQrOnPdf = (doc, text, x, y, size) => {
+    const qr = qrcode(0, 'M')   // type 0 → smallest version that fits the text
+    qr.addData(text)
+    qr.make()
+    const n = qr.getModuleCount()
+    const quiet = 2
+    const m = size / (n + quiet * 2)
+    const ox = x + quiet * m, oy = y + quiet * m
+    doc.setFillColor(255, 255, 255)
+    doc.rect(x, y, size, size, 'F')
+    doc.setFillColor(0, 0, 0)
+    for (let r = 0; r < n; r++)
+        for (let c = 0; c < n; c++)
+            // 4% overdraw hides hairline seams between adjacent modules
+            if (qr.isDark(r, c)) doc.rect(ox + c * m, oy + r * m, m * 1.04, m * 1.04, 'F')
+}
+
+// QR-only label: big scannable QR, with the identifier code (and name, when
+// there is room) beside it for human eyes.
+const renderQrOnlyLabel = (doc, item, x, y, w, h) => {
+    const qsize = Math.min(h - 1.0, w - 1.0, 22)
+    const sideRoom = w - qsize - 2.0
+    const qx = sideRoom >= 8 ? x + 0.8 : x + (w - qsize) / 2
+    const qy = y + (h - qsize) / 2
+    drawQrOnPdf(doc, qrUrlForItem(item), qx, qy, qsize)
+    if (sideRoom >= 8 && item.code) {
+        const tx = qx + qsize + 1.2
+        const maxW = x + w - 0.8 - tx
+        const s = 1 + (h / 13 - 1) * 0.55
+        let ty = y + h / 2 - 0.6 * s
+        doc.setFont('courier', 'bold'); doc.setFontSize(4.4 * s); doc.setTextColor(10, 10, 10)
+        doc.text(doc.splitTextToSize(String(item.code), maxW)[0], tx, ty)
+        ty += lineMM(4.4 * s)
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(3.2 * s); doc.setTextColor(105, 105, 105)
+        const nameLn = doc.splitTextToSize(item.name || '', maxW)[0]
+        if (nameLn) doc.text(nameLn, tx, ty)
+    }
+}
+
 const generateLabelsPDF = () => {
     if (labelQueue.value.length === 0) return
 
@@ -572,9 +642,20 @@ const generateLabelsPDF = () => {
         doc.rect(cellX, cellY, tw, th)
         doc.setLineDash([])
 
-        const cls = item.itemClass || ''
-        if (cls === 'DNA' || cls === 'RNA') renderDnaLabel(doc, item, cellX, cellY, tw, th)
-        else renderChemLabel(doc, item, cellX, cellY, tw, th)
+        if (labelQrMode.value === 'only') {
+            renderQrOnlyLabel(doc, item, cellX, cellY, tw, th)
+        } else {
+            // With QR: reserve a right-hand square for the code, text gets the rest
+            let textW = tw
+            if (labelQrMode.value === 'with') {
+                const qsize = Math.min(th - 1.6, 15)
+                drawQrOnPdf(doc, qrUrlForItem(item), cellX + tw - qsize - 0.8, cellY + (th - qsize) / 2, qsize)
+                textW = tw - qsize - 1.6
+            }
+            const cls = item.itemClass || ''
+            if (cls === 'DNA' || cls === 'RNA') renderDnaLabel(doc, item, cellX, cellY, textW, th)
+            else renderChemLabel(doc, item, cellX, cellY, textW, th)
+        }
     })
 
     const dateStr = new Date().toISOString().split('T')[0]
@@ -809,6 +890,21 @@ const generateLabelsPDF = () => {
             </div>
             <div style="font-size: 0.68rem; opacity: 0.55; margin-bottom: 16px; line-height: 1.5;">
               DNA / RNA items keep their sequence layout; all other classes print name, conc, solvent/buffer, Na⁺/Cl⁻ salt, location, MW, CAS, pH &amp; code.
+            </div>
+
+            <!-- QR code mode -->
+            <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">QR Code</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 10px;">
+              <div
+                v-for="opt in [{ v: 'off', label: 'None' }, { v: 'with', label: 'Text + QR' }, { v: 'only', label: 'QR only' }]"
+                :key="opt.v"
+                @click="labelQrMode = opt.v"
+                style="padding: 7px 4px; border-radius: 4px; border: 1.5px solid; text-align: center; font-size: 0.7rem; font-weight: 600; cursor: pointer; user-select: none;"
+                :style="{ borderColor: labelQrMode === opt.v ? 'var(--primary)' : 'var(--border)', background: labelQrMode === opt.v ? 'var(--primary)' : 'var(--panel-bg)', color: labelQrMode === opt.v ? 'white' : 'var(--text)' }"
+              >{{ opt.label }}</div>
+            </div>
+            <div style="font-size: 0.68rem; opacity: 0.55; margin-bottom: 16px; line-height: 1.5;">
+              Scanning a label QR with the phone camera opens this app on the item — stock, location and all properties. Unknown codes offer to create a new compound.
             </div>
 
             <!-- HERMA picker -->

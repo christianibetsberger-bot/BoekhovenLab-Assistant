@@ -202,8 +202,8 @@ th { font-weight: 600; background-color: var(--input-bg); opacity: 0.9; text-tra
     }
 }
 
-/* ══ Mobile / iPhone Safari (breakpoint must match matchMedia in App.vue) ══ */
-@media (max-width: 820px) {
+/* ══ Mobile / iPhone Safari (query must match matchMedia in App.vue) ══ */
+@media (max-width: 820px), ((hover: none) and (pointer: coarse) and (max-width: 950px)) {
     /* iOS Safari auto-zooms into any focused input with font-size < 16px,
        which leaves the page zoomed-in and mis-scaled. 16px prevents that. */
     input[type="number"], input[type="text"], input[type="date"],
@@ -301,3 +301,12 @@ th { font-weight: 600; background-color: var(--input-bg); opacity: 0.9; text-tra
 .mobile-ui .journal-textarea { border-radius: 12px; }
 .mobile-ui .plate-container { border-radius: 14px; }
 .mobile-ui .well-editor-panel { border-radius: 14px; }
+
+/* Phase Map: in fixed-axis mode the 2D + ternary plots sit side by side in
+   an inline-styled 38/62 grid — far too cramped on a phone. Stack them.
+   (!important needed to beat the inline style.) */
+.mobile-ui .plot-area:has(> #phase-2d-plot) {
+    height: auto !important;
+    grid-template-columns: 1fr !important;
+}
+.mobile-ui .plot-area:has(> #phase-2d-plot) > div { height: 240px !important; }

@@ -335,6 +335,14 @@ function setMobileModule(id, e) {
 // Compact identity for the mobile top bar — just the mailbox name
 const mobileEmailLabel = computed(() => (store.user?.email || '').split('@')[0])
 
+// Plotly charts (Phase Map, LIDA Kinetics, Data & Figures) only resize on
+// window resize events. KeepAlive re-attaches them at a stale size when
+// switching tabs, so nudge them after the new module is in the DOM.
+watch(currentMobileId, () => {
+  if (!isMobile.value) return
+  nextTick(() => setTimeout(() => window.dispatchEvent(new Event('resize')), 60))
+})
+
 // Modules removed from sidebar (can be re-added via redock panel)
 const removedModuleIds = computed(() =>
   Object.keys(layoutMeta.value.sidebarHidden || {}).filter(id => layoutMeta.value.sidebarHidden[id])
@@ -664,9 +672,22 @@ async function initSession(user) {
   loadGridLayout()
   loadSidebarGroups()
   if (MOB_KEY.value) activeMobileId.value = localStorage.getItem(MOB_KEY.value)
+  // Arriving via a scanned label QR: bring the inventory module into view;
+  // InventoryManager resolves the code once the cloud inventory has loaded.
+  if (store.pendingQrCode) {
+    if (isMobile.value) activeMobileId.value = 'inventoryManager'
+    else if (!isInGrid('inventoryManager')) toggleModule('inventoryManager')
+  }
 }
 
 onMounted(() => {
+  // Deep link from a scanned label QR (?qr=CODE). Stash the code and strip the
+  // parameter so a later reload doesn't re-trigger the lookup.
+  const qrParam = new URLSearchParams(window.location.search).get('qr')
+  if (qrParam) {
+    store.pendingQrCode = qrParam
+    history.replaceState(null, '', window.location.pathname + window.location.hash)
+  }
   db.auth.getSession().then(({ data }) => {
     if (data.session) initSession(data.session.user)
   })
@@ -679,8 +700,10 @@ onMounted(() => {
   onResize()
   window.addEventListener('resize', onResize)
   onUnmounted(() => window.removeEventListener('resize', onResize))
-  // Mobile breakpoint — must match the @media queries in style.css
-  const mq = window.matchMedia('(max-width: 820px)')
+  // Mobile breakpoint — must match the @media queries in style.css.
+  // The second clause keeps phones in mobile mode when rotated to landscape
+  // (iPhone landscape is 844–932px wide) without capturing desktops/iPads.
+  const mq = window.matchMedia('(max-width: 820px), ((hover: none) and (pointer: coarse) and (max-width: 950px))')
   const updateMq = () => { isMobile.value = mq.matches }
   updateMq()
   mq.addEventListener('change', updateMq)

@@ -9,6 +9,10 @@ export const useLabStore = defineStore('lab', {
     user: null,
     inventoryMode: 'Global',
     importTargetMode: 'Global',
+    // Set from a scanned label deep link (?qr=CODE) before login/data load;
+    // InventoryManager resolves it once inventoryLoaded flips true.
+    pendingQrCode: null,
+    inventoryLoaded: false,
     isDarkMode: false,
     uiSettings: { primaryColor: '#0E396E', borderRadius: '2px' },
     globalSettings: { mmReactions: 3.3, decimals: 3 },
@@ -97,6 +101,7 @@ export const useLabStore = defineStore('lab', {
       // 1. Load Inventory
       const { data: invData } = await db.from('inventory').select('*');
       if (invData) this.inventory = invData.map(row => row.item_data);
+      this.inventoryLoaded = true;
 
       // 2. Load Reactions
       const { data: rxnData } = await db.from('reactions').select('*');

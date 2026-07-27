@@ -19,9 +19,12 @@ import DataFigures from './components/DataFigures.vue'
 import WellPlateEditor from './components/WellPlateEditor.vue'
 import ArchiveManager from './components/ArchiveManager.vue'
 import TimeTracker from './components/TimeTracker.vue'
+import InstrumentBooking from './components/InstrumentBooking.vue'
 import TopBarClock from './components/TopBarClock.vue'
+import DashboardOverview from './components/DashboardOverview.vue'
 
 import lidaIcon from './assets/lida-icon.svg?raw'
+import { MODULE_ICONS } from './utils/moduleIcons.js'
 
 const store = useLabStore()
 useDynamicIcon()
@@ -42,7 +45,14 @@ const MODULE_META = {
   dataFigures:      { label: 'Data & Figures', icon: 'fa-chart-line', alpha: true, component: markRaw(DataFigures) },
   wellPlateEditor:  { label: 'Well Plate',  icon: 'fa-border-all',        component: markRaw(WellPlateEditor) },
   timeTracker:      { label: 'Time Tracker', icon: 'fa-clock',             component: markRaw(TimeTracker) },
+  instrumentBooking:{ label: 'Booking',      icon: 'fa-calendar-check',    component: markRaw(InstrumentBooking) },
 }
+
+// Dashboard (home) line icon for the dock.
+const DASHBOARD_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5 8 2.5 13.5 7.5V13a0.8 0.8 0 0 1-0.8 0.8H3.3a0.8 0.8 0 0 1-0.8-0.8Z"/><line x1="8" y1="10" x2="8" y2="13.8"/></svg>'
+
+// Desktop view router: 'dashboard' (the free-drag grid home) or a module id (full page).
+const desktopView = ref('dashboard')
 
 // ── Free-placement grid layout — 12-column absolute grid ───────────────────
 const ROW_HEIGHT = 30
@@ -117,6 +127,20 @@ function getDefaultGridLayout() {
 const GL_KEY    = computed(() => store.user?.id ? `gl3_${store.user.id}`   : null)
 const GL_KEY_V2 = computed(() => store.user?.id ? `gl2_${store.user.id}`   : null)
 const LMETA_KEY = computed(() => store.user?.id ? `lmeta_${store.user.id}` : null)
+const DV_KEY    = computed(() => store.user?.id ? `dv_${store.user.id}`    : null)
+
+// Navigate the desktop view router (dock + dashboard-card affordances call this).
+function goView(v) {
+  desktopView.value = v
+  if (DV_KEY.value) localStorage.setItem(DV_KEY.value, v)
+  window.scrollTo({ top: 0 })
+  // Plotly modules only resize on window resize — nudge one after the switch.
+  nextTick(() => setTimeout(() => window.dispatchEvent(new Event('resize')), 60))
+}
+// Hiding alpha while viewing one → return to the dashboard.
+watch(() => store.uiSettings.showAlpha, (on) => {
+  if (!on && MODULE_META[desktopView.value]?.alpha) goView('dashboard')
+})
 
 function loadGridLayout() {
   if (!GL_KEY.value) return
@@ -308,9 +332,29 @@ function isModuleHiddenForUser(id) {
 const visibleTimeTracker = computed(() => !isModuleHiddenForUser('timeTracker'))
 
 // All module ids visible in the sidebar (all MODULE_META keys, minus sidebarHidden + per-user hidden)
+// Alpha-stage modules are hidden unless the user opts in (Settings → Show alpha).
+function isAlphaHidden(id) { return MODULE_META[id].alpha && !store.uiSettings.showAlpha }
 const allModuleIds = computed(() =>
-  Object.keys(MODULE_META).filter(id => !layoutMeta.value.sidebarHidden?.[id] && !isModuleHiddenForUser(id))
+  Object.keys(MODULE_META).filter(id =>
+    !layoutMeta.value.sidebarHidden?.[id] && !isModuleHiddenForUser(id) && !isAlphaHidden(id))
 )
+
+// Dock grouping: administrative → lab work → alpha (experimental).
+const DOCK_GROUPS = [
+  ['globalSettings', 'timeTracker', 'archiveManager'],
+  ['labJournal', 'inventoryManager', 'instrumentBooking', 'reactionPlan', 'standardStock', 'sequenceCalc',
+   'matrixPlanner', 'screeningPlanner', 'phasePredictor', 'wellPlateEditor'],
+  ['dataFigures', 'lidaKinetics'],
+]
+// Ordered, visible groups; any module not explicitly grouped falls into Lab.
+const dockGroups = computed(() => {
+  const visible = new Set(allModuleIds.value)
+  const listed = new Set(DOCK_GROUPS.flat())
+  const groups = DOCK_GROUPS.map(ids => ids.filter(id => visible.has(id)))
+  const leftovers = allModuleIds.value.filter(id => !listed.has(id))
+  if (leftovers.length) groups[1] = [...groups[1], ...leftovers]
+  return groups.filter(g => g.length)
+})
 
 // ── Mobile mode — one module at a time with a bottom tab bar ───────────────
 // The desktop grid (mouse drag/resize, hover sidebar) is unusable on touch,
@@ -335,6 +379,44 @@ function setMobileModule(id, e) {
 // Compact identity for the mobile top bar — just the mailbox name
 const mobileEmailLabel = computed(() => (store.user?.email || '').split('@')[0])
 
+// ── iPhone home hub — hub → module → back (replaces the 14-tab bottom bar) ──
+// activeMobileId null (or unknown) means we're on the hub; a valid id means that
+// module is open full-screen with a back button.
+const onHub = computed(() => !activeMobileId.value || !allModuleIds.value.includes(activeMobileId.value))
+function openMobileModule(id) {
+  activeMobileId.value = id
+  if (MOB_KEY.value) localStorage.setItem(MOB_KEY.value, id)
+  nextTick(() => { window.scrollTo({ top: 0 }); setTimeout(() => window.dispatchEvent(new Event('resize')), 60) })
+}
+function backToHub() {
+  activeMobileId.value = null
+  if (MOB_KEY.value) localStorage.removeItem(MOB_KEY.value)
+  window.scrollTo({ top: 0 })
+}
+const greeting = computed(() => {
+  const h = new Date().getHours()
+  return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
+})
+
+// Pinned modules (2-column hub grid), user-editable, persisted per user.
+const mobilePinnedKey = computed(() => store.user?.id ? `mobpin_${store.user.id}` : null)
+const mobilePinned = ref(['labJournal', 'inventoryManager', 'timeTracker', 'dataFigures'])
+function loadMobilePinned() {
+  if (!mobilePinnedKey.value) return
+  const raw = localStorage.getItem(mobilePinnedKey.value)
+  if (raw) { try { mobilePinned.value = JSON.parse(raw) } catch {} }
+}
+function saveMobilePinned() {
+  if (mobilePinnedKey.value) localStorage.setItem(mobilePinnedKey.value, JSON.stringify(mobilePinned.value))
+}
+function togglePin(id) {
+  const i = mobilePinned.value.indexOf(id)
+  if (i >= 0) mobilePinned.value.splice(i, 1)
+  else mobilePinned.value.push(id)
+  saveMobilePinned()
+}
+const pinnedModules = computed(() => mobilePinned.value.filter(id => allModuleIds.value.includes(id)))
+
 // Plotly charts (Phase Map, LIDA Kinetics, Data & Figures) only resize on
 // window resize events. KeepAlive re-attaches them at a stale size when
 // switching tabs, so nudge them after the new module is in the DOM.
@@ -357,6 +439,9 @@ function cyclePosition() {
   const cur = layoutMeta.value.sidebarPosition || 'left'
   layoutMeta.value.sidebarPosition = POSITION_CYCLE[(POSITION_CYCLE.indexOf(cur) + 1) % 3]
   saveLayoutMeta()
+  // The dock's reserved space changes with position, so the grid's measured
+  // width is briefly stale — nudge a resize once the new padding is applied.
+  nextTick(() => window.dispatchEvent(new Event('resize')))
 }
 
 // Sidebar remove / redock
@@ -671,6 +756,8 @@ async function initSession(user) {
   loadLayoutMeta()
   loadGridLayout()
   loadSidebarGroups()
+  loadMobilePinned()
+  if (DV_KEY.value) { const v = localStorage.getItem(DV_KEY.value); if (v === 'dashboard' || (MODULE_META[v] && !isAlphaHidden(v))) desktopView.value = v }
   if (MOB_KEY.value) activeMobileId.value = localStorage.getItem(MOB_KEY.value)
   // Arriving via a scanned label QR: bring the inventory module into view;
   // InventoryManager resolves the code once the cloud inventory has loaded.
@@ -712,6 +799,58 @@ onMounted(() => {
 
 const signOut = async () => { await db.auth.signOut(); window.location.reload() }
 
+// ── ⌘K command palette — jump to any module ────────────────────────────────
+const paletteOpen  = ref(false)
+const paletteQuery = ref('')
+const paletteInput = ref(null)
+const paletteResults = computed(() => {
+  const q = paletteQuery.value.trim().toLowerCase()
+  const list = allModuleIds.value.map(id => ({ id, ...MODULE_META[id] }))
+  return q ? list.filter(m => m.label.toLowerCase().includes(q)) : list
+})
+function openPalette() {
+  paletteOpen.value = true
+  paletteQuery.value = ''
+  nextTick(() => paletteInput.value?.focus())
+}
+function closePalette() { paletteOpen.value = false }
+function paletteGo(id) {
+  closePalette()
+  if (isMobile.value) { openMobileModule(id); return }
+  if (!isInGrid(id)) toggleModule(id)
+  nextTick(() => document.querySelector(`[data-grid-id="${id}"]`)
+    ?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+}
+function paletteEnter() { const f = paletteResults.value[0]; if (f) paletteGo(f.id) }
+function onPaletteKey(e) {
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault(); paletteOpen.value ? closePalette() : openPalette()
+  } else if (e.key === 'Escape' && paletteOpen.value) closePalette()
+}
+onMounted(() => document.addEventListener('keydown', onPaletteKey))
+onUnmounted(() => document.removeEventListener('keydown', onPaletteKey))
+
+// ── Avatar (initials + menu) — replaces the raw e-mail in the toolbar ───────
+const avatarMenuOpen = ref(false)
+const userInitials = computed(() => {
+  const local = (store.user?.email || '').split('@')[0] || ''
+  const parts = local.split(/[.\-_]+/).filter(Boolean)
+  const s = parts.length >= 2 ? parts[0][0] + parts[1][0] : local.slice(0, 2)
+  return (s || '?').toUpperCase()
+})
+onMounted(() => document.addEventListener('click', () => { avatarMenuOpen.value = false }))
+
+// ── Header-band drag (replaces the visible grip strip) ─────────────────────
+// The module's own header doubles as the drag surface; the body and any
+// interactive control never start a drag.
+function startHeaderDrag(id, e) {
+  if (e.button !== 0) return
+  if (e.target.closest('button, a, input, select, textarea, label, [contenteditable], .no-drag')) return
+  const rect = e.currentTarget.getBoundingClientRect()
+  if (e.clientY - rect.top > 56) return  // only the top header band initiates a drag
+  startDrag(id, e)
+}
+
 // Close redock panel on any click outside the panel or its toggle button
 const _closeRedock = () => { showRedockPanel.value = false }
 onMounted(() => document.addEventListener('click', _closeRedock))
@@ -741,89 +880,21 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
         @drop.prevent="sbSidebarBackgroundDrop"
       >
         <div class="sidebar-modules">
+          <!-- Dashboard (home) -->
+          <button class="sidebar-btn" :class="{ 'is-active': desktopView === 'dashboard' }"
+                  title="Dashboard" @click="goView('dashboard')">
+            <div class="sidebar-icon"><span class="sidebar-svg" v-html="DASHBOARD_ICON"></span></div>
+          </button>
 
-          <template v-for="item in sidebarItems" :key="item.type === 'module' ? item.id : item.group.id">
-
-            <!-- ── Regular module button ── -->
-            <template v-if="item.type === 'module'">
-              <button
-                class="sidebar-btn"
-                :class="{
-                  'is-active': isInGrid(item.id),
-                  'is-hidden': !isInGrid(item.id),
-                  'sg-drop-target': sidebarDragOver === item.id && sidebarDragging?.moduleId !== item.id,
-                }"
-                :title="MODULE_META[item.id].label"
-                draggable="true"
-                @click="toggleModule(item.id)"
-                @dragstart.stop="sbDragStart(item.id, $event)"
-                @dragend.stop="sbDragEnd"
-                @dragover.stop.prevent="sbDragOver(item.id, $event)"
-                @drop.stop.prevent="sbDrop(item.id, $event)"
-              >
-                <span class="sidebar-remove" @click.stop="removeFromSidebar(item.id)" title="Remove from sidebar">
-                  <i class="fas fa-xmark"></i>
-                </span>
-                <span v-if="MODULE_META[item.id].alpha" class="alpha-badge" title="Alpha version">α</span>
-                <div class="sidebar-icon">
-                  <span v-if="MODULE_META[item.id].svgIcon" class="sidebar-svg" v-html="MODULE_META[item.id].svgIcon"></span>
-                  <i v-else class="fas" :class="MODULE_META[item.id].icon"></i>
-                </div>
-              </button>
-            </template>
-
-            <!-- ── Group button ── -->
-            <template v-else-if="item.type === 'group'">
-              <div class="sg-group-wrapper">
-                <!-- Group icon button (collapsed state) -->
-                <button
-                  class="sidebar-btn sg-group-item"
-                  :class="{ 'sg-drop-target': sidebarDragOver === item.group.id && sidebarDragging }"
-                  :title="item.group.name"
-                  @click="toggleGroupExpanded(item.group.id)"
-                  @contextmenu.prevent="openGroupEditor(item.group, $event)"
-                  @dragover.stop.prevent="sbDragOver(item.group.id, $event)"
-                  @drop.stop.prevent="sbDropOnGroup(item.group.id, $event)"
-                >
-                  <div class="sidebar-icon sg-group-icon">
-                    <i class="fas" :class="item.group.icon"></i>
-                  </div>
-                  <span class="sg-badge">{{ item.group.moduleIds.length }}</span>
-                </button>
-
-                <!-- Expanded inline container -->
-                <div
-                  v-if="expandedGroups.has(item.group.id)"
-                  class="sg-expanded"
-                  :class="`sg-expanded-${sidebarPosition}`"
-                >
-                  <button
-                    v-for="memberId in item.group.moduleIds.filter(mid => allModuleIds.includes(mid))"
-                    :key="memberId"
-                    class="sidebar-btn sg-member-btn"
-                    :class="{
-                      'is-active': isInGrid(memberId),
-                      'is-hidden': !isInGrid(memberId),
-                      'sg-drop-target': sidebarDragOver === memberId && sidebarDragging?.moduleId !== memberId,
-                    }"
-                    :title="MODULE_META[memberId]?.label"
-                    draggable="true"
-                    @click="toggleModule(memberId)"
-                    @dragstart.stop="sbDragStart(memberId, $event)"
-                    @dragend.stop="sbDragEnd"
-                    @dragover.stop.prevent="sbDragOver(memberId, $event)"
-                    @drop.stop.prevent="sbDrop(memberId, $event)"
-                  >
-                    <span v-if="MODULE_META[memberId]?.alpha" class="alpha-badge" title="Alpha version">α</span>
-                    <div class="sidebar-icon sg-member-icon">
-                      <span v-if="MODULE_META[memberId]?.svgIcon" class="sidebar-svg" v-html="MODULE_META[memberId].svgIcon"></span>
-                      <i v-else class="fas" :class="MODULE_META[memberId]?.icon"></i>
-                    </div>
-                  </button>
-                </div>
-              </div>
-            </template>
-
+          <!-- Modules grouped: administrative → lab → alpha, divider between groups -->
+          <template v-for="(group, gi) in dockGroups" :key="gi">
+            <span class="sidebar-divider"></span>
+            <button v-for="id in group" :key="id" class="sidebar-btn"
+                    :class="{ 'is-active': desktopView === id }"
+                    :title="MODULE_META[id].label" @click="goView(id)">
+              <span v-if="MODULE_META[id].alpha" class="alpha-badge" title="Alpha version">α</span>
+              <div class="sidebar-icon"><span class="sidebar-svg" v-html="MODULE_ICONS[id]"></span></div>
+            </button>
           </template>
         </div>
 
@@ -851,8 +922,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
             <button v-for="id in removedModuleIds" :key="id" class="redock-item"
               :title="MODULE_META[id].label" @click="redockModule(id)">
               <div class="sidebar-icon redock-icon">
-                <span v-if="MODULE_META[id].svgIcon" class="sidebar-svg" v-html="MODULE_META[id].svgIcon"></span>
-                <i v-else class="fas" :class="MODULE_META[id].icon"></i>
+                <span class="sidebar-svg" v-html="MODULE_ICONS[id]"></span>
               </div>
               <span class="redock-label">{{ MODULE_META[id].label }}</span>
             </button>
@@ -920,68 +990,147 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
       </Teleport>
 
       <!-- Main content -->
-      <div class="app-main" :class="{ 'mobile-main': isMobile }">
+      <div class="app-main" :class="[{ 'mobile-main': isMobile }, !isMobile ? `dock-${sidebarPosition}` : '']">
 
-        <div class="top-bar" :class="{ 'mobile-top-bar': isMobile }">
+        <div v-if="!isMobile" class="top-bar">
           <TopBarClock v-if="visibleTimeTracker" />
-          <span class="user-info"><i class="fas fa-user-circle"></i> {{ isMobile ? mobileEmailLabel : store.user.email }}</span>
-          <button class="small danger" @click="signOut"><i class="fas fa-sign-out-alt"></i><span class="logout-label">Log Out</span></button>
-        </div>
 
-        <!-- Mobile: one module at a time, natural document flow -->
-        <div v-if="isMobile" class="mobile-module">
-          <KeepAlive>
-            <component v-if="currentMobileId" :is="MODULE_META[currentMobileId].component" :key="currentMobileId" />
-          </KeepAlive>
-        </div>
+          <!-- ⌘K search (desktop) -->
+          <button v-if="!isMobile" class="tb-search" @click="openPalette" title="Search modules (⌘K)">
+            <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="5" cy="5" r="3.6" fill="none" stroke="currentColor" stroke-width="1.4"/><line x1="7.7" y1="7.7" x2="10.6" y2="10.6" stroke="currentColor" stroke-width="1.4"/></svg>
+            <span class="tb-search-text">Search modules, items, entries</span>
+            <span class="tb-kbd">⌘K</span>
+          </button>
 
-        <!-- Free-placement 12-column grid workspace -->
-        <div v-else ref="gridContainer" class="grid-workspace" :style="{ height: containerHeight + 'px' }">
-          <template v-for="item in gridLayout" :key="item.i">
-            <div
-              v-if="!isModuleHiddenForUser(item.i)"
-              class="grid-module"
-              :class="{ 'grid-module--active': dragState?.id === item.i || resizeState?.id === item.i }"
-              :data-grid-id="item.i"
-              :style="getModuleStyle(item)"
-            >
-              <div class="drag-handle" @mousedown.prevent="startDrag(item.i, $event)" title="Drag to move">
-                <i class="fas fa-grip-lines"></i>
+          <div class="tb-right">
+            <button class="tb-icon" @click="store.toggleDarkMode()" :title="store.isDarkMode ? 'Light mode' : 'Dark mode'">
+              <i class="fas" :class="store.isDarkMode ? 'fa-sun' : 'fa-moon'"></i>
+            </button>
+            <div class="tb-avatar-wrap">
+              <button class="tb-avatar" :title="store.user.email" @click.stop="avatarMenuOpen = !avatarMenuOpen">{{ userInitials }}</button>
+              <div v-if="avatarMenuOpen" class="tb-avatar-menu" @click.stop>
+                <div class="tb-avatar-email">{{ store.user.email }}</div>
+                <button class="tb-avatar-logout" @click="signOut"><i class="fas fa-sign-out-alt"></i> Log out</button>
               </div>
-              <div class="grid-module-content">
-                <component :is="MODULE_META[item.i].component" />
-              </div>
-              <!-- 8-direction resize handles -->
-              <div class="rh rh-n"  @mousedown.prevent.stop="startGridResize(item.i, 'n',  $event)"></div>
-              <div class="rh rh-s"  @mousedown.prevent.stop="startGridResize(item.i, 's',  $event)"></div>
-              <div class="rh rh-e"  @mousedown.prevent.stop="startGridResize(item.i, 'e',  $event)"></div>
-              <div class="rh rh-w"  @mousedown.prevent.stop="startGridResize(item.i, 'w',  $event)"></div>
-              <div class="rh rh-ne" @mousedown.prevent.stop="startGridResize(item.i, 'ne', $event)"></div>
-              <div class="rh rh-nw" @mousedown.prevent.stop="startGridResize(item.i, 'nw', $event)"></div>
-              <div class="rh rh-se" @mousedown.prevent.stop="startGridResize(item.i, 'se', $event)"></div>
-              <div class="rh rh-sw" @mousedown.prevent.stop="startGridResize(item.i, 'sw', $event)"></div>
             </div>
-          </template>
+          </div>
         </div>
+
+        <!-- Mobile: home hub → module → back -->
+        <template v-if="isMobile">
+          <!-- ── Home hub ── -->
+          <div v-if="onHub" class="hub">
+            <div class="hub-head">
+              <div class="hub-greeting">
+                <span class="hub-hi">{{ greeting }}</span>
+                <span class="hub-lab">Boekhoven Lab</span>
+              </div>
+              <div class="hub-head-actions">
+                <button class="hub-icon-btn" @click="store.toggleDarkMode()" :title="store.isDarkMode ? 'Light mode' : 'Dark mode'">
+                  <i class="fas" :class="store.isDarkMode ? 'fa-sun' : 'fa-moon'"></i>
+                </button>
+                <div class="tb-avatar-wrap">
+                  <button class="tb-avatar hub-avatar" :title="store.user.email" @click.stop="avatarMenuOpen = !avatarMenuOpen">{{ userInitials }}</button>
+                  <div v-if="avatarMenuOpen" class="tb-avatar-menu" @click.stop>
+                    <div class="tb-avatar-email">{{ store.user.email }}</div>
+                    <button class="tb-avatar-logout" @click="signOut"><i class="fas fa-sign-out-alt"></i> Log out</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="visibleTimeTracker" class="hub-timer"><TopBarClock /></div>
+
+            <button class="tb-search hub-search" @click="openPalette">
+              <svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true"><circle cx="5.5" cy="5.5" r="4" fill="none" stroke="currentColor" stroke-width="1.4"/><line x1="8.5" y1="8.5" x2="11.5" y2="11.5" stroke="currentColor" stroke-width="1.4"/></svg>
+              <span class="tb-search-text">Search modules…</span>
+            </button>
+
+            <template v-if="pinnedModules.length">
+              <div class="hub-label">Pinned</div>
+              <div class="hub-pinned">
+                <button v-for="id in pinnedModules" :key="id" class="hub-tile" @click="openMobileModule(id)">
+                  <span class="hub-tile-ic"><span class="sidebar-svg" v-html="MODULE_ICONS[id]"></span></span>
+                  <span class="hub-tile-label">{{ MODULE_META[id].label }}</span>
+                  <span v-if="MODULE_META[id].alpha" class="hub-tile-alpha">α</span>
+                  <span class="hub-pin is-pinned" @click.stop="togglePin(id)" title="Unpin">★</span>
+                </button>
+              </div>
+            </template>
+
+            <div class="hub-label">All modules</div>
+            <div class="hub-grid">
+              <button v-for="id in allModuleIds" :key="id" class="hub-cell" @click="openMobileModule(id)">
+                <span v-if="MODULE_META[id].alpha" class="alpha-badge alpha-badge--hub" title="Alpha version">α</span>
+                <span class="hub-cell-ic"><span class="sidebar-svg" v-html="MODULE_ICONS[id]"></span></span>
+                <span class="hub-cell-label">{{ MODULE_META[id].label }}</span>
+                <span class="hub-pin" :class="{ 'is-pinned': mobilePinned.includes(id) }" @click.stop="togglePin(id)" :title="mobilePinned.includes(id) ? 'Unpin' : 'Pin'">★</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- ── Module full screen ── -->
+          <div v-else class="mobile-module">
+            <button class="mob-back" @click="backToHub">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="9.5,3 5,8 9.5,13"/></svg>
+              Home
+            </button>
+            <KeepAlive>
+              <component :is="MODULE_META[activeMobileId].component" :key="activeMobileId" />
+            </KeepAlive>
+          </div>
+        </template>
+
+        <!-- Desktop: Dashboard overview or a single module page -->
+        <template v-else>
+        <DashboardOverview v-if="desktopView === 'dashboard'" @open="goView" />
+
+        <!-- Single module full page -->
+        <div v-else class="module-page">
+          <div class="module-page-bar">
+            <button class="mp-back" @click="goView('dashboard')">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="9.5,3 5,8 9.5,13"/></svg>
+              Dashboard
+            </button>
+            <span class="mp-title">{{ MODULE_META[desktopView]?.label }}</span>
+          </div>
+          <div class="module-page-body">
+            <component :is="MODULE_META[desktopView].component" :key="desktopView" />
+          </div>
+        </div>
+        </template>
       </div>
 
-      <!-- Mobile bottom tab bar — always visible, horizontally scrollable -->
-      <nav v-if="isMobile" class="mobile-nav">
-        <button
-          v-for="id in allModuleIds"
-          :key="id"
-          class="mobile-nav-btn"
-          :class="{ 'is-current': id === currentMobileId }"
-          @click="setMobileModule(id, $event)"
-        >
-          <span v-if="MODULE_META[id].alpha" class="alpha-badge alpha-badge--nav" title="Alpha version">α</span>
-          <div class="sidebar-icon mobile-nav-icon">
-            <span v-if="MODULE_META[id].svgIcon" class="sidebar-svg" v-html="MODULE_META[id].svgIcon"></span>
-            <i v-else class="fas" :class="MODULE_META[id].icon"></i>
+
+      <!-- ⌘K command palette -->
+      <Teleport to="body">
+        <div v-if="paletteOpen" class="cmdk-overlay" :class="{ 'dark-mode': store.isDarkMode }" @click="closePalette">
+          <div class="cmdk" @click.stop>
+            <div class="cmdk-search">
+              <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="6" cy="6" r="4.2" fill="none" stroke="currentColor" stroke-width="1.4"/><line x1="9.2" y1="9.2" x2="12.4" y2="12.4" stroke="currentColor" stroke-width="1.4"/></svg>
+              <input ref="paletteInput" v-model="paletteQuery" placeholder="Jump to a module…"
+                     @keydown.enter.prevent="paletteEnter" @keydown.esc.prevent="closePalette" />
+              <span class="tb-kbd">esc</span>
+            </div>
+            <div class="cmdk-list">
+              <button v-for="m in paletteResults" :key="m.id" class="cmdk-item" @click="paletteGo(m.id)">
+                <span class="cmdk-ic"><span class="sidebar-svg" v-html="MODULE_ICONS[m.id]"></span></span>
+                <span class="cmdk-label">{{ m.label }}</span>
+                <span v-if="m.alpha" class="cmdk-alpha">α</span>
+                <span v-if="isInGrid(m.id)" class="cmdk-open">open</span>
+              </button>
+              <div v-if="!paletteResults.length" class="cmdk-empty">No modules match “{{ paletteQuery }}”.</div>
+            </div>
           </div>
-          <span class="mobile-nav-label">{{ MODULE_META[id].label }}</span>
-        </button>
-      </nav>
+        </div>
+      </Teleport>
+
+      <!-- Toast host -->
+      <Teleport to="body">
+        <div class="toast-host">
+          <div v-for="t in store.toasts" :key="t.id" class="toast">{{ t.message }}</div>
+        </div>
+      </Teleport>
 
     </template>
   </div>
@@ -999,66 +1148,61 @@ body { padding: 0 !important; margin: 0 !important; }
 .module-sidebar {
   position: fixed;
   z-index: 500;
-  background: rgba(235, 235, 245, 0.58);
-  backdrop-filter: blur(64px) saturate(200%);
-  -webkit-backdrop-filter: blur(64px) saturate(200%);
-  box-shadow: 0 8px 40px rgba(0,0,0,0.14), inset 0 1px 0 rgba(255,255,255,0.55);
+  background: var(--ch);
+  backdrop-filter: blur(30px) saturate(140%);
+  -webkit-backdrop-filter: blur(30px) saturate(140%);
+  box-shadow: 0 10px 32px rgba(20,30,60,0.14);
   display: flex;
   gap: 0;
   transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1);
   scrollbar-width: none;
 }
 .module-sidebar::-webkit-scrollbar { display: none; }
-.dark-mode .module-sidebar {
-  background: rgba(12, 12, 22, 0.62);
-  box-shadow: 0 8px 48px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.07);
-}
 
-/* ── Left dock ── */
+/* ── Left dock — a persistent floating glass dock (always visible) ── */
 .module-sidebar.pos-left {
-  left: 0; top: 50%;
-  transform: translateY(-50%) translateX(calc(-100% + 6px));
+  left: 10px; top: 50%;
+  transform: translateY(-50%);
   flex-direction: column;
   padding: 10px 7px;
   width: 56px;
-  border-radius: 0 18px 18px 0;
-  border: 1px solid rgba(255,255,255,0.42); border-left: none;
-  max-height: calc(100vh - 80px);
+  border-radius: var(--rd, 18px);
+  border: 1px solid var(--chl);
+  max-height: calc(100vh - 40px);
   overflow-y: auto; overflow-x: hidden;
 }
-.module-sidebar.pos-left:hover { transform: translateY(-50%) translateX(0); }
 
 /* ── Right dock ── */
 .module-sidebar.pos-right {
-  right: 0; left: auto; top: 50%;
-  transform: translateY(-50%) translateX(calc(100% - 6px));
+  right: 10px; left: auto; top: 50%;
+  transform: translateY(-50%);
   flex-direction: column;
   padding: 10px 7px;
   width: 56px;
-  border-radius: 18px 0 0 18px;
-  border: 1px solid rgba(255,255,255,0.42); border-right: none;
-  max-height: calc(100vh - 80px);
+  border-radius: var(--rd, 18px);
+  border: 1px solid var(--chl);
+  max-height: calc(100vh - 40px);
   overflow-y: auto; overflow-x: hidden;
 }
-.module-sidebar.pos-right:hover { transform: translateY(-50%) translateX(0); }
 
 /* ── Bottom dock ── */
 .module-sidebar.pos-bottom {
-  bottom: 0; top: auto; left: 50%;
-  transform: translateX(-50%) translateY(calc(100% - 6px));
+  bottom: 10px; top: auto; left: 50%;
+  transform: translateX(-50%);
   flex-direction: row;
   padding: 7px 10px;
   height: 56px;
-  width: auto; max-width: calc(100vw - 80px);
-  border-radius: 18px 18px 0 0;
-  border: 1px solid rgba(255,255,255,0.42); border-bottom: none;
+  width: auto; max-width: calc(100vw - 40px);
+  border-radius: var(--rd, 18px);
+  border: 1px solid var(--chl);
   overflow-x: auto; overflow-y: hidden;
 }
-.module-sidebar.pos-bottom:hover { transform: translateX(-50%) translateY(0); }
 
-.dark-mode .module-sidebar.pos-left,
-.dark-mode .module-sidebar.pos-right,
-.dark-mode .module-sidebar.pos-bottom { border-color: rgba(255,255,255,0.10); }
+/* Reserve space so the always-visible dock never overlaps module content. */
+.app-main.dock-left   { padding-left: 78px; }
+.app-main.dock-right  { padding-right: 78px; }
+.app-main.dock-bottom { padding-bottom: 84px; }
+
 
 /* Sidebar sections */
 .sidebar-modules {
@@ -1129,80 +1273,54 @@ body { padding: 0 !important; margin: 0 !important; }
 }
 
 /* ── Icon tile — translucent primary-color squircle ── */
+/* Dock tile — transparent by default; the active (docked) module fills accent.
+   (Per the redesign: active = solid accent + white icon, inactive = muted.) */
 .sidebar-icon {
   width: 38px; height: 38px;
-  border-radius: 22%;
+  border-radius: 12px;
   display: flex; align-items: center; justify-content: center;
-  position: relative; overflow: hidden; flex-shrink: 0;
-  background: color-mix(in srgb, var(--primary) 28%, transparent);
-  border: 1px solid color-mix(in srgb, var(--primary) 44%, rgba(255,255,255,0.16));
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.22);
-  transition:
-    transform  0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
-    box-shadow 0.22s ease,
-    opacity    0.18s ease,
-    filter     0.18s ease;
+  position: relative; flex-shrink: 0;
+  background: transparent;
+  color: var(--tx2);
+  transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
-/* Diagonal gloss */
-.sidebar-icon::after {
-  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  background: linear-gradient(148deg, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.07) 42%, rgba(255,255,255,0) 65%);
-}
-.sidebar-icon i {
-  font-size: 1.0rem;
-  color: rgba(255,255,255,0.95);
-  text-shadow: 0 1px 3px rgba(0,0,0,0.28);
-  position: relative; z-index: 1;
-}
+.sidebar-icon i { font-size: 0.95rem; position: relative; z-index: 1; }
 .sidebar-svg {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px;
-  color: rgba(255,255,255,0.95);
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.28));
-  position: relative; z-index: 1;
+  width: 20px; height: 20px; position: relative; z-index: 1;
 }
 .sidebar-svg svg { width: 100%; height: 100%; display: block; }
 
-/* Hover: spring lift */
-.sidebar-btn:hover .sidebar-icon {
-  transform: scale(1.13) translateY(-2px);
-  box-shadow: 0 8px 20px rgba(0,0,0,0.24), 0 2px 6px rgba(0,0,0,0.14), inset 0 1px 0 rgba(255,255,255,0.26);
+/* Active module (currently on the dashboard): solid accent + white icon */
+.sidebar-btn.is-active .sidebar-icon {
+  background: var(--acc); color: #fff;
+  box-shadow: 0 3px 10px var(--acsh);
 }
+/* Inactive module: transparent, tertiary text */
+.sidebar-btn.is-hidden .sidebar-icon { background: transparent; color: var(--tx3); }
 
-/* Inactive module: dimmed + desaturated */
-.sidebar-btn.is-hidden .sidebar-icon { opacity: 0.36; filter: saturate(0.35); }
-
-/* Active indicator dot */
-.sidebar-btn.is-active::after {
-  content: ''; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
-  width: 3px; height: 3px; border-radius: 50%;
-  background: color-mix(in srgb, var(--primary) 80%, rgba(255,255,255,0.6));
-}
+/* Hover: gentle scale (0.15s transform only) */
+.sidebar-btn:hover .sidebar-icon { transform: scale(1.12); }
+.sidebar-btn.is-hidden:hover .sidebar-icon { color: var(--tx2); }
 
 /* Utility icons (position toggle, reset, redock add) */
-.sidebar-icon-util {
-  background: color-mix(in srgb, var(--primary) 12%, rgba(120,120,140,0.10));
-  border-color: rgba(120,120,140,0.22);
-  opacity: 0.60;
-}
-.sidebar-btn:hover .sidebar-icon-util { opacity: 1; transform: scale(1.10) translateY(-1px); }
+.sidebar-icon-util { background: transparent; color: var(--tx3); }
+.sidebar-btn:hover .sidebar-icon-util { color: var(--tx2); transform: scale(1.10); }
 
 /* ── Redock picker panel ── */
 .redock-panel {
   position: fixed; z-index: 600;
-  background: rgba(235,235,245,0.90);
+  background: var(--cd);
   backdrop-filter: blur(48px) saturate(180%);
   -webkit-backdrop-filter: blur(48px) saturate(180%);
-  border: 1px solid rgba(255,255,255,0.50);
+  border: 1px solid var(--cdl);
   border-radius: 16px;
   box-shadow: 0 12px 40px rgba(0,0,0,0.20), inset 0 1px 0 rgba(255,255,255,0.55);
   padding: 12px 14px 14px;
   min-width: 160px;
 }
 .redock-panel.dark-mode {
-  background: rgba(18,18,32,0.90);
+  background: var(--cd);
   border-color: rgba(255,255,255,0.10);
   box-shadow: 0 12px 40px rgba(0,0,0,0.60), inset 0 1px 0 rgba(255,255,255,0.06);
 }
@@ -1245,14 +1363,103 @@ body { padding: 0 !important; margin: 0 !important; }
 .top-bar {
   display: flex; align-items: center; gap: 12px;
 }
-.top-bar .user-info { margin-left: auto; }
-.user-info { font-size: 0.9rem; opacity: 0.8; display: flex; align-items: center; gap: 6px; }
+
+/* ⌘K search field */
+.tb-search {
+  flex: 1; max-width: 380px; margin: 0 auto;
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px; border-radius: var(--rc);
+  background: var(--fl); color: var(--tx3);
+  font-size: 12px; font-weight: 500; border: none; box-shadow: none; cursor: pointer;
+}
+.tb-search:hover { filter: none; color: var(--tx2); }
+.tb-search-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-kbd { margin-left: auto; font: 10px ui-monospace, Menlo, monospace; opacity: .75; padding: 1px 5px; border-radius: 5px; background: var(--ln2); }
+
+.tb-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.tb-icon {
+  width: 32px; height: 32px; padding: 0; border-radius: var(--rc);
+  background: var(--fl); color: var(--tx2); border: none; box-shadow: none;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 0.9rem;
+}
+.tb-icon:hover { filter: none; color: var(--tx); background: var(--ln2); }
+
+.tb-avatar-wrap { position: relative; }
+.tb-avatar {
+  width: 30px; height: 30px; border-radius: 50%; padding: 0;
+  background: var(--acc); color: #fff; font-size: 11px; font-weight: 700;
+  border: none; box-shadow: 0 1px 4px var(--acsh); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.tb-avatar:hover { filter: brightness(1.08); }
+.tb-avatar-menu {
+  position: absolute; right: 0; top: 40px; z-index: 600; min-width: 210px;
+  background: var(--cd); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--cdl); border-radius: var(--r); box-shadow: var(--sh); padding: 10px;
+}
+.tb-avatar-email { font-size: 12px; color: var(--tx2); padding: 2px 6px 9px; word-break: break-all; border-bottom: 1px solid var(--ln); margin-bottom: 7px; }
+.tb-avatar-logout {
+  width: 100%; justify-content: flex-start; gap: 8px;
+  background: transparent; color: var(--danger-color); border: none; box-shadow: none;
+  padding: 7px 6px; border-radius: var(--rc); font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.tb-avatar-logout:hover { filter: none; background: var(--danger-bg); }
+
+/* ── ⌘K command palette ── */
+.cmdk-overlay {
+  position: fixed; inset: 0; z-index: 900;
+  background: rgba(20,30,60,.28); backdrop-filter: blur(2px);
+  display: flex; align-items: flex-start; justify-content: center; padding-top: 14vh;
+}
+.cmdk-overlay.dark-mode { background: rgba(0,0,0,.5); }
+.cmdk {
+  width: min(560px, 92vw);
+  background: var(--cd); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+  border: 1px solid var(--cdl); border-radius: var(--r); box-shadow: 0 24px 60px rgba(20,30,60,.28);
+  overflow: hidden;
+}
+.cmdk-search { display: flex; align-items: center; gap: 9px; padding: 12px 14px; border-bottom: 1px solid var(--ln); color: var(--tx3); }
+.cmdk-search input { flex: 1; border: none; background: transparent; box-shadow: none !important; color: var(--tx); font-size: 15px; padding: 0; }
+.cmdk-search input:focus { box-shadow: none !important; }
+.cmdk-list { max-height: 52vh; overflow-y: auto; padding: 6px; }
+.cmdk-item {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: var(--rc);
+  background: transparent; color: var(--tx); border: none; box-shadow: none; cursor: pointer;
+  font-size: 13px; font-weight: 500; text-align: left;
+}
+.cmdk-item:hover { filter: none; background: var(--acs); }
+.cmdk-ic { width: 26px; height: 26px; border-radius: 7px; background: var(--acc); color: #fff; display: flex; align-items: center; justify-content: center; flex: none; box-shadow: 0 2px 5px var(--acsh); }
+.cmdk-ic .sidebar-svg { width: 15px; height: 15px; }
+.cmdk-ic i { font-size: 0.8rem; }
+.cmdk-label { flex: 1; }
+.cmdk-alpha { font-size: 10px; font-weight: 700; color: var(--wr); background: var(--wrs); border-radius: 8px; padding: 1px 6px; }
+.cmdk-open { font-size: 10px; font-weight: 600; color: var(--acc); background: var(--acs); border-radius: 8px; padding: 2px 7px; }
+.cmdk-empty { padding: 18px; text-align: center; color: var(--tx3); font-size: 13px; }
 
 /* ══ Free-placement grid workspace ══ */
 .grid-workspace {
   position: relative;
   width: 100%;
+  max-width: 1280px;   /* dashboard grid, per design */
+  margin: 0 auto;
 }
+
+/* ── Single module full page (dock navigation target) ── */
+.module-page { max-width: 1120px; margin: 0 auto; width: 100%; }
+.module-page-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.mp-back {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 34px; padding: 0 13px 0 9px; border-radius: var(--rc);
+  background: var(--btn2); border: 1px solid var(--ln2); color: var(--tx);
+  font-size: 12px; font-weight: 600; box-shadow: none; cursor: pointer;
+}
+.mp-back:hover { filter: brightness(1.04); }
+.mp-title { font-size: 17px; font-weight: 600; color: var(--tx); letter-spacing: -0.01em; }
+
+/* Dock divider (Dashboard | modules) */
+.sidebar-divider { display: block; align-self: stretch; height: 1px; background: var(--ln2); margin: 3px 6px; }
+.pos-bottom .sidebar-divider { width: 1px; height: auto; margin: 6px 3px; }
 
 .grid-module {
   position: absolute;
@@ -1273,23 +1480,24 @@ body { padding: 0 !important; margin: 0 !important; }
   overflow-x: hidden;
 }
 
-/* ── 8-direction resize handles ── */
+/* The module's own header doubles as the drag surface (grip strip removed). */
+.grid-module .card > h2,
+.grid-module .data-figures > h2 { cursor: grab; }
+.grid-module--active .card > h2 { cursor: grabbing; }
+
+/* ── 8-direction resize handles — invisible; cursor-only (per redesign) ── */
 .rh {
   position: absolute;
   z-index: 3;
-  opacity: 0;
-  transition: opacity 0.12s;
+  opacity: 0;               /* never drawn — the cursor is the only affordance */
   user-select: none;
 }
-.grid-module:hover .rh,
-.grid-module--active .rh { opacity: 0.45; }
-.rh:hover { opacity: 1 !important; background: color-mix(in srgb, var(--primary) 30%, transparent); }
 
-/* Edge strips */
-.rh-n { top: 0;    left: 10px; right: 10px; height: 5px; cursor: n-resize; }
-.rh-s { bottom: 0; left: 10px; right: 10px; height: 5px; cursor: s-resize; }
-.rh-e { right: 0;  top: 10px; bottom: 10px; width: 5px;  cursor: e-resize; }
-.rh-w { left: 0;   top: 10px; bottom: 10px; width: 5px;  cursor: w-resize; }
+/* Edge strips (a touch wider so they're easy to grab without a visual cue) */
+.rh-n { top: 0;    left: 12px; right: 12px; height: 7px; cursor: n-resize; }
+.rh-s { bottom: 0; left: 12px; right: 12px; height: 7px; cursor: s-resize; }
+.rh-e { right: 0;  top: 12px; bottom: 12px; width: 7px;  cursor: e-resize; }
+.rh-w { left: 0;   top: 12px; bottom: 12px; width: 7px;  cursor: w-resize; }
 
 /* Corner squares */
 .rh-ne { top: 0;    right: 0;  width: 10px; height: 10px; cursor: ne-resize; }
@@ -1432,16 +1640,16 @@ body { padding: 0 !important; margin: 0 !important; }
   position: fixed;
   z-index: 700;
   width: 230px;
-  background: rgba(235,235,245,0.94);
+  background: var(--cd);
   backdrop-filter: blur(48px) saturate(180%);
   -webkit-backdrop-filter: blur(48px) saturate(180%);
-  border: 1px solid rgba(255,255,255,0.52);
+  border: 1px solid var(--cdl);
   border-radius: 16px;
   box-shadow: 0 16px 48px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.60);
   padding: 14px 14px 12px;
 }
 .sg-editor.dark-mode {
-  background: rgba(16,16,30,0.94);
+  background: var(--cd);
   border-color: rgba(255,255,255,0.11);
   box-shadow: 0 16px 48px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.06);
 }
@@ -1593,11 +1801,51 @@ body { padding: 0 !important; margin: 0 !important; }
    ══════════════════════════════════════════════════════════════════════ */
 
 .mobile-main {
-  padding: 10px 0 calc(96px + env(safe-area-inset-bottom));
-  padding-left: calc(12px + env(safe-area-inset-left));
-  padding-right: calc(12px + env(safe-area-inset-right));
+  padding: calc(10px + env(safe-area-inset-top)) 0 calc(28px + env(safe-area-inset-bottom));
+  padding-left: calc(14px + env(safe-area-inset-left));
+  padding-right: calc(14px + env(safe-area-inset-right));
   gap: 12px;
 }
+
+/* ══ iPhone home hub ══ */
+.hub { display: flex; flex-direction: column; gap: 16px; }
+.hub-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.hub-greeting { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hub-hi { font-size: 26px; font-weight: 700; color: var(--tx); letter-spacing: -0.02em; }
+.hub-lab { font-size: 13px; color: var(--tx2); }
+.hub-head-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+.hub-icon-btn { width: 44px; height: 44px; border-radius: 50%; background: var(--fl); color: var(--tx2); border: none; box-shadow: none; display: flex; align-items: center; justify-content: center; font-size: 1rem; cursor: pointer; }
+.hub-avatar { width: 44px; height: 44px; font-size: 15px; }
+
+.hub-timer .tbc { width: 100%; box-sizing: border-box; flex-wrap: wrap; border-radius: var(--r); }
+.hub-search { width: 100%; max-width: none; margin: 0; padding: 13px 15px; font-size: 15px; }
+.hub-label { font-size: 13px; font-weight: 700; color: var(--tx2); margin: 4px 2px -6px; }
+
+/* Pinned — 2-column tiles */
+.hub-pinned { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.hub-tile { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 15px; border-radius: var(--r); background: var(--cd); border: 1px solid var(--cdl); box-shadow: var(--sh); cursor: pointer; text-align: left; }
+.hub-tile:hover { filter: none; }
+.hub-tile-ic { width: 40px; height: 40px; border-radius: 11px; background: var(--acc); color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 3px 10px var(--acsh); }
+.hub-tile-ic .sidebar-svg { width: 22px; height: 22px; }
+.hub-tile-label { font-size: 14px; font-weight: 600; color: var(--tx); }
+.hub-tile-alpha { font-size: 10px; font-weight: 700; color: var(--wr); background: var(--wrs); border-radius: 8px; padding: 1px 6px; }
+
+/* All modules — 4-column icon grid (50px tiles, 11px labels) */
+.hub-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px 4px; }
+.hub-cell { position: relative; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 8px 2px; background: transparent; border: none; box-shadow: none; cursor: pointer; }
+.hub-cell:hover { filter: none; }
+.hub-cell-ic { width: 50px; height: 50px; border-radius: 14px; background: var(--fl); color: var(--acc); display: flex; align-items: center; justify-content: center; }
+.hub-cell-ic .sidebar-svg { width: 24px; height: 24px; }
+.hub-cell-label { font-size: 11px; font-weight: 500; color: var(--tx2); text-align: center; line-height: 1.2; max-width: 72px; }
+
+.hub-pin { position: absolute; top: 4px; right: 6px; font-size: 12px; line-height: 1; color: var(--tx3); opacity: .45; padding: 4px; }
+.hub-pin.is-pinned { color: var(--acc); opacity: 1; }
+.hub-tile .hub-pin { top: 11px; right: 11px; font-size: 15px; }
+.alpha-badge--hub { top: 4px; left: calc(50% - 26px); }
+
+/* Module full-screen back button */
+.mob-back { display: inline-flex; align-items: center; gap: 5px; height: 40px; padding: 0 15px 0 9px; margin-bottom: 12px; border-radius: var(--rc); background: var(--cd); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid var(--cdl); color: var(--tx); font-size: 14px; font-weight: 600; box-shadow: none; cursor: pointer; }
+.mob-back:hover { filter: none; }
 
 /* ── Sticky frosted top bar ── */
 .mobile-top-bar {
@@ -1607,13 +1855,13 @@ body { padding: 0 !important; margin: 0 !important; }
   z-index: 400;
   margin: -10px calc(-12px - env(safe-area-inset-right)) 0 calc(-12px - env(safe-area-inset-left));
   padding: calc(10px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 10px calc(12px + env(safe-area-inset-left));
-  background: rgba(235, 235, 245, 0.80);
+  background: var(--ch);
   backdrop-filter: blur(32px) saturate(180%);
   -webkit-backdrop-filter: blur(32px) saturate(180%);
-  border-bottom: 1px solid rgba(120,120,140,0.16);
+  border-bottom: 1px solid var(--chl);
 }
 .dark-mode .mobile-top-bar {
-  background: rgba(12, 12, 22, 0.82);
+  background: var(--ch);
   border-bottom-color: rgba(255,255,255,0.07);
 }
 
@@ -1644,16 +1892,16 @@ body { padding: 0 !important; margin: 0 !important; }
   overflow-x: auto; overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   padding: 8px calc(8px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left));
-  background: rgba(235, 235, 245, 0.78);
+  background: var(--ch);
   backdrop-filter: blur(40px) saturate(180%);
   -webkit-backdrop-filter: blur(40px) saturate(180%);
-  border-top: 1px solid rgba(255,255,255,0.45);
+  border-top: 1px solid var(--chl);
   box-shadow: 0 -6px 30px rgba(0,0,0,0.12);
   scrollbar-width: none;
 }
 .mobile-nav::-webkit-scrollbar { display: none; }
 .dark-mode .mobile-nav {
-  background: rgba(12, 12, 22, 0.82);
+  background: var(--ch);
   border-top-color: rgba(255,255,255,0.08);
   box-shadow: 0 -6px 30px rgba(0,0,0,0.50);
 }

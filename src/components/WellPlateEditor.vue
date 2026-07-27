@@ -2,8 +2,33 @@
 import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { esc, sanitize } from '../utils/htmlSafe'
+import { BOEKHOVEN_PALETTE, assignColors } from '../utils/palette'
 
 const store = useLabStore()
+
+// ── Optional "colour by condition" overlay (Okabe-Ito) ──
+// Groups wells by a key derived from their content (first text line), assigns
+// each distinct group an Okabe-Ito colour, and renders a legend. Purely a view
+// layer — the well content is untouched.
+function wellText(html) {
+  const div = document.createElement('div')
+  div.innerHTML = html || ''
+  return (div.textContent || '').trim().split('\n')[0].trim()
+}
+function plateGroups(plate) {
+  const keys = []
+  for (const wId of Object.keys(plate.wells || {})) {
+    const k = wellText(plate.wells[wId])
+    if (k && !keys.includes(k)) keys.push(k)
+  }
+  return { keys, colorMap: assignColors(BOEKHOVEN_PALETTE, keys) }
+}
+function wellColor(plate, wId) {
+  if (!plate.colorByCondition) return ''
+  const k = wellText(plate.wells?.[wId])
+  if (!k) return ''
+  return plateGroups(plate).colorMap[k] || ''
+}
 const activeDropdown = ref(null)
 const showCloudLibrary = ref(false)
 const showOnpSettings = ref(false)
@@ -735,7 +760,7 @@ const exportAndrewPlusMulti = () => {
     
     <div v-if="showCloudLibrary" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000;">
         <div style="background: var(--surface); padding: 25px; border-radius: var(--radius); border: 1px solid var(--border); max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
-            <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 10px; margin-bottom: 15px;">
+            <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 10px; margin-bottom: 15px;">
                 <h3 style="margin: 0; color: var(--primary);"><i class="fas fa-cloud"></i> Well Plate Library</h3>
                 <button class="danger small" @click="showCloudLibrary = false"><i class="fas fa-times"></i></button>
             </div>
@@ -775,7 +800,7 @@ const exportAndrewPlusMulti = () => {
     <!-- Grouped multi-plate .onp export -->
     <div v-if="showGroupExport" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000;">
         <div style="background: var(--surface); padding: 25px; border-radius: var(--radius); border: 1px solid var(--border); max-width: 560px; width: 90%; max-height: 80vh; overflow-y: auto;">
-            <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 10px; margin-bottom: 15px;">
+            <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 10px; margin-bottom: 15px;">
                 <h3 style="margin: 0; color: var(--primary);"><i class="fas fa-layer-group"></i> Group Plates → one .onp</h3>
                 <button class="danger small" @click="showGroupExport = false"><i class="fas fa-times"></i></button>
             </div>
@@ -820,8 +845,8 @@ const exportAndrewPlusMulti = () => {
         </div>
     </div>
 
-    <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
-        <h2 style="border: none; padding: 0; margin: 0;"><i class="fas fa-border-all"></i> Well Plate</h2>
+    <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
+        <h2 style="border: none; padding: 0; margin: 0;"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3.5" width="12" height="9" rx="1.5"/><circle cx="5" cy="6.5" r="0.9"/><circle cx="8" cy="6.5" r="0.9"/><circle cx="11" cy="6.5" r="0.9"/><circle cx="5" cy="9.5" r="0.9"/><circle cx="8" cy="9.5" r="0.9"/><circle cx="11" cy="9.5" r="0.9"/></svg> Well Plate</h2>
         <div style="display: flex; gap: 10px;">
             <button @click="showOnpSettings = !showOnpSettings" class="secondary small" title="Robot Protocol Export Settings"><i class="fas fa-cog"></i> ONP</button>
             <button @click="openGroupExport" class="secondary small" title="Combine multiple plates into one .onp (shared stocks merged)"><i class="fas fa-layer-group"></i> Group .onp</button>
@@ -866,19 +891,20 @@ const exportAndrewPlusMulti = () => {
             </div>
 
             <div style="display: flex; gap: 5px; align-items: center;">
-                <span v-if="plate.scope === 'Global'" style="font-size: 0.75rem; color: var(--success); font-weight: bold; margin-right: 5px;"><i class="fas fa-globe"></i> Global</span>
-                <span v-else style="font-size: 0.75rem; opacity: 0.7; font-weight: bold; margin-right: 5px;"><i class="fas fa-lock"></i> Personal</span>
+                <span class="scope-badge" :class="plate.scope === 'Global' ? 'lab' : 'private'" style="margin-right: 5px;">{{ plate.scope === 'Global' ? 'Lab' : 'Private' }}</span>
 
-                <button class="success small" @click="store.saveToCloud('plates', plate)" title="Save to Cloud"><i class="fas fa-cloud-arrow-up"></i> Save</button>
+                <button class="success small" @click="store.saveToCloud('plates', plate); store.toast('Saved')" title="Save to cloud"><i class="fas fa-cloud-arrow-up"></i> Save</button>
 
                 <template v-if="plate.owner_id === store.user.id">
-                    <button class="secondary small" @click="plate.scope = 'Personal'; store.saveToCloud('plates', plate)" v-if="plate.scope === 'Global'" title="Make Private">
-                        <i class="fas fa-user-lock"></i> Private
+                    <button class="secondary small" @click="plate.scope = 'Personal'; store.saveToCloud('plates', plate); store.toast('Moved to Private')" v-if="plate.scope === 'Global'" title="Make private">
+                        <i class="fas fa-user-lock"></i> Make private
                     </button>
-                    <button class="secondary small" @click="plate.scope = 'Global'; store.saveToCloud('plates', plate)" v-if="plate.scope !== 'Global'" title="Publish to Global Lab Feed">
-                        <i class="fas fa-bullhorn"></i> Publish
+                    <button class="small" @click="plate.scope = 'Global'; store.saveToCloud('plates', plate); store.toast('Published to the lab')" v-if="plate.scope !== 'Global'" title="Publish to the shared Lab space">
+                        <i class="fas fa-bullhorn"></i> Publish to Lab
                     </button>
                 </template>
+
+                <button class="secondary small" :style="plate.colorByCondition ? 'background: var(--acs); color: var(--acc); border-color: var(--acc);' : ''" @click="plate.colorByCondition = !plate.colorByCondition" title="Colour wells by condition (Okabe-Ito)"><i class="fas fa-palette"></i></button>
                 
                 <div style="width: 1px; height: 24px; background: var(--border); margin: 0 5px;"></div>
 
@@ -901,13 +927,22 @@ const exportAndrewPlusMulti = () => {
                 
                 <template v-for="r in getPlateRows(plate.format)" :key="'r'+r">
                     <div class="plate-label">{{ String.fromCharCode(64 + r) }}</div>
-                    <div v-for="c in getPlateCols(plate.format)" :key="'w'+r+'-'+c" 
+                    <div v-for="c in getPlateCols(plate.format)" :key="'w'+r+'-'+c"
                          :class="['well', { 'selected': plate.selectedWell === getWellId(r-1, c-1), 'has-content': plate.wells[getWellId(r-1, c-1)] && plate.wells[getWellId(r-1, c-1)].trim() !== '' }]"
+                         :style="wellColor(plate, getWellId(r-1, c-1)) ? { background: wellColor(plate, getWellId(r-1, c-1)), borderColor: wellColor(plate, getWellId(r-1, c-1)) } : {}"
                          @click="selectWell(plate, getWellId(r-1, c-1))"
                          :title="getWellId(r-1, c-1)">
                     </div>
                 </template>
             </div>
+        </div>
+
+        <!-- Condition legend (Okabe-Ito) -->
+        <div v-if="plate.colorByCondition && plateGroups(plate).keys.length" class="plate-legend">
+            <span v-for="k in plateGroups(plate).keys" :key="k" class="plate-legend-item">
+                <span class="plate-legend-dot" :style="{ background: plateGroups(plate).colorMap[k] }"></span>
+                {{ k }}
+            </span>
         </div>
 
         <div v-if="plate.selectedWell" class="well-editor-panel">
@@ -954,3 +989,14 @@ const exportAndrewPlusMulti = () => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.plate-legend {
+  display: flex; flex-wrap: wrap; gap: 8px 16px;
+  margin-top: 12px; padding: 10px 12px;
+  background: var(--fl); border-radius: var(--rc);
+  font-size: 0.78rem; color: var(--tx);
+}
+.plate-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.plate-legend-dot { width: 12px; height: 12px; border-radius: 3px; flex: none; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
+</style>

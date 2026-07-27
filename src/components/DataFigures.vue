@@ -133,12 +133,14 @@
     <!-- ── 4 · Figures (only what this set produces) ─────────────────────── -->
     <section v-if="tableRows.length && setFigures.length" class="df-card">
       <h3><i class="fas fa-image"></i> Figures</h3>
-      <div class="df-row">
+      <div class="df-row df-figcontrols">
         <label class="df-field">
           <span>Plot preset</span>
-          <select v-model="selectedPresetId">
-            <option v-for="p in allPresets" :key="p.id" :value="p.id">{{ p.name }}</option>
-          </select>
+          <div class="df-seg" role="group" aria-label="Plot preset">
+            <button v-for="p in allPresets" :key="p.id" type="button"
+                    class="df-seg-btn" :class="{ active: selectedPresetId === p.id }"
+                    @click="selectedPresetId = p.id">{{ p.name }}</button>
+          </div>
         </label>
         <label class="df-field">
           <span>Palette</span>
@@ -146,9 +148,18 @@
             <option v-for="p in allPalettes" :key="p.id" :value="p.id">{{ p.name }}</option>
           </select>
         </label>
-        <button class="df-btn" @click="styleOpen = !styleOpen">
+        <button class="df-btn secondary" @click="styleOpen = !styleOpen">
           <i class="fas" :class="styleOpen ? 'fa-chevron-up' : 'fa-sliders'"></i> Plot style
         </button>
+      </div>
+
+      <!-- Data palette (plots only) — Okabe-Ito series + vermillion dashed control -->
+      <div class="df-swatches" :title="currentPalette.name">
+        <span v-for="(c, i) in currentPalette.categorical" :key="i" class="df-sw"
+              :style="{ background: c }"></span>
+        <span class="df-sw df-sw-ctrl" :style="{ '--ctrl': currentPalette.control }"
+              title="Control / reference — always vermillion &amp; dashed"></span>
+        <span class="df-sw-label">Okabe-Ito · CVD-safe</span>
       </div>
 
       <!-- Plot-style editor — drives both the Plotly preview and the export -->
@@ -316,8 +327,8 @@ import {
 } from '../utils/analysisSets'
 import { BOEKHOVEN_PALETTE, hexToRgba } from '../utils/palette'
 import {
-  DEFAULT_PRESET, resolvePreset, boekhovenPlotlyLayout, boekhovenHeatmapLayout,
-  axisTitle, matplotlibStyleCode,
+  DEFAULT_PRESET, BUILTIN_PRESETS, isBuiltinPreset, resolvePreset,
+  boekhovenPlotlyLayout, boekhovenHeatmapLayout, axisTitle, matplotlibStyleCode,
 } from '../utils/plotStyle'
 
 const store = useLabStore()
@@ -473,9 +484,9 @@ function safeJson(s, fallback) { try { return JSON.parse(s) } catch { return fal
 const customPalettes = ref([])
 const customPresets = ref([])
 const allPalettes = computed(() => [BOEKHOVEN_PALETTE, ...customPalettes.value])
-const allPresets = computed(() => [DEFAULT_PRESET, ...customPresets.value])
+const allPresets = computed(() => [...BUILTIN_PRESETS, ...customPresets.value])
 const selectedPaletteId = ref(BOEKHOVEN_PALETTE.id)
-const selectedPresetId = ref(DEFAULT_PRESET.id)
+const selectedPresetId = ref(DEFAULT_PRESET.id)  // Boekhoven Wilke is the default
 const currentPalette = computed(() => allPalettes.value.find(p => p.id === selectedPaletteId.value) || BOEKHOVEN_PALETTE)
 
 // Editable working copy of the selected preset — drives preview + export live.
@@ -495,7 +506,7 @@ async function savePreset() {
   presetMsg.value = 'Saving…'
   try {
     const base = JSON.parse(JSON.stringify(workingPreset))
-    const isBuiltin = workingPreset.id === DEFAULT_PRESET.id
+    const isBuiltin = isBuiltinPreset(workingPreset.id)
     const obj = {
       ...base, kind: 'plot_preset', scope: presetScope.value,
       name: presetName.value || workingPreset.name,
@@ -557,7 +568,8 @@ function renderGallery() {
     const el = galleryRefs.value[r.name]
     if (!el) continue
     const t = r.trace?.t || [], s = r.trace?.s || []
-    const traces = [{ type: 'scatter', mode: 'lines', x: t, y: s, line: { color: lineColor, width: 1.4 }, hoverinfo: 'x+y', showlegend: false }]
+    const lw = currentPreset.value.lineWidth || 1.4
+    const traces = [{ type: 'scatter', mode: 'lines', x: t, y: s, line: { color: lineColor, width: lw }, hoverinfo: 'x+y', showlegend: false }]
     for (const pk of r.peaks || []) {
       if (pk.peakClass !== 'product') continue
       const hw = pk.scale && pk.scale > 0 ? Math.min(0.35, pk.scale * 3) : 0.18
@@ -612,6 +624,7 @@ function buildExportSpec() {
   }))
   return { type: 'chromGallery', data: {
     panels, control: pal.control, lineColor: '#0f172a',
+    lineWidth: currentPreset.value.lineWidth, maxTicks: currentPreset.value.nticks,
     xlabel: axisTitle('t', 'min', currentPreset.value), ylabel: axisTitle('signal', 'mAU', currentPreset.value),
   } }
 }
@@ -758,7 +771,7 @@ onMounted(() => { loadSeqLibrary(); loadCustom() })
 
 <style scoped>
 .data-figures { max-width: 1100px; }
-.df-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+.df-card { background: var(--cd); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid var(--cdl); border-radius: var(--r); padding: 16px; margin-bottom: 16px; box-shadow: var(--sh); }
 .df-card h3 { margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
 .df-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
 .df-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; }
@@ -789,22 +802,24 @@ onMounted(() => { loadSeqLibrary(); loadCustom() })
 .df-drop { display: flex; align-items: center; justify-content: center; gap: 12px; border: 2px dashed var(--border); border-radius: var(--radius); padding: 18px; }
 .df-drop i { font-size: 1.4rem; color: var(--primary); }
 .df-filelist { margin-top: 10px; font-size: 0.8rem; }
-.df-file-ok { color: #10b981; font-weight: 600; }
-.df-file-skip { color: #f59e0b; margin-top: 6px; }
+.df-file-ok { color: var(--ok); font-weight: 600; }
+.df-file-skip { color: var(--wr); margin-top: 6px; }
 .df-file-skip ul { margin: 4px 0 0 20px; opacity: 0.8; }
 
-.df-trust { display: flex; gap: 12px; margin-top: 14px; padding: 12px; border: 1px solid #f59e0b; border-radius: var(--radius); background: rgba(245, 158, 11, 0.08); font-size: 0.82rem; }
-.df-trust > i { color: #f59e0b; font-size: 1.2rem; }
+.df-trust { display: flex; gap: 12px; margin-top: 14px; padding: 12px; border: 1px solid var(--wr); border-radius: var(--rc); background: var(--wrs); font-size: 0.82rem; }
+.df-trust > i { color: var(--wr); font-size: 1.2rem; }
 .df-check { display: block; margin-top: 8px; font-weight: 600; }
 .df-code-view { max-height: 220px; overflow: auto; background: var(--input-bg); padding: 8px; border-radius: 6px; font-size: 0.72rem; }
 
 .df-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
-.df-btn { background: var(--input-bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 14px; cursor: pointer; font-weight: 600; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px; }
-.df-btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.df-btn { background: var(--btn2); color: var(--tx); border: 1px solid var(--ln2); border-radius: var(--rc); padding: 8px 14px; cursor: pointer; font-weight: 600; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px; box-shadow: none; }
+.df-btn:hover { filter: brightness(1.04); }
+.df-btn.primary { background: var(--acc); color: #fff; border-color: transparent; box-shadow: 0 3px 10px var(--acsh); }
+.df-btn.primary:hover { filter: brightness(1.1); }
 .df-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .df-progress { font-size: 0.78rem; opacity: 0.8; }
-.df-count { background: var(--primary); color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 0.7rem; }
-.df-chip { background: rgba(245, 158, 11, 0.18); color: #b45309; border-radius: 999px; padding: 1px 8px; font-size: 0.68rem; font-weight: 600; }
+.df-count { background: var(--acc); color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 0.7rem; }
+.df-chip { background: var(--wrs); color: var(--wr); border-radius: 999px; padding: 1px 8px; font-size: 0.68rem; font-weight: 600; }
 
 .df-table-wrap { overflow-x: auto; }
 .df-table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
@@ -814,9 +829,23 @@ onMounted(() => { loadSeqLibrary(); loadCustom() })
 .df-style { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--input-bg); }
 .df-toggles { display: flex; flex-wrap: wrap; gap: 14px; margin: 12px 0; }
 
+/* Segmented control (Default | Boekhoven Wilke) */
+.df-figcontrols { align-items: flex-end; }
+.df-seg { display: inline-flex; padding: 2px; gap: 2px; background: var(--fl); border-radius: calc(var(--rc) + 2px); }
+.df-seg-btn { background: transparent; color: var(--tx2); border: none; box-shadow: none; padding: 6px 13px; border-radius: var(--rc); font-size: 0.78rem; font-weight: 600; cursor: pointer; }
+.df-seg-btn:hover { filter: none; color: var(--tx); }
+.df-seg-btn.active { background: var(--acc); color: #fff; box-shadow: 0 2px 6px var(--acsh); }
+
+/* Data-palette swatch row */
+.df-swatches { display: flex; align-items: center; gap: 5px; margin: 4px 0 12px; }
+.df-sw { width: 15px; height: 15px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
+.df-sw-ctrl { background: repeating-linear-gradient(90deg, var(--ctrl) 0 3px, transparent 3px 5px); box-shadow: inset 0 0 0 1px var(--ctrl); }
+.df-sw-label { font-size: 0.68rem; color: var(--tx3); margin-left: 6px; }
+
 .df-figtabs { display: flex; gap: 6px; margin: 12px 0; }
-.df-figtabs button { background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 14px; cursor: pointer; font-size: 0.8rem; }
-.df-figtabs button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.df-figtabs button { background: var(--fl); border: none; border-radius: var(--rc); padding: 6px 14px; cursor: pointer; font-size: 0.8rem; color: var(--tx2); box-shadow: none; }
+.df-figtabs button:hover { filter: none; }
+.df-figtabs button.active { background: var(--acc); color: #fff; box-shadow: 0 2px 6px var(--acsh); }
 .df-plot { width: 100%; height: 460px; }
 .df-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .df-gallery-item { height: 220px; border: 1px solid var(--border); border-radius: 6px; }
@@ -831,6 +860,7 @@ onMounted(() => { loadSeqLibrary(); loadCustom() })
 .df-myset-list { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
 .df-myset { display: flex; justify-content: space-between; padding: 4px 0; font-size: 0.8rem; }
 .df-myset-actions { display: flex; gap: 10px; }
-.df-link { background: none; border: none; color: var(--primary); cursor: pointer; font-size: 0.78rem; padding: 0; }
-.df-link.danger { color: #ef4444; }
+.df-link { background: none; border: none; color: var(--acc); cursor: pointer; font-size: 0.78rem; padding: 0; box-shadow: none; }
+.df-link:hover { filter: none; }
+.df-link.danger { color: var(--danger-color); }
 </style>

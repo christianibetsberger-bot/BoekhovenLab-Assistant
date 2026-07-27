@@ -4,6 +4,18 @@ import {
   assignColors, hexToRgba, plotlyColorscale, clonePalette,
 } from './palette.js'
 
+describe('seeded palette (Okabe-Ito + vermillion control)', () => {
+  it('starts the qualitative series with Okabe-Ito blue', () => {
+    expect(BOEKHOVEN_PALETTE.categorical[0]).toBe('#0072B2')
+    expect(BOEKHOVEN_PALETTE.categorical).toContain('#E69F00')
+    expect(BOEKHOVEN_PALETTE.categorical).toContain('#009E73')
+  })
+
+  it('uses vermillion for the control / reference trace', () => {
+    expect(BOEKHOVEN_PALETTE.control).toBe('#D55E00')
+  })
+})
+
 describe('categoricalColor', () => {
   it('wraps around the categorical list', () => {
     const n = BOEKHOVEN_PALETTE.categorical.length
@@ -89,7 +101,8 @@ describe('clonePalette', () => {
     expect(copy.id).not.toBe(BOEKHOVEN_PALETTE.id)
     expect(copy.categorical).toEqual(BOEKHOVEN_PALETTE.categorical)
     // Mutating the copy must not touch the seeded palette.
-    copy.categorical.push('#000000')
-    expect(BOEKHOVEN_PALETTE.categorical).not.toContain('#000000')
+    // (Sentinel must be a colour NOT in Okabe-Ito — black #000000 is a member.)
+    copy.categorical.push('#123456')
+    expect(BOEKHOVEN_PALETTE.categorical).not.toContain('#123456')
   })
 })

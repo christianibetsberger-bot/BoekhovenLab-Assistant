@@ -2,7 +2,7 @@
   <div class="card">
     <!-- ── Header ── -->
     <div class="tt-header">
-      <h2><i class="fas fa-clock"></i> Time Tracker</h2>
+      <h2><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><polyline points="8,5 8,8 10.2,9.4"/></svg> Time Tracker</h2>
       <div v-if="activeEntry" class="tt-live-badge">
         <span class="tt-live-dot"></span>
         CHECKED IN · {{ formatDuration(currentDuration) }}
@@ -2085,7 +2085,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .tt-header {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-  border-bottom: 2px solid var(--bg); padding-bottom: 12px; margin-bottom: 15px;
+  border-bottom: 1px solid var(--ln); padding-bottom: 12px; margin-bottom: 15px;
 }
 .tt-header h2 { margin: 0; border: none; padding: 0; display: flex; align-items: center; gap: 10px; }
 .tt-header-project { display: flex; align-items: center; gap: 5px; }
@@ -2156,7 +2156,7 @@ onBeforeUnmount(() => {
   background: var(--input-bg); border: 1px solid var(--border);
 }
 .tt-stat-value { font-size: 0.95rem; font-weight: 700; }
-.tt-stat-label { font-size: .62rem; opacity: .65; text-transform: uppercase; letter-spacing: .3px; margin-top: 1px; }
+.tt-stat-label { font-size: .62rem; opacity: .65; text-transform: none; letter-spacing: .3px; margin-top: 1px; }
 .tt-we-note { font-weight: 400; color: #ef4444; font-size: .6rem; }
 .tt-stat.positive .tt-stat-value { color: var(--success); }
 .tt-stat.negative .tt-stat-value { color: #ef4444; }
@@ -2172,7 +2172,7 @@ onBeforeUnmount(() => {
 .tt-table th {
   position: sticky; top: 0; background: var(--input-bg); z-index: 1;
   padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border);
-  font-size: .7rem; text-transform: uppercase; letter-spacing: .4px; opacity: .8;
+  font-size: .7rem; text-transform: none; letter-spacing: .4px; opacity: .8;
 }
 .tt-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
 .tt-row-active td { background: color-mix(in srgb, var(--success) 8%, transparent); }

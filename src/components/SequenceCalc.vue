@@ -57,7 +57,7 @@ const saveDnaToInventory = () => {
 
 <template>
   <div class="card">
-    <h2><i class="fas fa-dna"></i> Sequence Calculator</h2>
+    <h2><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2c0 3 6 3 6 6s-6 3-6 6"/><path d="M11 2c0 3-6 3-6 6s6 3 6 6"/><line x1="5.7" y1="4" x2="10.3" y2="4"/><line x1="5.7" y1="12" x2="10.3" y2="12"/></svg> Sequence Calculator</h2>
     
     <div class="grid-2">
         <div class="input-group">
@@ -147,7 +147,7 @@ const saveDnaToInventory = () => {
             <input type="text" v-model="store.dnaCalc.saveName" placeholder="Oligo Name">
         </div>
         <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;padding:7px 10px;background:var(--input-bg);border-radius:6px;border:1px solid var(--border);">
-            <span style="font-size:0.73rem;opacity:0.6;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap;">Save to:</span>
+            <span style="font-size:0.73rem;opacity:0.6;font-weight:600;text-transform: none;letter-spacing:0.04em;white-space:nowrap;">Save to:</span>
             <label class="checkbox-label"><input type="radio" value="Global" v-model="saveScope"> Global</label>
             <label class="checkbox-label"><input type="radio" value="Personal" v-model="saveScope"> Personal</label>
         </div>

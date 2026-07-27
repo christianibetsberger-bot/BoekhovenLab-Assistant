@@ -291,12 +291,12 @@ const saveReverseMatrixToPlate = (rm) => {
 
     <div v-if="showCloudLibrary" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000;">
         <div style="background: var(--surface); padding: 25px; border-radius: var(--radius); border: 1px solid var(--border); max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
-            <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 10px; margin-bottom: 15px;">
+            <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 10px; margin-bottom: 15px;">
                 <h3 style="margin: 0; color: var(--primary);"><i class="fas fa-cloud"></i> Screening Library</h3>
                 <button class="danger small" @click="showCloudLibrary = false"><i class="fas fa-times"></i></button>
             </div>
 
-            <h4 style="margin-bottom: 10px; color: var(--success);"><i class="fas fa-globe"></i> Global Lab Feed</h4>
+            <h4 style="margin-bottom: 10px;"><span class="scope-badge lab" style="margin-right:6px;">Lab</span> Shared screenings</h4>
             <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 25px;">
                 <div v-for="rm in store.cloudReverseMatrices.filter(m => m.scope === 'Global')" :key="'cloud_rmg_'+rm.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
                     <div>
@@ -308,10 +308,10 @@ const saveReverseMatrixToPlate = (rm) => {
                         <button v-if="rm.owner_id === store.user.id" class="danger small" @click="store.deleteFromCloud('screenings', rm.id)"><i class="fas fa-trash"></i></button>
                     </div>
                 </div>
-                <div v-if="store.cloudReverseMatrices.filter(m => m.scope === 'Global').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No global screenings published yet.</div>
+                <div v-if="store.cloudReverseMatrices.filter(m => m.scope === 'Global').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No screenings published to the lab yet.</div>
             </div>
 
-            <h4 style="margin-bottom: 10px;"><i class="fas fa-lock"></i> My Personal Drafts</h4>
+            <h4 style="margin-bottom: 10px;"><span class="scope-badge private" style="margin-right:6px;">Private</span> My drafts</h4>
             <div style="display: flex; flex-direction: column; gap: 8px;">
                 <div v-for="rm in store.cloudReverseMatrices.filter(m => m.scope === 'Personal')" :key="'cloud_rmp_'+rm.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
                     <div>
@@ -328,8 +328,8 @@ const saveReverseMatrixToPlate = (rm) => {
         </div>
     </div>
 
-    <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
-        <h2 style="border: none; padding: 0; margin: 0;"><i class="fas fa-table-cells-large"></i> Screening</h2>
+    <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
+        <h2 style="border: none; padding: 0; margin: 0;"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5H13.5L9.3 8.4V12.6L6.7 13.9V8.4Z"/></svg> Screening</h2>
         <div style="display: flex; gap: 10px;">
             <button @click="showCloudLibrary = true" class="secondary small"><i class="fas fa-cloud"></i> Library</button>
             <button @click="addReverseMatrix" class="small"><i class="fas fa-plus"></i> New Screening</button>
@@ -352,14 +352,13 @@ const saveReverseMatrixToPlate = (rm) => {
             </div>
 
             <div style="display: flex; gap: 5px; align-items: center;">
-                <span v-if="rm.scope === 'Global'" style="font-size: 0.75rem; color: var(--success); font-weight: bold; margin-right: 5px;"><i class="fas fa-globe"></i> Global</span>
-                <span v-else style="font-size: 0.75rem; opacity: 0.7; font-weight: bold; margin-right: 5px;"><i class="fas fa-lock"></i> Personal</span>
+                <span class="scope-badge" :class="rm.scope === 'Global' ? 'lab' : 'private'" style="margin-right: 5px;">{{ rm.scope === 'Global' ? 'Lab' : 'Private' }}</span>
 
-                <button class="success small" @click="store.saveToCloud('screenings', rm)" title="Save to Cloud"><i class="fas fa-cloud-arrow-up"></i> Save</button>
-                
+                <button class="success small" @click="store.saveToCloud('screenings', rm); store.toast('Saved')" title="Save to cloud"><i class="fas fa-cloud-arrow-up"></i> Save</button>
+
                 <template v-if="rm.owner_id === store.user.id">
-                    <button v-if="rm.scope !== 'Global'" class="secondary small" @click="rm.scope = 'Global'; store.saveToCloud('screenings', rm)" title="Make Global"><i class="fas fa-bullhorn"></i> Publish</button>
-                    <button v-else class="secondary small" @click="rm.scope = 'Personal'; store.saveToCloud('screenings', rm)" title="Make Private"><i class="fas fa-user-lock"></i> Private</button>
+                    <button v-if="rm.scope !== 'Global'" class="small" @click="rm.scope = 'Global'; store.saveToCloud('screenings', rm); store.toast('Published to the lab')" title="Publish to the shared Lab space"><i class="fas fa-bullhorn"></i> Publish to Lab</button>
+                    <button v-else class="secondary small" @click="rm.scope = 'Personal'; store.saveToCloud('screenings', rm); store.toast('Moved to Private')" title="Make private"><i class="fas fa-user-lock"></i> Make private</button>
                 </template>
                 
                 <div style="width: 1px; height: 24px; background: var(--border); margin: 0 5px;"></div>

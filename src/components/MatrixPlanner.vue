@@ -232,12 +232,12 @@ const saveMatrixToPlate = (matrix) => {
     
     <div v-if="showCloudLibrary" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000;">
         <div style="background: var(--surface); padding: 25px; border-radius: var(--radius); border: 1px solid var(--border); max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
-            <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 10px; margin-bottom: 15px;">
+            <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 10px; margin-bottom: 15px;">
                 <h3 style="margin: 0; color: var(--primary);"><i class="fas fa-cloud"></i> Matrix Library</h3>
                 <button class="danger small" @click="showCloudLibrary = false"><i class="fas fa-times"></i></button>
             </div>
 
-            <h4 style="margin-bottom: 10px; color: var(--success);"><i class="fas fa-globe"></i> Global Lab Feed</h4>
+            <h4 style="margin-bottom: 10px;"><span class="scope-badge lab" style="margin-right:6px;">Lab</span> Shared matrices</h4>
             <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 25px;">
                 <div v-for="mat in store.cloudMatrices.filter(m => m.scope === 'Global')" :key="'cloud_mg_'+mat.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
                     <div>
@@ -248,10 +248,10 @@ const saveMatrixToPlate = (matrix) => {
                         <button v-if="mat.owner_id === store.user.id" class="danger small" @click="store.deleteFromCloud('matrices', mat.id)"><i class="fas fa-trash"></i></button>
                     </div>
                 </div>
-                <div v-if="store.cloudMatrices.filter(m => m.scope === 'Global').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No global matrices published yet.</div>
+                <div v-if="store.cloudMatrices.filter(m => m.scope === 'Global').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No matrices published to the lab yet.</div>
             </div>
 
-            <h4 style="margin-bottom: 10px;"><i class="fas fa-lock"></i> My Personal Drafts</h4>
+            <h4 style="margin-bottom: 10px;"><span class="scope-badge private" style="margin-right:6px;">Private</span> My drafts</h4>
             <div style="display: flex; flex-direction: column; gap: 8px;">
                 <div v-for="mat in store.cloudMatrices.filter(m => m.scope === 'Personal')" :key="'cloud_mp_'+mat.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
                     <div>
@@ -267,8 +267,8 @@ const saveMatrixToPlate = (matrix) => {
         </div>
     </div>
 
-    <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
-        <h2 style="border: none; padding: 0; margin: 0;"><i class="fas fa-table-cells"></i> Matrix</h2>
+    <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
+        <h2 style="border: none; padding: 0; margin: 0;"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="11" height="11" rx="1"/><line x1="2.5" y1="6.5" x2="13.5" y2="6.5"/><line x1="2.5" y1="10" x2="13.5" y2="10"/><line x1="6.5" y1="2.5" x2="6.5" y2="13.5"/><line x1="10" y1="2.5" x2="10" y2="13.5"/></svg> Matrix</h2>
         <div style="display: flex; gap: 10px;">
             <button @click="showCloudLibrary = true" class="secondary small"><i class="fas fa-cloud"></i> Library</button>
             <button @click="addMatrix" class="small"><i class="fas fa-plus"></i> New Matrix</button>
@@ -291,23 +291,18 @@ const saveMatrixToPlate = (matrix) => {
             </div>
 
             <div style="display: flex; gap: 5px; align-items: center;">
-                <span v-if="matrix.scope === 'Global'" style="font-size: 0.75rem; color: var(--success); font-weight: bold; margin-right: 10px;">
-                    <i class="fas fa-globe"></i> Global
-                </span>
-                <span v-else style="font-size: 0.75rem; opacity: 0.7; font-weight: bold; margin-right: 10px;">
-                    <i class="fas fa-lock"></i> Personal
-                </span>
+                <span class="scope-badge" :class="matrix.scope === 'Global' ? 'lab' : 'private'" style="margin-right: 8px;">{{ matrix.scope === 'Global' ? 'Lab' : 'Private' }}</span>
 
-                <button class="success small" @click="store.saveToCloud('matrices', matrix)" title="Save to Cloud">
+                <button class="success small" @click="store.saveToCloud('matrices', matrix); store.toast('Saved')" title="Save to cloud">
                     <i class="fas fa-cloud-arrow-up"></i> Save
                 </button>
 
                 <template v-if="matrix.owner_id === store.user.id">
-                    <button class="secondary small" @click="matrix.scope = 'Personal'; store.saveToCloud('matrices', matrix)" v-if="matrix.scope === 'Global'" title="Make Private">
-                        <i class="fas fa-user-lock"></i> Private
+                    <button class="secondary small" @click="matrix.scope = 'Personal'; store.saveToCloud('matrices', matrix); store.toast('Moved to Private')" v-if="matrix.scope === 'Global'" title="Make private">
+                        <i class="fas fa-user-lock"></i> Make private
                     </button>
-                    <button class="secondary small" @click="matrix.scope = 'Global'; store.saveToCloud('matrices', matrix)" v-if="matrix.scope !== 'Global'" title="Publish to Global Lab Feed">
-                        <i class="fas fa-bullhorn"></i> Publish
+                    <button class="small" @click="matrix.scope = 'Global'; store.saveToCloud('matrices', matrix); store.toast('Published to the lab')" v-if="matrix.scope !== 'Global'" title="Publish to the shared Lab space">
+                        <i class="fas fa-bullhorn"></i> Publish to Lab
                     </button>
                 </template>
                 

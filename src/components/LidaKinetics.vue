@@ -5,7 +5,7 @@
     <div class="full-width-header">
       <div class="flex-between">
         <h2 style="display:flex; align-items:center; gap:10px; margin:0;">
-          <i class="fas fa-dna"></i>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 2.5v11h11"/><path d="M3.5 12c2-6 3.5-6 4.5-3s2.5 4 4.5-4"/></svg>
           <input
             type="text"
             v-model="dataset.name"
@@ -3459,7 +3459,7 @@ onBeforeUnmount(() => {
   font-size: 0.72rem; opacity: 0.85;
   margin-bottom: 6px; padding: 4px 0;
 }
-.engine-label { font-weight: 700; color: var(--primary, #3b82f6); text-transform: uppercase; letter-spacing: 0.4px; }
+.engine-label { font-weight: 700; color: var(--primary, #3b82f6); text-transform: none; letter-spacing: 0.4px; }
 .engine-opt { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 .engine-opt input { margin: 0; }
 
@@ -3488,7 +3488,7 @@ onBeforeUnmount(() => {
 .ledger-table th {
   position: sticky; top: 0; background: var(--input-bg, #f8fafc); z-index: 1;
   padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border-color, #e2e8f0);
-  font-weight: 700; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.4px;
+  font-weight: 700; font-size: 0.72rem; text-transform: none; letter-spacing: 0.4px;
 }
 /* Disable uppercasing for chemical symbols (Mg, Cl, etc.) */
 .no-upper { text-transform: none !important; }
@@ -3529,7 +3529,7 @@ onBeforeUnmount(() => {
 /* ── Section 2: sub-section label ──────────────────────── */
 .sub-label {
   font-size: 0.72rem; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.4px;
+  text-transform: none; letter-spacing: 0.4px;
   opacity: 0.65; margin-bottom: 5px;
 }
 
@@ -3693,14 +3693,14 @@ onBeforeUnmount(() => {
 
 /* ── DNA Building Block sub-section ────────────────────────── */
 .stock-section-label {
-  font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+  font-size: 0.7rem; font-weight: 700; text-transform: none;
   letter-spacing: 0.4px; color: #8b5cf6;
 }
 .stock-section-hint {
   font-size: 0.68rem; opacity: 0.6; margin-bottom: 4px;
 }
 .strand-group-label {
-  font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+  font-size: 0.68rem; font-weight: 700; text-transform: none;
   letter-spacing: 0.3px; color: #8b5cf6; opacity: 0.75;
   margin-top: 6px; margin-bottom: 2px;
 }

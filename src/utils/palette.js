@@ -8,32 +8,33 @@
 // a condition label, …) to a fixed hex so the same entity keeps the same
 // colour across every figure that plots it.
 //
-// The seeded "Boekhoven Lab" palette matches the group's published figures
-// (steel-blue data, red controls) and the TUM secondary colour system. It is
-// editable/duplicable once the palette-builder UI lands; nothing here is
+// The seeded "Boekhoven Lab" palette follows Wilke (Fundamentals of Data
+// Visualization, ch. 19–20): the qualitative series use the **Okabe-Ito**
+// colour-vision-deficiency-safe set, and the control / reference trace is always
+// **vermillion (#D55E00) and dashed** — redundant coding that survives greyscale
+// and every form of colour blindness. It is editable/duplicable; nothing here is
 // hard-wired into the plot code — plots read whichever palette is selected.
 
 export const BOEKHOVEN_PALETTE = Object.freeze({
   id: 'boekhoven-lab',
   name: 'Boekhoven Lab',
   builtin: true,
-  // TUM secondary palette + observed figure colours.
+  // Okabe-Ito qualitative palette, in canonical order.
   categorical: [
-    '#0065BD', // TUM blue (primary data)
-    '#E37222', // TUM orange
-    '#A2AD00', // TUM green
-    '#98C6EA', // light blue
-    '#64A0C8', // mid blue
-    '#B55CA5', // magenta
-    '#007C30', // dark green
-    '#7F7F7F', // neutral grey
+    '#0072B2', // blue        (primary data)
+    '#E69F00', // orange
+    '#009E73', // green
+    '#56B4E9', // sky blue
+    '#CC79A7', // reddish purple
+    '#F0E442', // yellow
+    '#000000', // black
   ],
-  // Blues ramp (matplotlib "Blues" / seaborn light_palette('#0065BD')).
+  // Blues ramp (matplotlib "Blues" / seaborn light_palette('#0072B2')).
   sequential: [
     '#F7FBFF', '#DEEBF7', '#C6DBEF', '#9ECAE1', '#6BAED6',
     '#4292C6', '#2171B5', '#08519C', '#08306B',
   ],
-  control: '#D0021B', // red — blanks / reference
+  control: '#D55E00', // vermillion — blanks / reference (always dashed in plots)
   colorMap: {},       // { contentKey: '#rrggbb' }
 })
 

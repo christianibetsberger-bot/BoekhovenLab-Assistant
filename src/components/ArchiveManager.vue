@@ -100,8 +100,8 @@ const importArchive = (event) => {
 
 <template>
   <div class="card">
-    <div class="flex-between" style="border-bottom: 2px solid var(--bg); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
-        <h2 style="border: none; padding: 0; margin: 0;"><i class="fas fa-box-archive"></i> Archive</h2>
+    <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
+        <h2 style="border: none; padding: 0; margin: 0;"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="11" height="9" rx="1"/><rect x="2" y="2.5" width="12" height="2.6" rx="0.6"/><line x1="6.3" y1="8.5" x2="9.7" y2="8.5"/></svg> Archive</h2>
         <div style="display: flex; gap: 10px;">
             <button class="small" @click="exportArchive"><i class="fas fa-file-export"></i> Export</button>
             <button class="small" @click="archiveUpload.click()"><i class="fas fa-file-import"></i> Import</button>

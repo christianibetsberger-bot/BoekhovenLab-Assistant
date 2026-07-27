@@ -14,7 +14,12 @@ export const useLabStore = defineStore('lab', {
     pendingQrCode: null,
     inventoryLoaded: false,
     isDarkMode: false,
-    uiSettings: { primaryColor: '#0E396E', borderRadius: '2px' },
+    // primaryColor = accent (Soft Glass --acc-user). radiusName = Sharp|Soft|Round.
+    // borderRadius (legacy px) is retained only to migrate old saved prefs.
+    // showAlpha: reveal alpha-stage modules (per user; off by default).
+    uiSettings: { primaryColor: '#0E396E', radiusName: 'Soft', borderRadius: '14px', showAlpha: false },
+    // Curated accent swatches offered in Settings (dark mode lightens each 38%).
+    accentOptions: ['#0E396E', '#0065BD', '#00786B', '#5E5CE6'],
     globalSettings: { mmReactions: 3.3, decimals: 3 },
     inventorySearch: '',
     archiveReactionSearch: '',
@@ -75,10 +80,20 @@ export const useLabStore = defineStore('lab', {
     journal: { entries: [], activeId: null, nextId: 1 },
     journalNeedsSync: 0,
     selectedWellInvRef: '',
-    viewingItem: null
+    viewingItem: null,
+
+    // Transient bottom-center toasts (redesign feedback pattern).
+    toasts: [],
   }),
-  
+
   actions: {
+    // Push a bottom-center toast that auto-dismisses (~2.6 s).
+    toast(message) {
+      const id = Date.now() + Math.random();
+      this.toasts.push({ id, message });
+      setTimeout(() => { this.toasts = this.toasts.filter(t => t.id !== id); }, 2600);
+    },
+
     // --- PERSISTENT WORKSPACE REGISTRY ---
     saveWorkspaceState() {
       // This saves a list of "Visible IDs" to the browser's storage
@@ -454,14 +469,40 @@ export const useLabStore = defineStore('lab', {
       this.saveUserPreferences();
     },
 
+    // Sharp | Soft | Round — prefer the explicit name, else migrate an old px value.
+    resolveRadiusName() {
+      const n = this.uiSettings.radiusName;
+      if (n === 'Sharp' || n === 'Soft' || n === 'Round') return n;
+      const px = parseFloat(this.uiSettings.borderRadius);
+      if (!isNaN(px)) {
+        if (px <= 4) return 'Sharp';
+        if (px >= 16) return 'Round';
+        return 'Soft';
+      }
+      return 'Soft';
+    },
+
     // DOM-only update — called during load so we don't trigger a redundant save.
+    // Sets ONLY --acc-user and data-radius; the stylesheet derives --acc/--acs/
+    // --acsh (with the dark 38% lift), the radius trio, and every legacy alias
+    // (--primary, --radius, …). Setting --primary inline here would override the
+    // dark-lifted accent, so we deliberately don't.
     applyThemeToDOM() {
       const dark = this.isDarkMode;
+      const root = document.documentElement;
+      // CRUCIAL: the legacy aliases (--surface: var(--cd), --text: var(--tx), …)
+      // live on :root (<html>) and are resolved THERE. If the dark class is only
+      // on <body>, those aliases resolve against <html>'s light tokens and inherit
+      // light everywhere. Putting the dark class on <html> makes them resolve dark.
+      root.classList.toggle('dark-mode', dark);
       document.body.classList.toggle('dark-mode', dark);
       const wrapper = document.getElementById('body-wrapper');
       if (wrapper) wrapper.classList.toggle('dark-mode', dark);
-      document.documentElement.style.setProperty('--primary', this.uiSettings.primaryColor);
-      document.documentElement.style.setProperty('--radius',  this.uiSettings.borderRadius);
+      root.style.setProperty('--acc-user', this.uiSettings.primaryColor);
+      root.setAttribute('data-radius', this.resolveRadiusName());
+      // Force native controls (select popups, spinners, date pickers, scrollbars)
+      // to match the theme document-wide — otherwise they render light in dark mode.
+      root.style.colorScheme = dark ? 'dark' : 'light';
     },
 
     // ── Module layout ─────────────────────────────────────────────────────────

@@ -9,38 +9,123 @@ html {
     text-size-adjust: 100%;
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   SOFT GLASS DESIGN TOKENS  (redesign "direction 1b" — single design language)
+   Every UI colour, radius and shadow comes from these custom properties.
+   Legacy token names (--primary, --surface, --border, --radius …) are defined
+   in terms of the new ones at the bottom of this block, so the existing modules
+   adopt the new look through the variables they already consume.
+
+   Theming: JS sets  --acc-user  (accent swatch) and the  data-radius  attribute
+   on <html>; dark mode is the .dark / .dark-mode class. The dark accent is the
+   light accent lifted 38% toward white — reproduced exactly by color-mix 62/38.
+   ══════════════════════════════════════════════════════════════════════════ */
 :root {
-    /* Dynamic Variables - Overridden by Vue */
-    --primary: #0E396E;      
-    --bg: #f4f7f5;            
-    --surface: #ffffff;
-    --text: #1f2937; 
-    --border: #d1d5db;
-    --danger: #ef4444; 
-    --danger-bg: #fee2e2;
-    --success: #10b981; 
-    --summary-bg: #f8fafc;
-    --input-bg: #ffffff;
-    --panel-bg: #f9fafb;
-    --radius: 2px; /* Controlled by UI settings */
+    /* Accent — user-themable. Default Boekhoven navy. */
+    --acc-user: #0E396E;
+    --acc:  var(--acc-user);
+    --acs:  color-mix(in srgb, var(--acc) 10%, transparent);  /* accent tint  */
+    --acsh: color-mix(in srgb, var(--acc) 30%, transparent);  /* button glow  */
+
+    /* Radius trio — default "Soft"; data-radius on <html> switches the set. */
+    --r:  14px;   /* cards        */
+    --rc: 10px;   /* controls     */
+    --rd: 18px;   /* dock / large */
+
+    /* App background (gradient) + frosted chrome/card surfaces — LIGHT */
+    --app-bg: linear-gradient(160deg, #E9EEF5, #DCE2EC);
+    --ch:  rgba(255,255,255,.55);   /* title bar / dock  */
+    --ch2: rgba(255,255,255,.42);   /* toolbar           */
+    --chl: rgba(255,255,255,.6);    /* chrome hairline   */
+    --cd:  rgba(255,255,255,.74);   /* card surface      */
+    --cdl: rgba(255,255,255,.7);    /* card border       */
+    --ln:  rgba(20,30,60,.07);      /* row separators    */
+    --ln2: rgba(20,30,60,.12);      /* stronger sep.     */
+
+    /* Text */
+    --tx:  #1D1D1F;   /* primary   */
+    --tx2: #6E6E73;   /* secondary */
+    --tx3: #8A8A8F;   /* tertiary  */
+
+    /* Fills, buttons, status */
+    --fl:   rgba(20,30,60,.05);
+    --btn2: rgba(255,255,255,.8);
+    --ok:   #248A3D;   --wr: #C93400;   --wrs: rgba(201,52,0,.12);
+    --danger-color: #D70015;
+    --sh:  0 8px 28px rgba(20,30,60,.10);   /* card shadow */
+    --tst: rgba(29,29,31,.92);              /* toast       */
+    --modal: rgba(255,255,255,.98);         /* dialogs — opaque enough to read */
+    --surface-solid: #EDF1F7;               /* opaque panel (sticky headers, dense tables) */
+
+    /* Data palette (plots only — never for UI): Okabe-Ito + vermillion control */
+    --data-1: #0072B2; --data-2: #E69F00; --data-3: #009E73; --data-4: #56B4E9;
+    --data-5: #CC79A7; --data-6: #F0E442; --data-7: #000000; --data-ctrl: #D55E00;
+
+    /* Native form controls (select popups, spinners, scrollbars) follow the theme */
+    color-scheme: light;
+
+    /* ── Legacy aliases → new tokens (keeps every existing module on-system) ── */
+    --primary:    var(--acc);
+    --bg:         #E6EBF3;            /* solid mid of the gradient (background-color consumers) */
+    --surface:    var(--cd);
+    --text:       var(--tx);
+    --border:     var(--ln2);
+    --danger:     var(--danger-color);
+    --danger-bg:  rgba(215,0,21,.10);
+    --success:    var(--ok);
+    --success-color: var(--ok);
+    --warning:    var(--wr);
+    --warning-color: var(--wr);
+    --error:      var(--danger-color);
+    --summary-bg: var(--fl);
+    --input-bg:   var(--fl);
+    --panel-bg:   rgba(255,255,255,.5);
+    --radius:     var(--r);
 }
 
-/* Dark Mode Override — covers both body.dark-mode and #body-wrapper.dark-mode */
-body.dark-mode, .dark-mode {
-    --bg: #111827;
-    --surface: #1f2937;
-    --text: #f3f4f6;
-    --border: #374151;
-    --danger: #f87171;
-    --danger-bg: #7f1d1d;
-    --summary-bg: #111827;
-    --input-bg: #374151;
-    --panel-bg: #1f2937;
+/* Radius presets — <html data-radius="Sharp|Soft|Round"> */
+:root[data-radius="Sharp"] { --r: 8px;  --rc: 6px;  --rd: 12px; }
+:root[data-radius="Soft"]  { --r: 14px; --rc: 10px; --rd: 18px; }
+:root[data-radius="Round"] { --r: 18px; --rc: 12px; --rd: 22px; }
+
+/* Dark mode — single token switch. Class lives on <body>/#body-wrapper; the
+   custom properties cascade to every descendant, overriding :root. */
+body.dark-mode, .dark-mode, .dark {
+    color-scheme: dark;
+    --app-bg: linear-gradient(160deg, #23262E, #1A1C22);
+    --ch:  rgba(40,44,54,.72);
+    --ch2: rgba(36,40,50,.6);
+    --chl: rgba(255,255,255,.08);
+    --cd:  rgba(44,46,54,.72);
+    --cdl: rgba(255,255,255,.10);
+    --ln:  rgba(255,255,255,.08);
+    --ln2: rgba(255,255,255,.14);
+    --tx:  #F5F5F7;
+    --tx2: #98989D;
+    --tx3: #7C7C82;
+    --fl:   rgba(255,255,255,.07);
+    --btn2: rgba(255,255,255,.10);
+    --ok:   #30D158;  --wr: #FF9F0A;  --wrs: rgba(255,159,10,.14);
+    --danger-color: #FF453A;
+    --sh:  0 8px 24px rgba(0,0,0,.4);
+    --tst: rgba(70,74,86,.95);
+    --modal: rgba(38,40,48,.985);
+    --surface-solid: #282B33;
+    /* accent lifted 38% toward white; tint 18%, glow neutral */
+    --acc:  color-mix(in srgb, var(--acc-user) 62%, #fff);
+    --acs:  color-mix(in srgb, var(--acc) 18%, transparent);
+    --acsh: rgba(0,0,0,.4);
+    /* legacy solids for dark */
+    --bg:        #1E2027;
+    --panel-bg:  rgba(255,255,255,.05);
+    --danger-bg: rgba(255,69,58,.15);
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background-color: var(--bg); color: var(--text); margin: 0; padding: 20px; line-height: 1.5; transition: background-color 0.3s, color 0.3s;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--app-bg); background-attachment: fixed;
+    color: var(--text); margin: 0; padding: 20px; line-height: 1.5;
+    transition: color 0.3s;
     overflow-x: hidden; /* Extra safety to prevent page-level horizontal scrolling */
 }
 
@@ -59,40 +144,88 @@ body {
 .full-width-header { grid-column: 1 / -1; }
 
 .card {
-    background-color: var(--surface); border-radius: var(--radius); padding: 20px; margin-bottom: 25px; border: 1px solid var(--border); border-top: 4px solid var(--primary); transition: background-color 0.3s, border-radius 0.3s;
+    background: var(--cd);
+    backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+    border-radius: var(--r); padding: 16px; margin-bottom: 20px;
+    border: 1px solid var(--cdl);
+    box-shadow: var(--sh);
+    transition: border-radius 0.3s, box-shadow 0.3s;
 }
 
-h2 { margin-top: 0; font-size: 1.25rem; border-bottom: 2px solid var(--bg); padding-bottom: 12px; color: var(--primary); display: flex; align-items: center; gap: 10px; font-weight: 700; }
-h3 { margin-top: 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; }
-h4 { margin-top: 0; font-size: 0.95rem; color: var(--text); opacity: 0.8; margin-bottom: 10px; }
+/* Card / section titles — sentence case, calm weight, hairline underline.
+   (No accent-coloured heavy title bar; no uppercase.) */
+h2 { margin-top: 0; font-size: 0.95rem; border-bottom: 1px solid var(--ln); padding-bottom: 10px; color: var(--tx); display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: -0.01em; }
+/* Card-header icon chip: accent square + white glyph/line-icon (card anatomy). */
+h2 > i, h2 > .fas, h2 > .far, h2 > .fab, h2 > .fa, h2 > svg {
+  width: 24px; height: 24px; border-radius: 8px; flex: none;
+  background: var(--acc); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; box-shadow: 0 2px 5px var(--acsh);
+}
+/* SVG line-icon sits inside the chip (viewBox scaled into a padded box). */
+h2 > svg { padding: 5px; box-sizing: border-box; stroke: #fff; }
+h3 { margin-top: 0; font-size: 0.9rem; display: flex; align-items: center; gap: 8px; color: var(--tx); font-weight: 600; }
+h4 { margin-top: 0; font-size: 0.82rem; color: var(--tx2); margin-bottom: 10px; font-weight: 600; }
 
-.input-group { margin-bottom: 15px; }
-.input-group label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.85rem; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.5px; }
+.input-group { margin-bottom: 14px; }
+.input-group label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.72rem; color: var(--tx2); letter-spacing: 0; }
 
 input[type="number"], input[type="text"], input[type="date"], select, textarea {
-    width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); box-sizing: border-box; font-family: inherit; transition: border-color 0.2s, border-radius 0.3s; background-color: var(--input-bg); color: var(--text); appearance: none; -webkit-appearance: none; box-shadow: none !important;
+    width: 100%; padding: 10px 11px; border: 1px solid transparent; border-radius: var(--rc); box-sizing: border-box; font-family: inherit; transition: border-color 0.15s, box-shadow 0.15s, border-radius 0.3s; background-color: var(--fl); color: var(--tx); appearance: none; -webkit-appearance: none; box-shadow: none !important;
 }
 select { background-image: url('data:image/svg+xml;utf8,<svg fill="%23999" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/><path d="M0 0h24v24H0z" fill="none"/></svg>'); background-repeat: no-repeat; background-position-x: 98%; background-position-y: 50%; }
-input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--acc); box-shadow: 0 0 0 3px var(--acs) !important; }
+input::placeholder, textarea::placeholder { color: var(--tx3); }
 input[type="color"] { padding: 2px; height: 40px; cursor: pointer; }
 
 .input-with-select { display: flex; }
 .input-with-select input { border-right: none; border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .input-with-select select { width: 90px; font-weight: 600; border-left: 1px solid var(--border); border-top-left-radius: 0; border-bottom-left-radius: 0; }
 
+/* Primary button: accent fill, sentence case, soft accent glow. */
 button {
-    background-color: var(--primary); color: white; border: none; padding: 10px 16px; border-radius: var(--radius); cursor: pointer; font-weight: 600; transition: filter 0.2s, border-radius 0.3s; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: none; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.5px;
+    background-color: var(--acc); color: white; border: none; padding: 9px 15px; border-radius: var(--rc); cursor: pointer; font-weight: 600; transition: filter 0.15s, border-radius 0.3s, box-shadow 0.15s; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 3px 10px var(--acsh); text-transform: none; font-size: 0.8rem; letter-spacing: 0;
 }
-button:hover { filter: brightness(0.85); }
-button.small { padding: 6px 10px; font-size: 0.75rem; }
-button.danger { background-color: var(--danger); }
-button.success { background-color: var(--success); }
-button.secondary { background-color: #6b7280; }
+button:hover { filter: brightness(1.1); }
+button.small { padding: 6px 11px; font-size: 0.72rem; }
+button.danger { background-color: var(--danger-color); box-shadow: none; }
+button.success { background-color: var(--ok); box-shadow: none; }
+/* Secondary button: translucent fill + hairline border, dark text. */
+button.secondary { background-color: var(--btn2); color: var(--tx); border: 1px solid var(--ln2); box-shadow: none; }
+button.secondary:hover { filter: brightness(1.04); }
 
 table { width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 0.85rem; }
-th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); }
-th { font-weight: 600; background-color: var(--input-bg); opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px; font-size: 0.75rem; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--ln); }
+th { font-weight: 600; background: transparent; color: var(--tx2); text-transform: none; letter-spacing: 0; font-size: 0.72rem; }
 .checkbox-label { display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer; user-select: none; }
+
+/* ══ Lab / Private scope vocabulary (redesign) ══════════════════════════════
+   Data model uses Global (= Lab, shared) / Personal (= Private, per-user).
+   These primitives give every list/editor module one consistent scope UI. */
+.scope-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; font-weight: 700; padding: 2px 8px; border-radius: 9px; line-height: 1.5; white-space: nowrap; letter-spacing: .01em; }
+.scope-badge.lab      { background: var(--acs); color: var(--acc); }
+.scope-badge.private  { background: var(--fl);  color: var(--tx2); }
+.scope-badge.archived { background: var(--fl);  color: var(--tx3); }
+/* Interactive scope pill (tap to flip scope in an editor) */
+.scope-toggle { cursor: pointer; border: none; }
+.scope-toggle:hover { filter: brightness(1.04); }
+
+.scope-chips { display: inline-flex; gap: 3px; padding: 2px; background: var(--fl); border-radius: calc(var(--rc) + 2px); }
+.scope-chip { padding: 5px 12px; border: none; box-shadow: none; border-radius: var(--rc); font-size: 12px; font-weight: 600; background: transparent; color: var(--tx2); cursor: pointer; }
+.scope-chip:hover { filter: none; color: var(--tx); }
+.scope-chip.active { background: var(--acc); color: #fff; box-shadow: 0 2px 6px var(--acsh); }
+
+/* ══ Module action bar — consistent primary-action (Save) placement ══
+   Convention: a bottom bar with secondary actions left, primary (Save) right.
+   Use <div class="module-actions"> … <span class="spacer"></span> … </div>. */
+.module-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--ln); }
+.module-actions .spacer { margin-left: auto; }
+
+/* ══ Toasts — bottom-center pill, auto-dismiss ══ */
+.toast-host { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 950; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+.toast { background: var(--tst); color: #fff; font-size: 12.5px; font-weight: 600; padding: 9px 16px; border-radius: 999px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 8px 24px rgba(0,0,0,.28); animation: toast-in .18s ease; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 820px) { .toast-host { bottom: 104px; } }
 
 .summary-panel { background-color: var(--summary-bg); padding: 15px; border-radius: var(--radius); margin-top: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 15px; border: 1px solid var(--border); }
 .summary-panel.error { background-color: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
@@ -243,14 +376,12 @@ th { font-weight: 600; background-color: var(--input-bg); opacity: 0.9; text-tra
    the user-configurable --radius look.
    ══════════════════════════════════════════════════════════════════════ */
 
-/* Cards: soft rounded surfaces with a slimmer accent */
+/* Cards: soft rounded surfaces (iOS uses the larger 18px card radius) */
 .mobile-ui .card {
     border-radius: 18px;
-    border-top-width: 3px;
-    padding: 18px 14px;
-    box-shadow: 0 2px 14px rgba(0,0,0,0.05);
+    padding: 16px 14px;
 }
-.mobile-ui h2 { font-size: 1.15rem; }
+.mobile-ui h2 { font-size: 1.0rem; }
 
 /* Inputs: taller, rounded, thumb-friendly */
 .mobile-ui .input-group { margin-bottom: 13px; }

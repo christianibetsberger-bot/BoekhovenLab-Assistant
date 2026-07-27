@@ -215,7 +215,7 @@ const saveStdToInventory = () => {
 
 <template>
   <div class="card">
-    <h2><i class="fas fa-flask-vial"></i> Standard Stock Calculator</h2>
+    <h2><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 2h5"/><path d="M6.5 2v8.5a1.5 1.5 0 0 0 3 0V2"/><line x1="6.5" y1="9" x2="9.5" y2="9"/></svg> Standard Stock Calculator</h2>
     
     <div style="display: flex; gap: 15px; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px;">
         <label class="checkbox-label" style="font-weight: bold;"><input type="radio" value="solid" v-model="store.stdCalc.type"> Solid (Mass)</label>
@@ -328,7 +328,7 @@ const saveStdToInventory = () => {
                 </div>
             </div>
         </div>
-        <p v-if="bufferWarning" style="margin: 0; font-size: 0.78rem; color: #ef4444; display: flex; align-items: center; gap: 6px;">
+        <p v-if="bufferWarning" style="margin: 0; font-size: 0.78rem; color: var(--danger-color); display: flex; align-items: center; gap: 6px;">
             <i class="fas fa-triangle-exclamation"></i> {{ bufferWarning }}
         </p>
     </div>
@@ -383,15 +383,15 @@ const saveStdToInventory = () => {
         </div>
         <div v-if="stdTotalVolumeL && (naAddedM > 0 || clAddedM > 0)" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
             <div style="background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; text-align: center;">
-                <div style="font-size: 0.72rem; opacity: 0.65; text-transform: uppercase; letter-spacing: 0.03em;">Na⁺ concentration</div>
+                <div style="font-size: 0.72rem; opacity: 0.65; text-transform: none; letter-spacing: 0.03em;">Na⁺ concentration</div>
                 <div style="font-size: 1.1rem; font-weight: bold; color: var(--primary);">{{ fmtConc(naAddedM) }}</div>
             </div>
             <div style="background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; text-align: center;">
-                <div style="font-size: 0.72rem; opacity: 0.65; text-transform: uppercase; letter-spacing: 0.03em;">Cl⁻ concentration</div>
+                <div style="font-size: 0.72rem; opacity: 0.65; text-transform: none; letter-spacing: 0.03em;">Cl⁻ concentration</div>
                 <div style="font-size: 1.1rem; font-weight: bold; color: var(--primary);">{{ fmtConc(clAddedM) }}</div>
             </div>
         </div>
-        <p v-else-if="!stdTotalVolumeL" style="margin: 0; font-size: 0.75rem; color: #f59e0b;">
+        <p v-else-if="!stdTotalVolumeL" style="margin: 0; font-size: 0.75rem; color: var(--wr);">
             <i class="fas fa-info-circle"></i> Enter molar mass, amount and target concentration first to compute the total volume.
         </p>
     </div>
@@ -404,14 +404,14 @@ const saveStdToInventory = () => {
     <!-- Buffer / water breakdown -->
     <div v-if="store.stdCalc.diluent === 'buffer' && stdTotalVolumeL" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
         <div style="background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; text-align: center;">
-            <div style="font-size: 0.72rem; opacity: 0.65; text-transform: uppercase; letter-spacing: 0.03em;">Buffer volume</div>
+            <div style="font-size: 0.72rem; opacity: 0.65; text-transform: none; letter-spacing: 0.03em;">Buffer volume</div>
             <div style="font-size: 1.15rem; font-weight: bold; color: var(--primary);">{{ fmtVol(bufferVolumeL) }}</div>
             <div style="font-size: 0.68rem; opacity: 0.6;">from {{ store.formatNum(store.stdCalc.bufferStockConc) }} {{ store.stdCalc.bufferStockUnit }} stock</div>
         </div>
         <div style="background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; text-align: center;">
-            <div style="font-size: 0.72rem; opacity: 0.65; text-transform: uppercase; letter-spacing: 0.03em;">Fill-up water</div>
+            <div style="font-size: 0.72rem; opacity: 0.65; text-transform: none; letter-spacing: 0.03em;">Fill-up water</div>
             <div style="font-size: 1.15rem; font-weight: bold; color: var(--primary);"
-                 :style="{ color: (fillWaterVolumeL != null && fillWaterVolumeL < 0) ? '#ef4444' : 'var(--primary)' }">
+                 :style="{ color: (fillWaterVolumeL != null && fillWaterVolumeL < 0) ? 'var(--danger-color)' : 'var(--primary)' }">
                 {{ fmtVol(fillWaterVolumeL) }}
             </div>
             <div v-if="store.stdCalc.type === 'liquid' && compoundVolumeL" style="font-size: 0.68rem; opacity: 0.6;">after {{ fmtVol(compoundVolumeL) }} compound</div>
@@ -439,7 +439,7 @@ const saveStdToInventory = () => {
             </div>
         </div>
         <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;padding:7px 10px;background:var(--input-bg);border-radius:6px;border:1px solid var(--border);">
-            <span style="font-size:0.73rem;opacity:0.6;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap;">Save to:</span>
+            <span style="font-size:0.73rem;opacity:0.6;font-weight:600;text-transform: none;letter-spacing:0.04em;white-space:nowrap;">Save to:</span>
             <label class="checkbox-label"><input type="radio" value="Global" v-model="saveScope"> Global</label>
             <label class="checkbox-label"><input type="radio" value="Personal" v-model="saveScope"> Personal</label>
         </div>

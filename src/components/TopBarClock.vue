@@ -419,8 +419,8 @@ onBeforeUnmount(() => {
 }
 
 .tbc.tbc-active {
-  background: color-mix(in srgb, #10b981 10%, var(--panel-bg));
-  border-color: #10b981;
+  background: color-mix(in srgb, var(--ok) 10%, var(--panel-bg));
+  border-color: var(--ok);
 }
 .tbc.tbc-private {
   background: var(--panel-bg, #f8fafc);
@@ -463,19 +463,19 @@ onBeforeUnmount(() => {
 }
 
 .tbc.tbc-warn {
-  background: color-mix(in srgb, #f59e0b 15%, var(--panel-bg));
-  border-color: #f59e0b;
+  background: color-mix(in srgb, var(--wr) 15%, var(--panel-bg));
+  border-color: var(--wr);
 }
 .tbc.tbc-over {
-  background: color-mix(in srgb, #ef4444 15%, var(--panel-bg));
-  border-color: #ef4444;
+  background: color-mix(in srgb, var(--danger-color) 15%, var(--panel-bg));
+  border-color: var(--danger-color);
   animation: tbc-pulse 2s ease-in-out infinite;
 }
 @keyframes tbc-pulse { 0%,100%{opacity:1} 50%{opacity:.75} }
 
 .tbc-dot {
   width: 8px; height: 8px; border-radius: 50%;
-  background: #10b981;
+  background: var(--ok);
   animation: dot-blink 1.6s ease-in-out infinite;
   flex-shrink: 0;
 }
@@ -509,8 +509,8 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .tbc-btn:hover { filter: brightness(.9); }
-.tbc-start { background: #10b981; color: #fff; }
-.tbc-stop  { background: #ef4444; color: #fff; }
+.tbc-start { background: var(--ok); color: #fff; }
+.tbc-stop  { background: var(--danger-color); color: #fff; }
 
 .tbc-label { display: inline; }
 @media (max-width: 900px) { .tbc-label { display: none; } }

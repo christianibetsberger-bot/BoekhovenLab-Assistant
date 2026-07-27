@@ -212,21 +212,28 @@ def render_chrom_gallery(data, fmt):
     ncol = int(data.get('ncol', min(4, n)))
     nrow = int(np.ceil(n / ncol))
     fig, axes = plt.subplots(nrow, ncol, figsize=(ncol * 3.2, nrow * 2.4), squeeze=False)
-    control = data.get('control', '#D0021B')
-    line = data.get('lineColor', '#0065BD')
+    control = data.get('control', '#D55E00')
+    line = data.get('lineColor', '#0072B2')
+    lw = float(data.get('lineWidth', 1.4))         # Wilke: heavier lines (2.2)
+    max_ticks = data.get('maxTicks')               # ≤ N ticks per axis
     for idx in range(nrow * ncol):
         ax = axes[idx // ncol][idx % ncol]
         if idx >= n:
             ax.set_visible(False); continue
         p = panels[idx]
-        ax.plot(p.get('t', []), p.get('s', []), color=line, lw=1.2)
+        ax.plot(p.get('t', []), p.get('s', []), color=line, lw=lw)
         for sh in p.get('shades', []):
             ax.axvspan(sh['x0'], sh['x1'], color=sh.get('color', control), alpha=0.25, lw=0)
         for vx in p.get('vlines', []):
-            ax.axvline(vx, color='#64748b', ls=':', lw=0.8)
-        ax.set_title(p.get('title', ''), fontsize=9)
-        ax.set_xlabel(data.get('xlabel', 't | min'), fontsize=8)
-        ax.set_ylabel(data.get('ylabel', 'signal | mAU'), fontsize=8)
+            ax.axvline(vx, color='#64748b', ls=':', lw=0.9)
+        # Typography follows the preset via rcParams (set by apply_style()).
+        ax.set_title(p.get('title', ''))
+        ax.set_xlabel(data.get('xlabel', 't | min'))
+        ax.set_ylabel(data.get('ylabel', 'signal | mAU'))
+        if max_ticks:
+            from matplotlib.ticker import MaxNLocator
+            ax.xaxis.set_major_locator(MaxNLocator(int(max_ticks)))
+            ax.yaxis.set_major_locator(MaxNLocator(int(max_ticks)))
         for s in ('top', 'right'):
             ax.spines[s].set_visible(False)
     if data.get('title'):

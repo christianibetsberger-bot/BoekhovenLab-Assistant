@@ -42,6 +42,57 @@ const resolvePendingQr = () => {
 }
 watch(() => [store.pendingQrCode, store.inventoryLoaded], resolvePendingQr, { immediate: true })
 
+// ── PubChem lookup — fetch CAS + a 2D structure for a chemical ─────────────────
+// Resolves a PubChem CID from the item's CAS, name or SMILES, then pulls the
+// structure PNG, molecular formula/weight and (if missing) the CAS number.
+// Runs in the user's browser, so it needs an internet connection.
+const pubchem = ref({ loading: false, error: '', img: '', formula: '', mw: '', cid: null })
+const PUG = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound'
+async function resolveCid(item) {
+    const tries = []
+    if (item.cas) tries.push(`name/${encodeURIComponent(item.cas)}`)
+    if (item.name && item.name !== 'New Stock' && item.name !== 'Scanned compound') tries.push(`name/${encodeURIComponent(item.name)}`)
+    if (item.smiles) tries.push(`smiles/${encodeURIComponent(item.smiles)}`)
+    for (const t of tries) {
+        try {
+            const r = await fetch(`${PUG}/${t}/cids/JSON`)
+            if (r.ok) { const cid = (await r.json())?.IdentifierList?.CID?.[0]; if (cid) return cid }
+        } catch { /* try next */ }
+    }
+    return null
+}
+async function fetchPubchem(item) {
+    pubchem.value = { loading: true, error: '', img: '', formula: '', mw: '', cid: null }
+    try {
+        const cid = await resolveCid(item)
+        if (!cid) { pubchem.value = { loading: false, error: 'No PubChem match — check the name or CAS.', img: '', formula: '', mw: '', cid: null }; return }
+        const img = `${PUG}/cid/${cid}/PNG`
+        let formula = '', mw = ''
+        try {
+            const pr = await fetch(`${PUG}/cid/${cid}/property/MolecularFormula,MolecularWeight/JSON`)
+            if (pr.ok) { const p = (await pr.json())?.PropertyTable?.Properties?.[0]; formula = p?.MolecularFormula || ''; mw = p?.MolecularWeight || '' }
+        } catch { /* non-fatal */ }
+        if (!item.cas) {
+            try {
+                const sr = await fetch(`${PUG}/cid/${cid}/synonyms/JSON`)
+                if (sr.ok) { const syn = (await sr.json())?.InformationList?.Information?.[0]?.Synonym || []; const cas = syn.find(s => /^\d{2,7}-\d{2}-\d$/.test(s)); if (cas) item.cas = cas }
+            } catch { /* non-fatal */ }
+        }
+        // Persist the light-weight identifiers so the structure re-shows instantly next time.
+        item.pubchemCid = cid
+        if (formula) item.molFormula = formula
+        store.saveItemToCloud?.(item)
+        pubchem.value = { loading: false, error: '', img, formula, mw, cid }
+    } catch {
+        pubchem.value = { loading: false, error: 'Lookup failed — are you online?', img: '', formula: '', mw: '', cid: null }
+    }
+}
+// When a chemical with a saved CID is opened, show its structure straight away.
+watch(viewingItem, (item) => {
+    if (item && item.pubchemCid) pubchem.value = { loading: false, error: '', img: `${PUG}/cid/${item.pubchemCid}/PNG`, formula: item.molFormula || '', mw: '', cid: item.pubchemCid }
+    else pubchem.value = { loading: false, error: '', img: '', formula: '', mw: '', cid: null }
+})
+
 // --- Local Computed ---
 const filteredInventory = computed(() => {
     const term = inventorySearch.value.toLowerCase();
@@ -73,6 +124,7 @@ const toggleScope = (item) => {
     // Promoting a stock to Global promotes its Personal location to Global too.
     if (item.scope === 'Global' && item.location) store.promoteLocationToGlobal(item.location);
     store.saveItemToCloud(item);
+    store.toast(item.scope === 'Global' ? `${item.code} shared with the lab` : `${item.code} moved to Private`);
 }
 
 // --- Storage locations ---
@@ -396,6 +448,14 @@ const toggleLabelItem = (item) => {
     else labelQueue.value.splice(idx, 1)
 }
 
+// Quick per-row QR label — works for any item (Global or Personal): queue it and
+// open the label/QR modal straight away.
+const openLabelFor = (item) => {
+    if (!isInQueue(item.id)) labelQueue.value.push({ item, copies: 1 })
+    labelQrMode.value = 'with'
+    showLabelModal.value = true
+}
+
 const labelCapacity = computed(() => {
     const total = labelQueue.value.reduce((s, e) => s + (e.copies || 1), 0)
     if (total === 0) return null
@@ -441,31 +501,52 @@ const solventText = (item) => {
     return 'in water'
 }
 
-// DNA/RNA label — bold wrapping name, then code, conc | MW, and the sequence (mono).
+// DNA/RNA label — bold auto-shrinking name (whole name always shown), conc | MW,
+// location and the sequence (mono) filling the middle, with the full CAS (when
+// present) and full identifier code guaranteed in a reserved bottom stack.
 // Scales with the label HEIGHT (s = h / 13) so wide/short and tall formats render right.
 const renderDnaLabel = (doc, item, x, y, w, h) => {
     const s = 1 + (h / 13 - 1) * 0.55   // gentle height scaling: eppi=1, falcon≈2.1
     const px = x + 0.9 * s
     const maxW = w - 1.8 * s
-    const bottom = y + h - 0.5 * s
+    const keyW = 6.0 * s
 
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(6 * s); doc.setTextColor(12, 12, 12)
-    const nameLines = doc.splitTextToSize(item.name || '', maxW).slice(0, s >= 1.5 ? 3 : 2)
-    let cy = y + 2.1 * s
-    nameLines.forEach(ln => { doc.text(ln, px, cy); cy += lineMM(6 * s) })
+    const hasCode = !!(item.code != null && String(item.code).trim() !== '')
+    const casStr  = (item.cas != null && String(item.cas).trim() !== '') ? String(item.cas).trim() : ''
+
+    // Reserved bottom stack: full code on the last line, full CAS just above it.
+    const codeSize = 3.6 * s
+    const casSize  = 3.4 * s
+    const codeBaseline = y + h - 0.8 * s
+    const casBaseline  = codeBaseline - (hasCode ? lineMM(codeSize) + 0.4 * s : 0)
+    const bottomTop    = (casStr ? casBaseline - lineMM(casSize) : casBaseline) - 0.5 * s
+
+    // Name — bold, wraps and auto-shrinks so the whole name always fits.
+    const nameTop = y + 2.1 * s
+    const nameRegionH = Math.max(lineMM(3.0 * s), bottomTop - nameTop)
+    let nameSize = 6 * s
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(nameSize)
+    let nameLines = doc.splitTextToSize(item.name || '', maxW)
+    while (nameSize > 2.6 && nameLines.length * lineMM(nameSize) > nameRegionH) {
+        nameSize -= 0.25
+        doc.setFontSize(nameSize)
+        nameLines = doc.splitTextToSize(item.name || '', maxW)
+    }
+    doc.setTextColor(12, 12, 12)
+    let cy = nameTop
+    nameLines.forEach(ln => { doc.text(ln, px, cy); cy += lineMM(nameSize) })
     cy += 0.3 * s
-
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(3.5 * s); doc.setTextColor(105, 105, 105)
-    if (item.code) { doc.text(String(item.code), px, cy); cy += lineMM(3.5 * s) }
 
     const mwDisplay = item.mw ? Math.round(item.mw) : ''
     const concBase  = `${item.stock ?? ''} ${item.stockUnit || 'µM'}`.trim()
     const concStr   = mwDisplay ? `${concBase}  |  ${mwDisplay} Da` : concBase
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(4 * s); doc.setTextColor(20, 20, 20)
-    if (concStr) { doc.text(concStr, px, cy); cy += lineMM(4 * s) + 0.3 * s }
+    if (concStr && cy + lineMM(4 * s) <= bottomTop) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(4 * s); doc.setTextColor(20, 20, 20)
+        doc.text(concStr, px, cy); cy += lineMM(4 * s) + 0.3 * s
+    }
 
     const loc = [item.location, item.sublocation].filter(v => v != null && v !== '').join(' / ')
-    if (loc) {
+    if (loc && cy + lineMM(3.3 * s) <= bottomTop) {
         doc.setFont('helvetica', 'normal'); doc.setFontSize(3.3 * s); doc.setTextColor(90, 90, 90)
         doc.text(doc.splitTextToSize(loc, maxW)[0], px, cy); cy += lineMM(3.3 * s) + 0.2 * s
     }
@@ -474,27 +555,62 @@ const renderDnaLabel = (doc, item, x, y, w, h) => {
     if (seq) {
         doc.setFont('courier', 'normal'); doc.setFontSize(3.5 * s); doc.setTextColor(40, 40, 40)
         doc.splitTextToSize(seq, maxW).forEach(lineTxt => {
-            if (cy < bottom) { doc.text(lineTxt, px, cy); cy += lineMM(3.5 * s) }
+            if (cy + lineMM(3.5 * s) <= bottomTop) { doc.text(lineTxt, px, cy); cy += lineMM(3.5 * s) }
         })
+    }
+
+    // Guaranteed CAS — full number, monospace, in its reserved slot above the code.
+    if (casStr) {
+        doc.setFontSize(casSize)
+        doc.setFont('helvetica', 'normal'); doc.setTextColor(110, 110, 110); doc.text('CAS', px, casBaseline)
+        doc.setFont('courier', 'normal'); doc.setTextColor(30, 30, 30); doc.text(casStr, px + keyW, casBaseline)
+    }
+
+    // Guaranteed identifier code — full, monospace, anchored to the very bottom.
+    if (hasCode) {
+        doc.setFont('courier', 'bold'); doc.setFontSize(codeSize); doc.setTextColor(10, 10, 10)
+        doc.text(String(item.code), px, codeBaseline)
     }
 }
 
-// Chemical / non-sequence label — industry-style layout: bold wrapping compound name,
-// a separator rule (taller labels), labelled fields (conc, solvent, location, MW, CAS)
-// and a monospace identifier code. Scales with the label HEIGHT (s = h / 13).
+// Chemical / non-sequence label — industry-style layout. Three things are
+// GUARANTEED on every label: the full compound name (bold, wraps and auto-
+// shrinks so the whole name always fits — never truncated), the full CAS number
+// and the full identifier code (both anchored to the bottom so they are never
+// dropped). Optional rows (conc, solvent, location, MW, LOT) fill any room left
+// between the name and that bottom stack. Scales with the label HEIGHT (s = h/13).
 const renderChemLabel = (doc, item, x, y, w, h) => {
     const s = 1 + (h / 13 - 1) * 0.55   // gentle height scaling: eppi=1, falcon≈2.1
     const big = s >= 1.5
     const px = x + 1.0 * s
     const rightX = x + w - 1.0 * s
-    const codeReserve = item.code ? lineMM(3.9 * s) + 0.4 * s : 0
-    const bottom = y + h - 0.5 * s - codeReserve
-    let cy = y + 2.2 * s
+    const maxW = rightX - px
+    const keyW = 6.5 * s
 
-    // Compound name — bold, wraps to fill the width (up to 2 lines short / 3 tall)
-    const nameSize = 5.8 * s
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(nameSize); doc.setTextColor(15, 15, 15)
-    const nameLines = doc.splitTextToSize(item.name || '', rightX - px).slice(0, big ? 3 : 2)
+    const hasCode = !!(item.code != null && String(item.code).trim() !== '')
+    const casStr  = (item.cas != null && String(item.cas).trim() !== '') ? String(item.cas).trim() : ''
+
+    // Reserved bottom stack: full code on the very last line, full CAS just above.
+    const codeSize = 3.9 * s
+    const casSize  = 3.6 * s
+    const codeBaseline = y + h - 1.0 * s
+    const casBaseline  = codeBaseline - (hasCode ? lineMM(codeSize) + 0.5 * s : 0)
+    const bottomTop    = (casStr ? casBaseline - lineMM(casSize) : casBaseline) - 0.6 * s
+
+    // Compound name — bold, wraps to the full width and auto-shrinks until every
+    // line fits in the space above the bottom stack. The whole name always shows.
+    const nameTop = y + 2.2 * s
+    const nameRegionH = Math.max(lineMM(3.0 * s), bottomTop - nameTop)
+    let nameSize = 5.8 * s
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(nameSize)
+    let nameLines = doc.splitTextToSize(item.name || '', maxW)
+    while (nameSize > 2.6 && nameLines.length * lineMM(nameSize) > nameRegionH) {
+        nameSize -= 0.25
+        doc.setFontSize(nameSize)
+        nameLines = doc.splitTextToSize(item.name || '', maxW)
+    }
+    doc.setTextColor(15, 15, 15)
+    let cy = nameTop
     nameLines.forEach(ln => { doc.text(ln, px, cy); cy += lineMM(nameSize) })
 
     // Separator rule (taller labels only; short labels stay compact)
@@ -507,12 +623,11 @@ const renderChemLabel = (doc, item, x, y, w, h) => {
         cy += 0.3 * s
     }
 
-    // Labelled data rows: muted key + value
+    // Optional labelled rows: muted key + value — only while they fit above CAS.
     const fieldSize = 3.6 * s
-    const keyW = 6.5 * s
     const rowH = lineMM(fieldSize) + 0.2 * s
     const field = (key, val, { mono = false, bold = false } = {}) => {
-        if (val == null || val === '' || cy > bottom) return
+        if (val == null || val === '' || cy + lineMM(fieldSize) > bottomTop) return
         doc.setFontSize(fieldSize)
         doc.setFont('helvetica', 'normal'); doc.setTextColor(125, 125, 125)
         doc.text(key, px, cy)
@@ -540,13 +655,19 @@ const renderChemLabel = (doc, item, x, y, w, h) => {
     field('SOLV', solventLine)
     field('SALT', saltLine)
     field('MW',   mw)
-    field('CAS',  item.cas, { mono: true })
     field('LOT',  item.lotNum, { mono: true })
 
-    // Identifier code — monospace, anchored to the bottom like a catalog / lot number
-    if (item.code) {
-        doc.setFont('courier', 'bold'); doc.setFontSize(3.9 * s); doc.setTextColor(10, 10, 10)
-        doc.text(String(item.code), px, y + h - 1.0 * s)
+    // Guaranteed CAS — full number, monospace, in its reserved slot above the code.
+    if (casStr) {
+        doc.setFontSize(casSize)
+        doc.setFont('helvetica', 'normal'); doc.setTextColor(125, 125, 125); doc.text('CAS', px, casBaseline)
+        doc.setFont('courier', 'normal'); doc.setTextColor(25, 25, 25); doc.text(casStr, px + keyW, casBaseline)
+    }
+
+    // Guaranteed identifier code — full, monospace, anchored to the very bottom.
+    if (hasCode) {
+        doc.setFont('courier', 'bold'); doc.setFontSize(codeSize); doc.setTextColor(10, 10, 10)
+        doc.text(String(item.code), px, codeBaseline)
     }
 }
 
@@ -569,25 +690,44 @@ const drawQrOnPdf = (doc, text, x, y, size) => {
             if (qr.isDark(r, c)) doc.rect(ox + c * m, oy + r * m, m * 1.04, m * 1.04, 'F')
 }
 
-// QR-only label: big scannable QR, with the identifier code (and name, when
-// there is room) beside it for human eyes.
+// QR-only label: big scannable QR, with the full code, name and CAS beside it
+// for human eyes whenever there is side room. The QR carries everything else.
 const renderQrOnlyLabel = (doc, item, x, y, w, h) => {
     const qsize = Math.min(h - 1.0, w - 1.0, 22)
     const sideRoom = w - qsize - 2.0
     const qx = sideRoom >= 8 ? x + 0.8 : x + (w - qsize) / 2
     const qy = y + (h - qsize) / 2
     drawQrOnPdf(doc, qrUrlForItem(item), qx, qy, qsize)
-    if (sideRoom >= 8 && item.code) {
+    if (sideRoom >= 8) {
+        const s = 1 + (h / 13 - 1) * 0.55
         const tx = qx + qsize + 1.2
         const maxW = x + w - 0.8 - tx
-        const s = 1 + (h / 13 - 1) * 0.55
-        let ty = y + h / 2 - 0.6 * s
-        doc.setFont('courier', 'bold'); doc.setFontSize(4.4 * s); doc.setTextColor(10, 10, 10)
-        doc.text(doc.splitTextToSize(String(item.code), maxW)[0], tx, ty)
-        ty += lineMM(4.4 * s)
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(3.2 * s); doc.setTextColor(105, 105, 105)
-        const nameLn = doc.splitTextToSize(item.name || '', maxW)[0]
-        if (nameLn) doc.text(nameLn, tx, ty)
+        const casStr = (item.cas != null && String(item.cas).trim() !== '') ? String(item.cas).trim() : ''
+
+        // Auto-shrink the name so the whole thing fits the side column.
+        let nameSize = 3.4 * s
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(nameSize)
+        let nameLines = doc.splitTextToSize(item.name || '', maxW)
+        const nameBudget = h - 2 * (lineMM(4.4 * s)) - 1.2 * s   // leave room for code + CAS
+        while (nameSize > 2.4 && nameLines.length * lineMM(nameSize) > nameBudget) {
+            nameSize -= 0.2
+            doc.setFontSize(nameSize)
+            nameLines = doc.splitTextToSize(item.name || '', maxW)
+        }
+        const blockH = lineMM(4.4 * s) + nameLines.length * lineMM(nameSize) + (casStr ? lineMM(3.2 * s) : 0)
+        let ty = y + (h - blockH) / 2 + lineMM(4.4 * s) * 0.8
+
+        if (item.code) {
+            doc.setFont('courier', 'bold'); doc.setFontSize(4.4 * s); doc.setTextColor(10, 10, 10)
+            doc.text(doc.splitTextToSize(String(item.code), maxW)[0] || String(item.code), tx, ty)
+            ty += lineMM(4.4 * s)
+        }
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(nameSize); doc.setTextColor(105, 105, 105)
+        nameLines.forEach(ln => { doc.text(ln, tx, ty); ty += lineMM(nameSize) })
+        if (casStr) {
+            doc.setFont('courier', 'normal'); doc.setFontSize(3.2 * s); doc.setTextColor(120, 120, 120)
+            doc.text(`CAS ${casStr}`, tx, ty)
+        }
     }
 }
 
@@ -667,10 +807,11 @@ const generateLabelsPDF = () => {
   <div>
 
     <!-- ── Properties modal ───────────────────────────────────────────────── -->
-    <div v-if="viewingItem" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000;">
-        <div style="background: var(--surface); padding: 25px; border-radius: var(--radius); border: 1px solid var(--border); max-width: 500px; width: 90%;">
+    <div v-if="viewingItem" @click.self="viewingItem = null" style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px;">
+        <div style="position: relative; background: var(--modal); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); padding: 22px; border-radius: var(--r); border: 1px solid var(--cdl); box-shadow: var(--sh); max-width: 500px; width: 90%; max-height: 88vh; overflow-y: auto;">
+            <button @click="viewingItem = null" title="Close" style="position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border-radius: 50%; background: var(--fl); color: var(--tx2); border: none; box-shadow: none; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; z-index: 2;">✕</button>
             <template v-if="viewingItem.itemClass === 'DNA' || viewingItem.itemClass === 'RNA'">
-                <h3 style="margin-top: 0; color: var(--primary); border-bottom: 2px solid var(--bg); padding-bottom: 10px;"><i class="fas fa-dna"></i> Sequence Properties</h3>
+                <h3 style="margin-top: 0; color: var(--primary); border-bottom: 1px solid var(--ln); padding-bottom: 10px;"><i class="fas fa-dna"></i> Sequence Properties</h3>
                 <div class="grid-2" style="margin-top: 15px;">
                     <p style="margin: 0;"><strong>Name:</strong> {{ viewingItem.name }}</p>
                     <div class="input-group" style="margin: 0;">
@@ -698,7 +839,7 @@ const generateLabelsPDF = () => {
                 </div>
             </template>
             <template v-else>
-                <h3 style="margin-top: 0; color: var(--primary); border-bottom: 2px solid var(--bg); padding-bottom: 10px;"><i class="fas fa-flask"></i> Chemical Properties</h3>
+                <h3 style="margin-top: 0; color: var(--primary); border-bottom: 1px solid var(--ln); padding-bottom: 10px;"><i class="fas fa-flask"></i> Chemical Properties</h3>
                 <div class="grid-2" style="margin-top: 15px;">
                     <p style="margin: 0;"><strong>Name:</strong> {{ viewingItem.name }}</p>
                     <p style="margin: 0;"><strong>Code:</strong> {{ viewingItem.code }}</p>
@@ -719,6 +860,28 @@ const generateLabelsPDF = () => {
                     <div><strong>Lot Number:</strong><br> <input type="text" v-model="viewingItem.lotNum" placeholder="e.g. L-2024-07" style="padding: 4px; margin-top: 4px; width: 100%;"></div>
                     <div><strong>Unit Size:</strong><br> <input type="text" v-model="viewingItem.unitSize" placeholder="e.g. 500g" style="padding: 4px; margin-top: 4px; width: 100%;"></div>
                     <div><strong>CAS Number:</strong><br> <input type="text" v-model="viewingItem.cas" placeholder="e.g. 50-00-0" style="padding: 4px; margin-top: 4px; width: 100%;"></div>
+                </div>
+
+                <!-- Structure & identifiers (PubChem) -->
+                <div style="margin-top: 15px; border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; background: var(--panel-bg);">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <strong style="flex: 1;"><i class="fas fa-atom"></i> Structure &amp; identifiers</strong>
+                        <button class="secondary small" @click="fetchPubchem(viewingItem)" :disabled="pubchem.loading" style="padding: 4px 10px;">
+                            <i class="fas" :class="pubchem.loading ? 'fa-spinner fa-spin' : 'fa-cloud-arrow-down'"></i>
+                            {{ viewingItem.pubchemCid ? 'Refresh' : 'Fetch from PubChem' }}
+                        </button>
+                    </div>
+                    <div v-if="pubchem.error" style="font-size: 0.8rem; color: var(--wr); margin-top: 8px;">{{ pubchem.error }}</div>
+                    <div v-if="pubchem.img" style="display: flex; gap: 14px; align-items: center; margin-top: 10px; flex-wrap: wrap;">
+                        <img :src="pubchem.img" alt="Chemical structure" style="width: 148px; height: 148px; object-fit: contain; background: #fff; border-radius: 8px; border: 1px solid var(--border);">
+                        <div style="font-size: 0.82rem; line-height: 1.7; min-width: 140px;">
+                            <div v-if="viewingItem.cas"><strong>CAS:</strong> {{ viewingItem.cas }}</div>
+                            <div v-if="pubchem.formula"><strong>Formula:</strong> {{ pubchem.formula }}</div>
+                            <div v-if="pubchem.mw"><strong>Mol. weight:</strong> {{ pubchem.mw }} g/mol</div>
+                            <a :href="`https://pubchem.ncbi.nlm.nih.gov/compound/${pubchem.cid}`" target="_blank" rel="noopener" style="font-size: 0.75rem;">PubChem CID {{ pubchem.cid }} ↗</a>
+                        </div>
+                    </div>
+                    <div v-else-if="!pubchem.loading && !pubchem.error" style="font-size: 0.76rem; color: var(--tx3); margin-top: 8px;">Looks up the compound by CAS or name and shows its 2D structure.</div>
                 </div>
             </template>
             <div style="display: flex; gap: 12px; align-items: flex-end; margin-top: 15px;">
@@ -764,7 +927,7 @@ const generateLabelsPDF = () => {
 
     <!-- ── Location manager modal ─────────────────────────────────────────── -->
     <div v-if="showLocationManager" style="position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1100;" @click.self="showLocationManager = false">
-        <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); width: 92%; max-width: 460px; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; padding: 20px;">
+        <div style="background: var(--modal); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); border: 1px solid var(--cdl); border-radius: var(--r); width: 92%; max-width: 460px; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; padding: 20px;">
             <h3 style="margin-top: 0; color: var(--primary);"><i class="fas fa-map-marker-alt"></i> Storage Locations</h3>
             <p style="font-size: 0.78rem; opacity: 0.7; margin: 0 0 12px;">Global locations are shared with everyone; personal ones are visible only to you.</p>
             <div style="display: flex; gap: 6px; align-items: flex-end; margin-bottom: 12px;">
@@ -782,9 +945,9 @@ const generateLabelsPDF = () => {
                 <div v-if="locationOptions.length === 0" style="padding: 12px; text-align: center; opacity: 0.6; font-size: 0.85rem;">No locations yet.</div>
                 <div v-for="l in locationOptions" :key="l.id" style="display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-bottom: 1px solid var(--border);">
                     <span>{{ l.name }}
-                        <span :style="{ marginLeft: '6px', padding: '1px 6px', borderRadius: '3px', fontSize: '0.68rem', background: (l.scope||'Global')==='Global' ? 'rgba(59,130,246,0.18)' : 'rgba(148,163,184,0.18)' }">{{ (l.scope || 'Global') === 'Global' ? 'Global' : 'Personal' }}</span>
+                        <span class="scope-badge" :class="(l.scope||'Global')==='Global' ? 'lab' : 'private'" style="margin-left: 6px;">{{ (l.scope || 'Global') === 'Global' ? 'Lab' : 'Private' }}</span>
                     </span>
-                    <button v-if="l.owner_id === store.user?.id" class="secondary small" @click="store.deleteLocation(l.id)" title="Delete (creator only)" style="padding: 3px 8px; color: #ef4444;"><i class="fas fa-trash"></i></button>
+                    <button v-if="l.owner_id === store.user?.id" class="secondary small" @click="store.deleteLocation(l.id)" title="Delete (creator only)" style="padding: 3px 8px; color: var(--danger-color);"><i class="fas fa-trash"></i></button>
                 </div>
             </div>
             <button @click="showLocationManager = false" style="margin-top: 16px; width: 100%;">Done</button>
@@ -793,7 +956,7 @@ const generateLabelsPDF = () => {
 
     <!-- ── Label printing modal ───────────────────────────────────────────── -->
     <div v-if="showLabelModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000;">
-      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); width: 92%; max-width: 960px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden;">
+      <div style="background: var(--modal); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); border: 1px solid var(--cdl); border-radius: var(--r); width: 92%; max-width: 960px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden;">
 
         <!-- Header -->
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;">
@@ -807,7 +970,7 @@ const generateLabelsPDF = () => {
           <!-- Left: item picker -->
           <div style="border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden;">
             <div style="padding: 12px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;">
-              <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;">Inventory</div>
+              <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; margin-bottom: 8px; text-transform: none; letter-spacing: 0.05em;">Inventory</div>
               <div class="search-box" style="margin: 0;">
                 <i class="fas fa-search"></i>
                 <input type="text" v-model="labelSearch" placeholder="Search code or name…">
@@ -840,7 +1003,7 @@ const generateLabelsPDF = () => {
           <!-- Middle: print queue -->
           <div style="border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden;">
             <div style="padding: 12px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;">
-              <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.05em;">Print Queue</div>
+              <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; text-transform: none; letter-spacing: 0.05em;">Print Queue</div>
               <div style="font-size: 0.72rem; opacity: 0.5; margin-top: 3px;">Drag to reorder</div>
             </div>
             <div style="overflow-y: auto; flex: 1; padding: 6px 0;">
@@ -878,7 +1041,7 @@ const generateLabelsPDF = () => {
           <div style="display: flex; flex-direction: column; overflow-y: auto; padding: 14px;">
 
             <!-- Label size / tube format -->
-            <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">Tube / Label Size</div>
+            <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; text-transform: none; letter-spacing: 0.05em; margin-bottom: 8px;">Tube / Label Size</div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 16px;">
               <div
                 v-for="(sz, key) in LABEL_SIZES"
@@ -893,7 +1056,7 @@ const generateLabelsPDF = () => {
             </div>
 
             <!-- QR code mode -->
-            <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">QR Code</div>
+            <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; text-transform: none; letter-spacing: 0.05em; margin-bottom: 8px;">QR Code</div>
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 10px;">
               <div
                 v-for="opt in [{ v: 'off', label: 'None' }, { v: 'with', label: 'Text + QR' }, { v: 'only', label: 'QR only' }]"
@@ -908,7 +1071,7 @@ const generateLabelsPDF = () => {
             </div>
 
             <!-- HERMA picker -->
-            <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">Start Position</div>
+            <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; text-transform: none; letter-spacing: 0.05em; margin-bottom: 8px;">Start Position</div>
             <div style="font-size: 0.7rem; opacity: 0.55; margin-bottom: 10px;">Which HERMA label block on the sheet is free?</div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 16px;">
               <div
@@ -926,7 +1089,7 @@ const generateLabelsPDF = () => {
             </div>
 
             <!-- Printer calibration -->
-            <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">Printer Calibration</div>
+            <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.7; text-transform: none; letter-spacing: 0.05em; margin-bottom: 8px;">Printer Calibration</div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px;">
               <div>
                 <div style="font-size: 0.7rem; opacity: 0.65; margin-bottom: 3px;">X shift (mm)</div>
@@ -965,7 +1128,7 @@ const generateLabelsPDF = () => {
 
     <!-- ── Bulk TSV import modal ────────────────────────────────────────────── -->
     <div v-if="showBulkModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 1000;">
-      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); width: 92%; max-width: 640px; display: flex; flex-direction: column; gap: 0; overflow: hidden;">
+      <div style="background: var(--modal); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); border: 1px solid var(--cdl); border-radius: var(--r); width: 92%; max-width: 640px; display: flex; flex-direction: column; gap: 0; overflow: hidden;">
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border);">
           <h3 style="margin: 0; color: var(--primary); font-size: 1rem;"><i class="fas fa-file-import" style="margin-right: 7px;"></i>Bulk Import — Conc.txt (TSV)</h3>
           <button class="danger small" @click="showBulkModal = false; bulkPasteText = ''"><i class="fas fa-times"></i></button>
@@ -1004,18 +1167,18 @@ const generateLabelsPDF = () => {
 
     <!-- ── Main inventory card ────────────────────────────────────────────── -->
     <div class="card">
-        <h2><i class="fas fa-boxes-stacked"></i> Inventory</h2>
+        <h2><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.7 5.2 8 2.6 13.3 5.2 13.3 10.8 8 13.4 2.7 10.8Z"/><path d="M2.7 5.2 8 7.8 13.3 5.2"/><path d="M8 7.8v5.6"/></svg> Inventory</h2>
 
-        <div style="display: flex; gap: 15px; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px;">
-            <label class="checkbox-label" style="font-weight: bold;"><input type="radio" value="Global" v-model="inventoryMode"> Global Inventory</label>
-            <label class="checkbox-label" style="font-weight: bold;"><input type="radio" value="Personal" v-model="inventoryMode"> Personal Inventory</label>
+        <div class="scope-chips" style="margin-bottom: 14px;">
+            <button class="scope-chip" :class="{ active: inventoryMode === 'Global' }" @click="inventoryMode = 'Global'">Lab</button>
+            <button class="scope-chip" :class="{ active: inventoryMode === 'Personal' }" @click="inventoryMode = 'Personal'">Private</button>
         </div>
 
         <div class="search-box">
             <i class="fas fa-search"></i>
             <input type="text" v-model="inventorySearch" placeholder="Search by name, CAS, or code...">
         </div>
-        <div class="table-responsive" style="max-height: 500px; border: 1px solid var(--border); background: var(--surface);">
+        <div class="table-responsive" style="max-height: 500px; border: 1px solid var(--ln2); border-radius: var(--rc); background: var(--surface-solid);">
             <table style="margin-bottom: 0;">
                 <thead style="position: sticky; top: 0; z-index: 1;">
                     <tr>
@@ -1030,8 +1193,8 @@ const generateLabelsPDF = () => {
                 </thead>
                 <tbody>
                     <tr v-for="item in filteredInventory" :key="item.id">
-                        <td><input type="text" v-model="item.code" @blur="store.saveItemToCloud(item)" style="width: 55px; padding: 6px;"></td>
-                        <td><input type="text" v-model="item.cas" placeholder="-" @blur="store.saveItemToCloud(item)" style="width: 70px; padding: 6px; font-size:0.8rem;"></td>
+                        <td><input type="text" v-model="item.code" @blur="store.saveItemToCloud(item)" style="width: 96px; padding: 6px; font-family: ui-monospace, Menlo, monospace; font-weight: 600; color: var(--acc);"></td>
+                        <td><input type="text" v-model="item.cas" placeholder="-" @blur="store.saveItemToCloud(item)" style="width: 96px; padding: 6px; font-family: ui-monospace, Menlo, monospace; font-size:0.8rem;"></td>
                         <td>
                             <select v-model="item.itemClass" @change="store.saveItemToCloud(item)" style="width: 80px; padding: 6px; font-size:0.8rem;">
                                 <option v-for="cls in store.classOptions" :key="cls" :value="cls">{{ cls }}</option>
@@ -1060,6 +1223,7 @@ const generateLabelsPDF = () => {
                                 <i class="fas" :class="(item.scope || 'Global') === 'Personal' ? 'fa-globe' : 'fa-user'"></i>
                             </button>
                             <button class="secondary small" @click="createAliquot(item)" title="Create Aliquot" style="margin-right: 5px;"><i class="fas fa-vial"></i></button>
+                            <button class="small" @click="openLabelFor(item)" title="Print QR label" style="margin-right: 5px;"><i class="fas fa-qrcode"></i></button>
                             <button class="secondary small" @click="viewProperties(item)" title="View Properties" style="margin-right: 5px;"><i class="fas fa-info-circle"></i></button>
                             <button class="danger small" @click="removeInventoryItem(item.id)"><i class="fas fa-times"></i></button>
                         </td>
@@ -1069,7 +1233,7 @@ const generateLabelsPDF = () => {
         </div>
 
         <div style="display: flex; gap: 10px; margin-top: 15px;">
-            <button @click="addInventoryItem" style="flex-grow: 1; height: 40px;"><i class="fas fa-plus"></i> Add to {{ inventoryMode }}</button>
+            <button @click="addInventoryItem" style="flex-grow: 1; height: 40px;"><i class="fas fa-plus"></i> Add to {{ inventoryMode === 'Personal' ? 'Private' : 'Lab' }}</button>
             <button @click="importTargetMode = inventoryMode; excelUpload.click()" style="flex-grow: 1; height: 40px;">
                 <i class="fas fa-file-excel"></i> Import
             </button>
@@ -1087,3 +1251,29 @@ const generateLabelsPDF = () => {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Dense inventory table — clearer cell definition + readable inputs. */
+.table-responsive table { font-size: 0.84rem; }
+.table-responsive table input,
+.table-responsive table select {
+  border: 1px solid var(--ln2);
+  background: var(--fl);
+  color: var(--tx);
+  font-size: 0.82rem;
+  padding: 6px 7px;
+}
+.table-responsive table input:focus,
+.table-responsive table select:focus {
+  border-color: var(--acc);
+}
+.table-responsive th {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--tx2);
+  background: var(--surface-solid);
+}
+.table-responsive td { vertical-align: middle; }
+/* zebra striping aids row scanning */
+.table-responsive tbody tr:nth-child(even) { background: color-mix(in srgb, var(--tx) 3%, transparent); }
+</style>

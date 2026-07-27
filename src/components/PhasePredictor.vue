@@ -2,7 +2,7 @@
   <div class="card module-card" @click="activeDropdown = null">
     <div class="full-width-header">
       <h2 style="display: flex; align-items: center; gap: 10px;">
-        <i class="fas fa-brain"></i> Active Learning Phase Predictor
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 2.5v11h11"/><circle cx="5.5" cy="10.5" r="1"/><circle cx="8.5" cy="7" r="1"/><circle cx="11.5" cy="9" r="1"/></svg> Active Learning Phase Predictor
       </h2>
       <p style="font-size: 0.85rem; opacity: 0.8; margin-top: 5px;">
         Map chemical phase space and calculate pipetting volumes using smart experimental design.
@@ -208,7 +208,7 @@
               </p>
 
               <!-- Header row -->
-              <div style="display:grid; grid-template-columns:120px 100px 1fr 130px 80px; gap:6px; align-items:center; font-size:0.7rem; font-weight:700; opacity:0.55; text-transform:uppercase; letter-spacing:0.04em;">
+              <div style="display:grid; grid-template-columns:120px 100px 1fr 130px 80px; gap:6px; align-items:center; font-size:0.7rem; font-weight:700; opacity:0.55; text-transform: none; letter-spacing:0.04em;">
                 <span>Component</span>
                 <span>Solvent</span>
                 <span>Buffer name</span>
@@ -277,7 +277,7 @@
               </div>
 
               <!-- Divider -->
-              <div style="border-top:1px dashed var(--border-color,#cbd5e1); padding-top:8px; font-size:0.72rem; font-weight:700; opacity:0.55; text-transform:uppercase; letter-spacing:0.04em;">Fill-up solution</div>
+              <div style="border-top:1px dashed var(--border-color,#cbd5e1); padding-top:8px; font-size:0.72rem; font-weight:700; opacity:0.55; text-transform: none; letter-spacing:0.04em;">Fill-up solution</div>
 
               <!-- Fill-up -->
               <div style="display:grid; grid-template-columns:120px 100px 1fr 130px 80px; gap:6px; align-items:center;">
@@ -325,7 +325,7 @@
               <!-- Live preview for first suggestion -->
               <template v-if="suggestions.length > 0">
                 <div style="border-top:1px solid var(--border-color,#e2e8f0); padding-top:8px;">
-                  <div style="font-size:0.7rem; font-weight:700; opacity:0.55; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Preview (first AI target)</div>
+                  <div style="font-size:0.7rem; font-weight:700; opacity:0.55; text-transform: none; letter-spacing:0.04em; margin-bottom:4px;">Preview (first AI target)</div>
                   <div style="font-size:0.78rem; display:flex; gap:16px; flex-wrap:wrap;">
                     <span>A: <strong>{{ computeWellVolumes(suggestions[0]).vA.toFixed(2) }} µL</strong></span>
                     <span>B: <strong>{{ computeWellVolumes(suggestions[0]).vB.toFixed(2) }} µL</strong></span>
@@ -465,7 +465,7 @@
 
           <!-- Settings panel -->
           <div v-if="prShowSettings" style="border:1px solid var(--border-color,#e2e8f0); border-radius:6px; padding:10px; margin-bottom:8px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
-            <div style="font-weight:700; font-size:0.75rem; text-transform:uppercase; letter-spacing:.4px; opacity:.7;">OD → Phase Thresholds</div>
+            <div style="font-weight:700; font-size:0.75rem; text-transform: none; letter-spacing:.4px; opacity:.7;">OD → Phase Thresholds</div>
             <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px;">
               <div class="input-group" style="margin:0;">
                 <label style="font-size:0.7rem;">Clear / Ph 1</label>
@@ -484,7 +484,7 @@
                 <input type="number" step="0.01" min="0" max="5" v-model.number="prPhaseBoundaries.phase3max" style="padding:3px 5px; font-size:0.8rem;" />
               </div>
             </div>
-            <div style="font-weight:700; font-size:0.75rem; text-transform:uppercase; letter-spacing:.4px; opacity:.7; margin-top:4px;">Dissolution Detection</div>
+            <div style="font-weight:700; font-size:0.75rem; text-transform: none; letter-spacing:.4px; opacity:.7; margin-top:4px;">Dissolution Detection</div>
             <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
               <label class="checkbox-label" style="font-size:0.8rem;">
                 <input type="checkbox" v-model="prDissolutionEnabled" /> Enable
@@ -522,7 +522,7 @@
                   <option value="all">All experiments</option>
                 </select>
                 <label>Starting well:</label>
-                <input type="text" v-model="prStartWell" maxlength="3" style="width:46px; font-size:0.8rem; padding:3px 6px; text-transform:uppercase;" placeholder="A1" />
+                <input type="text" v-model="prStartWell" maxlength="3" style="width:46px; font-size:0.8rem; padding:3px 6px; text-transform: none;" placeholder="A1" />
               </template>
               <template v-else>
                 <label>Import:</label>
@@ -865,7 +865,7 @@
           </select>
           <input type="text" v-model="targetStartWell" placeholder="A1" class="compact-input" />
           <button class="small" @click="exportAdditiveToPlate"
-            style="background:#f59e0b; color:#000; border:none; padding:4px 14px; border-radius:4px; cursor:pointer; font-weight:600;">
+            style="background:var(--wr); color:#fff; border:none; padding:4px 14px; border-radius:var(--rc); cursor:pointer; font-weight:600;">
             <i class="fas fa-arrow-down"></i> Send to Plate
           </button>
           <span style="font-size:0.72rem; opacity:0.5;">

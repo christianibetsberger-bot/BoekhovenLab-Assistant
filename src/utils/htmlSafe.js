@@ -36,7 +36,10 @@ const SANITIZE_CONFIG = {
     'onclick', 'onmouseover', 'onmouseout', 'onmouseenter', 'onmouseleave',
     'onerror', 'onload', 'onfocus', 'onblur', 'oninput', 'onchange',
   ],
-  ALLOW_DATA_ATTR: false,
+  // Keep data-* attributes: embedded chemical structures store their editable
+  // KET payload in data-ket (and data-smiles) on the .chem-struct block. data-*
+  // are inert (never executed), and the journal content is the user's own.
+  ALLOW_DATA_ATTR: true,
 }
 
 export function sanitize(html) {

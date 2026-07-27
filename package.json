@@ -11,12 +11,18 @@
     "test:run": "vitest run"
   },
   "dependencies": {
+    "@rdkit/rdkit": "^2025.3.4-1.0.0",
     "@supabase/supabase-js": "^2.103.3",
     "dompurify": "^3.2.0",
+    "fflate": "^0.8.3",
     "html2pdf.js": "^0.14.0",
     "jspdf": "^2.5.2",
+    "ketcher-react": "^3.17.1",
+    "ketcher-standalone": "^3.17.1",
     "pinia": "^3.0.4",
     "plotly.js-dist-min": "^3.5.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "vue": "^3.5.32",
     "xlsx": "^0.18.5"
   },

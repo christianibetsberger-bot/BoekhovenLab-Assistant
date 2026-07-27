@@ -1,9 +1,53 @@
 import { describe, it, expect } from 'vitest'
 import {
-  DEFAULT_PRESET, resolvePreset, axisTitle, boekhovenPlotlyLayout,
+  DEFAULT_PRESET, WILKE_PRESET, LEGACY_PRESET, BUILTIN_PRESETS, isBuiltinPreset,
+  resolvePreset, axisTitle, boekhovenPlotlyLayout,
   boekhovenHeatmapLayout, matplotlibStyleCode,
 } from './plotStyle.js'
 import { BOEKHOVEN_PALETTE } from './palette.js'
+
+describe('Boekhoven Wilke preset (the default)', () => {
+  it('is the default preset', () => {
+    expect(DEFAULT_PRESET).toBe(WILKE_PRESET)
+    expect(DEFAULT_PRESET.id).toBe('boekhoven-wilke')
+    expect(DEFAULT_PRESET.fontSize).toBe(15)
+    expect(DEFAULT_PRESET.lineWidth).toBe(2.2)
+    expect(DEFAULT_PRESET.control.dash).toBe('6 4')
+  })
+
+  it('exposes both built-in presets, Wilke first', () => {
+    expect(BUILTIN_PRESETS.map(p => p.id)).toEqual(['boekhoven-wilke', 'boekhoven-default'])
+    expect(isBuiltinPreset('boekhoven-wilke')).toBe(true)
+    expect(isBuiltinPreset('boekhoven-default')).toBe(true)
+    expect(isBuiltinPreset('preset_custom')).toBe(false)
+  })
+
+  it('caps ticks at 5 and uses the larger margins', () => {
+    const layout = boekhovenPlotlyLayout(WILKE_PRESET, BOEKHOVEN_PALETTE, {
+      x: { quantity: 't', unit: 'min' }, y: { quantity: 'signal', unit: 'mAU' },
+    })
+    expect(layout.xaxis.nticks).toBe(5)
+    expect(layout.yaxis.nticks).toBe(5)
+    expect(layout.margin.l).toBe(64)
+    expect(layout.margin.b).toBe(56)
+    expect(layout.xaxis.tickfont.size).toBe(14)
+    expect(layout.xaxis.title.font.size).toBe(15.5)
+  })
+
+  it('legacy preset leaves ticks on auto (no nticks)', () => {
+    const layout = boekhovenPlotlyLayout(LEGACY_PRESET, BOEKHOVEN_PALETTE, { x: {}, y: {} })
+    expect(layout.xaxis.nticks).toBeUndefined()
+    expect(layout.margin.l).toBe(55)
+  })
+
+  it('matplotlib code carries the tick cap, dashed control and heavier lines', () => {
+    const code = matplotlibStyleCode(WILKE_PRESET, BOEKHOVEN_PALETTE)
+    expect(code).toContain('def apply_ticks(ax)')
+    expect(code).toContain('BOEKHOVEN_MAX_TICKS   = 5')
+    expect(code).toContain('"lines.linewidth": 2.2')
+    expect(code).toContain('(0, (6, 4))')
+  })
+})
 
 describe('resolvePreset', () => {
   it('fills defaults for a partial preset', () => {

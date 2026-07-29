@@ -83,6 +83,18 @@ let elnUnavailable = false           // set once if the journal_versions table i
 
 const fmtStamp = (x) => x ? new Date(x).toLocaleString() : ''
 
+// True only while the current content still matches the signed snapshot — once you
+// edit after signing, the signature no longer covers what's on screen.
+const signatureIsCurrent = computed(() =>
+    entrySignature.value ? (activeJournalEntry.value?.content || '') === (entrySignature.value.content || '') : false)
+// There are edits not yet captured as a version (drives the "current draft" row).
+const hasUnsavedDraft = computed(() => {
+    if (!showHistory.value || !activeJournalEntry.value) return false
+    const latest = versions.value[0]
+    const cur = activeJournalEntry.value.content || ''
+    return latest ? latest.content !== cur : !isBlankJournalContent(cur)
+})
+
 // Snapshot the entry's current content (skips when unchanged). Best-effort — never
 // blocks editing; only flips the "not set up" flag if the table is missing.
 async function captureVersion(entry, summary = '') {
@@ -96,7 +108,7 @@ async function refreshSignatureBadge() {
     if (!e || elnUnavailable) return
     try {
         const { data, error } = await db.from('journal_versions')
-            .select('version_no, signed_by_email, signed_at, signature_meaning')
+            .select('version_no, signed_by_email, signed_at, signature_meaning, content, content_hash')
             .eq('entry_id', e.id).eq('signed', true)
             .order('version_no', { ascending: false }).limit(1).maybeSingle()
         if (error) { if (/journal_versions|does not exist|schema cache|42P01/i.test(error.message || '')) elnUnavailable = true; return }
@@ -112,12 +124,34 @@ async function loadVersions() {
     finally { versionsBusy.value = false }
 }
 async function openHistory() {
-    await captureVersion(activeJournalEntry.value, 'Checkpoint')
+    // Opening history is a read — it must not create a version. Any unsaved edits
+    // show up as the "current draft" row instead, savable on demand.
     previewVersion.value = null; diffView.value = null; showHistory.value = true
     await loadVersions()
 }
 function closeHistory() { showHistory.value = false; previewVersion.value = null; diffView.value = null }
 function viewVersion(v) { previewVersion.value = v; diffView.value = null }
+// Preview the live, not-yet-saved content as a pseudo "draft" version.
+function viewDraft() {
+    previewVersion.value = { __draft: true, version_no: 'draft', content: activeJournalEntry.value?.content || '' }
+    diffView.value = null
+}
+// Explicit checkpoint (dedups on no-change). This is the deliberate way to record
+// a version; auto-checkpoints only happen when you finish/leave an entry.
+async function saveVersionNow() {
+    if (!activeJournalEntry.value) return
+    const note = (prompt('Optional label for this version (e.g. “before adding NMR”):', '') || '').trim()
+    try {
+        const res = await createVersion(activeJournalEntry.value, store.user, { changeSummary: note || 'Manual checkpoint' })
+        if (res.skipped) { store.toast('No changes since the last version'); return }
+        if (res.error) { store.toast('Could not save version'); return }
+        previewVersion.value = null
+        await loadVersions()
+        store.toast('Version saved')
+    } catch (e) {
+        if (e instanceof JournalVersionsTableMissing) { elnUnavailable = true; versionsErr.value = 'setup' }
+    }
+}
 function compareToNow(v) { diffView.value = { version: v, ops: diffLines(v.content, activeJournalEntry.value?.content || '') }; previewVersion.value = null }
 async function restoreVersion(v) {
     if (!confirm(`Restore version ${v.version_no}? It becomes the current content as a NEW version — no history is deleted.`)) return
@@ -893,8 +927,12 @@ onMounted(async () => {
                     <button class="secondary small" title="New lab-wide category" @click="addCategoryAndAssign(activeJournalEntry)"><i class="fas fa-plus"></i></button>
                 </div>
 
-                <span v-if="entrySignature" class="je-signed" :title="`Signed by ${entrySignature.signed_by_email} · ${fmtStamp(entrySignature.signed_at)} · ${entrySignature.signature_meaning}`">
-                    <i class="fas fa-lock"></i> Signed v{{ entrySignature.version_no }}
+                <span v-if="entrySignature" class="je-signed" :class="{ stale: !signatureIsCurrent }"
+                      :title="signatureIsCurrent
+                        ? `Signed by ${entrySignature.signed_by_email} · ${fmtStamp(entrySignature.signed_at)} · ${entrySignature.signature_meaning}`
+                        : `Edited since it was signed by ${entrySignature.signed_by_email} on ${fmtStamp(entrySignature.signed_at)}. The signed version v${entrySignature.version_no} is kept in history; re-sign to cover the current content.`">
+                    <i class="fas" :class="signatureIsCurrent ? 'fa-lock' : 'fa-lock-open'"></i>
+                    {{ signatureIsCurrent ? 'Signed v' + entrySignature.version_no : 'Signed · edited since' }}
                 </span>
 
                 <button class="secondary small" style="margin-left: auto;" :disabled="!isEntryOwner(activeJournalEntry)" :title="isEntryOwner(activeJournalEntry) ? 'Share this entry with specific users' : 'Only the owner can change sharing'" @click="openShare(activeJournalEntry)">
@@ -997,9 +1035,19 @@ onMounted(async () => {
           <div v-if="versionsBusy" class="eln-state"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
           <div v-else-if="versionsErr === 'setup'" class="eln-setup"><i class="fas fa-triangle-exclamation"></i> Version history isn’t set up yet. Run <code>supabase/journal_eln.sql</code> in the Supabase SQL editor to enable it.</div>
           <div v-else-if="versionsErr" class="eln-setup"><i class="fas fa-triangle-exclamation"></i> {{ versionsErr }}</div>
-          <div v-else class="eln-cols">
+          <template v-else>
+          <div class="eln-bar">
+            <span class="eln-note"><i class="fas fa-circle-info"></i> Versions are recorded when you finish an entry or click Save version — not on every keystroke.</span>
+            <button class="small" @click="saveVersionNow" :disabled="versionsBusy"><i class="fas fa-floppy-disk"></i> Save version</button>
+          </div>
+          <div class="eln-cols">
             <div class="eln-list">
-              <div v-if="!versions.length" class="eln-empty">No versions yet.</div>
+              <button v-if="hasUnsavedDraft" class="eln-vrow draft" :class="{ active: previewVersion && previewVersion.__draft }" @click="viewDraft">
+                <span class="eln-vno">now</span>
+                <span class="eln-vmeta"><span class="eln-vwho">Current draft</span><span class="eln-vtime">unsaved</span></span>
+                <span class="eln-vsum">Not yet a version — click Save version to keep it</span>
+              </button>
+              <div v-if="!versions.length && !hasUnsavedDraft" class="eln-empty">No versions yet.</div>
               <button v-for="v in versions" :key="v.id" class="eln-vrow"
                       :class="{ active: (previewVersion && previewVersion.id === v.id) || (diffView && diffView.version.id === v.id), signed: v.signed }"
                       @click="viewVersion(v)">
@@ -1027,19 +1075,26 @@ onMounted(async () => {
               </template>
               <template v-else-if="previewVersion">
                 <div class="eln-detail-head">
-                  <span>v{{ previewVersion.version_no }} · {{ fmtStamp(previewVersion.created_at) }}</span>
+                  <span v-if="previewVersion.__draft"><i class="fas fa-pen"></i> Current draft (unsaved)</span>
+                  <span v-else>v{{ previewVersion.version_no }} · {{ fmtStamp(previewVersion.created_at) }}</span>
                   <span v-if="previewVersion.signed" class="eln-signed-tag"><i class="fas fa-lock"></i> {{ previewVersion.signature_meaning }} — {{ (previewVersion.signed_by_email || '').split('@')[0] }}</span>
                 </div>
-                <div class="eln-hash" :title="previewVersion.content_hash">SHA-256 {{ (previewVersion.content_hash || '').slice(0, 20) }}…</div>
+                <div v-if="!previewVersion.__draft" class="eln-hash" :title="previewVersion.content_hash">SHA-256 {{ (previewVersion.content_hash || '').slice(0, 20) }}…</div>
                 <div class="eln-preview" v-html="sanitize(previewVersion.content || '<em style=&quot;opacity:.6&quot;>empty</em>')"></div>
                 <div class="eln-detail-actions">
-                  <button class="secondary small" @click="compareToNow(previewVersion)"><i class="fas fa-code-compare"></i> Compare to current</button>
-                  <button class="small" @click="restoreVersion(previewVersion)"><i class="fas fa-rotate-left"></i> Restore</button>
+                  <template v-if="previewVersion.__draft">
+                    <button class="small" @click="saveVersionNow"><i class="fas fa-floppy-disk"></i> Save version</button>
+                  </template>
+                  <template v-else>
+                    <button class="secondary small" @click="compareToNow(previewVersion)"><i class="fas fa-code-compare"></i> Compare to current</button>
+                    <button class="small" @click="restoreVersion(previewVersion)"><i class="fas fa-rotate-left"></i> Restore</button>
+                  </template>
                 </div>
               </template>
               <div v-else class="eln-detail-empty">Select a version to view it or its changes.</div>
             </div>
           </div>
+          </template>
         </div>
         <div class="sh-actions">
           <span class="eln-foot-note"><i class="fas fa-shield-halved"></i> Append-only — restoring adds a new version and never deletes history.</span>
@@ -1242,8 +1297,13 @@ onMounted(async () => {
 
 /* ── ELN: signature badge, version history, diff ── */
 .je-signed { display: inline-flex; align-items: center; gap: 5px; font-size: 0.74rem; font-weight: 700; color: var(--ok); background: rgba(0,158,115,.12); border-radius: 999px; padding: 3px 10px; }
+.je-signed.stale { color: #C77700; background: rgba(199,119,0,.12); }
 .eln-dialog { max-width: 780px; }
 .eln-body { padding: 14px 16px; }
+.eln-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.eln-note { font-size: 0.74rem; color: var(--tx2); display: inline-flex; align-items: center; gap: 6px; flex: 1; }
+.eln-vrow.draft { border-style: dashed; border-left: 3px solid #C77700; }
+.eln-vrow.draft .eln-vno { color: #C77700; }
 .eln-state, .eln-empty, .eln-detail-empty { font-size: 0.85rem; color: var(--tx2); padding: 10px 0; }
 .eln-setup { font-size: 0.85rem; color: var(--wr); padding: 10px 0; display: flex; gap: 8px; align-items: baseline; }
 .eln-setup code { font-family: ui-monospace, monospace; }

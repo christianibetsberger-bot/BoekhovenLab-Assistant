@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent: run the incoming-chemicals reader once an hour.
+
+  Install (edit the two REPLACE_ME paths first):
+    cp de.boekhovenlab.incoming-chemicals.plist ~/Library/LaunchAgents/
+    launchctl load  ~/Library/LaunchAgents/de.boekhovenlab.incoming-chemicals.plist
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/de.boekhovenlab.incoming-chemicals.plist
+
+  It runs at load and then every 3600 s while you are logged in. If the Mac is
+  asleep at the tick, launchd runs it on the next wake. Logs go to /tmp.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>de.boekhovenlab.incoming-chemicals</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>REPLACE_ME/venv/bin/python3</string>
+    <string>REPLACE_ME/tools/incoming_chemicals/reader.py</string>
+  </array>
+
+  <key>StartInterval</key>
+  <integer>3600</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/incoming-chemicals.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/incoming-chemicals.log</string>
+</dict>
+</plist>

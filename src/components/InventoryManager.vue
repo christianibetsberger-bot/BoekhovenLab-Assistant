@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { useLabStore } from '../stores/labStore'
+import { db } from '../services/supabase'
 import * as XLSX from 'xlsx'
 import { jsPDF } from 'jspdf'
 import { calcSeqExtinction, calcSeqMw, calcSeqTm, calcSeqGc } from '../utils/seqUtils'
@@ -92,6 +93,68 @@ watch(viewingItem, (item) => {
     if (item && item.pubchemCid) pubchem.value = { loading: false, error: '', img: `${PUG}/cid/${item.pubchemCid}/PNG`, formula: item.molFormula || '', mw: '', cid: item.pubchemCid }
     else pubchem.value = { loading: false, error: '', img: '', formula: '', mw: '', cid: null }
 })
+
+// ── Incoming chemicals — the hourly Shopping-List reader publishes recently
+// ordered, not-yet-arrived chemicals to Supabase; here they queue for one-tap
+// confirmation into inventory (never added automatically).
+const incoming = ref([])
+const incomingErr = ref('')      // '' | 'setup' | message
+const incomingOpen = ref(true)
+async function loadIncoming() {
+    try {
+        const { data, error } = await db.from('incoming_chemicals')
+            .select('*').eq('app_status', 'incoming').eq('arrived', false)
+            .order('ordered_at', { ascending: false })
+        if (error) { incomingErr.value = /incoming_chemicals|does not exist|schema cache|42P01/i.test(error.message || '') ? 'setup' : error.message; return }
+        incoming.value = data || []; incomingErr.value = ''
+    } catch (e) { incomingErr.value = String(e?.message || e) }
+}
+loadIncoming()
+const fmtOrdered = (d) => d ? new Date(d).toLocaleDateString() : '—'
+
+// The "Add to lab" window: a draft inventory item prefilled from the order row,
+// with a save-free PubChem lookup. Nothing is written until you confirm.
+const addDialog = ref(null)
+function openAddFromIncoming(row) {
+    const item = {
+        id: 'inv_' + crypto.randomUUID(),
+        code: '', cas: row.cas || '', itemClass: 'Other', name: row.name || '',
+        stock: null, stockUnit: 'mg/mL', location: '', sequence: '', oligoType: 'DNA',
+        manualMw: null, tm: 0, scope: inventoryMode.value,
+        vendor: row.vendor || '', catalogue: row.catalogue || '', bottleSize: row.quantity || '',
+        weblink: row.weblink || '',
+    }
+    addDialog.value = { row, item, lookup: { loading: false, error: '', img: '', formula: '', mw: '', cid: null } }
+}
+function closeAdd() { addDialog.value = null }
+async function lookupAddDialog() {
+    const d = addDialog.value; if (!d) return
+    d.lookup = { loading: true, error: '', img: '', formula: '', mw: '', cid: null }
+    try {
+        const cid = await resolveCid(d.item)
+        if (!cid) { d.lookup = { loading: false, error: 'No PubChem match — check the name or CAS.', img: '', formula: '', mw: '', cid: null }; return }
+        let formula = '', mw = ''
+        try { const pr = await fetch(`${PUG}/cid/${cid}/property/MolecularFormula,MolecularWeight/JSON`); if (pr.ok) { const p = (await pr.json())?.PropertyTable?.Properties?.[0]; formula = p?.MolecularFormula || ''; mw = p?.MolecularWeight || '' } } catch { /* non-fatal */ }
+        if (!d.item.cas) { try { const sr = await fetch(`${PUG}/cid/${cid}/synonyms/JSON`); if (sr.ok) { const syn = (await sr.json())?.InformationList?.Information?.[0]?.Synonym || []; const cas = syn.find(s => /^\d{2,7}-\d{2}-\d$/.test(s)); if (cas) d.item.cas = cas } } catch { /* non-fatal */ } }
+        d.item.pubchemCid = cid; if (formula) d.item.molFormula = formula
+        d.lookup = { loading: false, error: '', img: `${PUG}/cid/${cid}/PNG`, formula, mw, cid }
+    } catch { d.lookup = { loading: false, error: 'Lookup failed — are you online?', img: '', formula: '', mw: '', cid: null } }
+}
+async function confirmAddIncoming() {
+    const d = addDialog.value; if (!d) return
+    if (!d.item.name?.trim()) { store.toast('Give it a name'); return }
+    if (!d.item.code?.trim()) d.item.code = (d.item.name || 'NEW').trim().slice(0, 12)
+    store.inventory.unshift(d.item)
+    store.saveItemToCloud(d.item)
+    try { await db.from('incoming_chemicals').update({ app_status: 'added', updated_at: new Date().toISOString() }).eq('id', d.row.id) } catch { /* best effort */ }
+    incoming.value = incoming.value.filter(r => r.id !== d.row.id)
+    addDialog.value = null
+    store.toast('Added to inventory')
+}
+async function dismissIncoming(row) {
+    try { await db.from('incoming_chemicals').update({ app_status: 'dismissed', updated_at: new Date().toISOString() }).eq('id', row.id) } catch { /* best effort */ }
+    incoming.value = incoming.value.filter(r => r.id !== row.id)
+}
 
 // --- Local Computed ---
 const filteredInventory = computed(() => {
@@ -1169,6 +1232,35 @@ const generateLabelsPDF = () => {
     <div class="card">
         <h2><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.7 5.2 8 2.6 13.3 5.2 13.3 10.8 8 13.4 2.7 10.8Z"/><path d="M2.7 5.2 8 7.8 13.3 5.2"/><path d="M8 7.8v5.6"/></svg> Inventory</h2>
 
+        <!-- Incoming chemicals (from the hourly Shopping-List reader) -->
+        <div v-if="incoming.length" class="inc-panel">
+            <button class="inc-head" @click="incomingOpen = !incomingOpen">
+                <i class="fas" :class="incomingOpen ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
+                <i class="fas fa-truck-fast"></i>
+                <span class="inc-title">Incoming chemicals</span>
+                <span class="inc-count">{{ incoming.length }}</span>
+                <span class="inc-sub">ordered in the last 12 weeks · not yet arrived</span>
+                <span class="inc-refresh" @click.stop="loadIncoming" title="Refresh"><i class="fas fa-rotate"></i></span>
+            </button>
+            <div v-if="incomingOpen" class="inc-list">
+                <div v-for="row in incoming" :key="row.id" class="inc-row">
+                    <div class="inc-rowmain">
+                        <span class="inc-name">{{ row.name }}</span>
+                        <span class="inc-meta">
+                            <span v-if="row.vendor">{{ row.vendor }}</span>
+                            <span v-if="row.catalogue" class="inc-cat">{{ row.catalogue }}</span>
+                            <span v-if="row.quantity"> · {{ row.quantity }}</span>
+                            <span v-if="row.ordered_at"> · {{ fmtOrdered(row.ordered_at) }}</span>
+                            <span v-if="row.requested_by"> · {{ row.requested_by }}</span>
+                        </span>
+                    </div>
+                    <a v-if="row.weblink" :href="row.weblink" target="_blank" rel="noopener" class="secondary small" title="Open vendor page"><i class="fas fa-up-right-from-square"></i></a>
+                    <button class="small" @click="openAddFromIncoming(row)"><i class="fas fa-plus"></i> Add to lab</button>
+                    <button class="secondary small" @click="dismissIncoming(row)" title="Dismiss"><i class="fas fa-xmark"></i></button>
+                </div>
+            </div>
+        </div>
+
         <div class="scope-chips" style="margin-bottom: 14px;">
             <button class="scope-chip" :class="{ active: inventoryMode === 'Global' }" @click="inventoryMode = 'Global'">Lab</button>
             <button class="scope-chip" :class="{ active: inventoryMode === 'Personal' }" @click="inventoryMode = 'Personal'">Private</button>
@@ -1249,10 +1341,88 @@ const generateLabelsPDF = () => {
             <input type="file" ref="excelUpload" @change="importInventory" accept=".xlsx, .xls, .csv, .txt" style="display: none;">
         </div>
     </div>
+
+    <!-- ── Add-from-incoming window (teleported so it centres on the viewport) ── -->
+    <Teleport to="body">
+    <div v-if="addDialog" class="inc-modal" :class="{ 'dark-mode': store.isDarkMode }" @click.self="closeAdd">
+      <div class="inc-dialog">
+        <div class="inc-dialog-head"><span><i class="fas fa-flask"></i> Add to {{ inventoryMode === 'Personal' ? 'Private' : 'Lab' }} inventory</span><button class="inc-x" @click="closeAdd">✕</button></div>
+        <div class="inc-dialog-body">
+          <div class="inc-grid">
+            <label class="inc-f grow"><span>Name</span><input v-model="addDialog.item.name"></label>
+            <label class="inc-f"><span>Code</span><input v-model="addDialog.item.code" placeholder="short code"></label>
+            <label class="inc-f"><span>CAS</span><input v-model="addDialog.item.cas"></label>
+            <label class="inc-f"><span>Class</span><select v-model="addDialog.item.itemClass"><option v-for="cls in store.classOptions" :key="cls" :value="cls">{{ cls }}</option></select></label>
+            <label class="inc-f"><span>Conc / unit</span>
+              <div class="input-with-select">
+                <input type="number" step="any" v-model.number="addDialog.item.stock" style="width:70px;">
+                <select v-model="addDialog.item.stockUnit" style="border-left:none;"><option>M</option><option>mM</option><option>µM</option><option>nM</option><option>mg/mL</option><option>µg/µL</option><option>ng/µL</option><option>X</option><option>U/µL</option><option>%</option></select>
+              </div>
+            </label>
+            <label class="inc-f"><span>Location</span>
+              <select v-model="addDialog.item.location"><option value="">— none —</option><option v-for="l in locationOptions" :key="l.id" :value="l.name">{{ l.name }}</option></select>
+            </label>
+            <label class="inc-f"><span>Vendor</span><input v-model="addDialog.item.vendor"></label>
+            <label class="inc-f"><span>Catalogue #</span><input v-model="addDialog.item.catalogue"></label>
+            <label class="inc-f"><span>Bottle / pack size</span><input v-model="addDialog.item.bottleSize" placeholder="from the vendor page"></label>
+          </div>
+          <div class="inc-lookup">
+            <div class="inc-lookup-actions">
+              <button class="secondary small" @click="lookupAddDialog" :disabled="addDialog.lookup.loading"><i class="fas fa-magnifying-glass"></i> {{ addDialog.lookup.loading ? 'Looking up…' : 'PubChem lookup' }}</button>
+              <a v-if="addDialog.item.weblink" :href="addDialog.item.weblink" target="_blank" rel="noopener" class="secondary small"><i class="fas fa-up-right-from-square"></i> Vendor page</a>
+              <span v-if="addDialog.lookup.error" class="inc-err">{{ addDialog.lookup.error }}</span>
+              <span v-else-if="addDialog.lookup.formula" class="inc-ok">{{ addDialog.lookup.formula }}<template v-if="addDialog.lookup.mw"> · {{ Number(addDialog.lookup.mw).toFixed(2) }} g/mol</template></span>
+            </div>
+            <img v-if="addDialog.lookup.img" :src="addDialog.lookup.img" alt="structure" class="inc-struct">
+          </div>
+        </div>
+        <div class="inc-dialog-foot">
+          <span class="inc-hint">PubChem fills the chemical identity; bottle size comes from the vendor page (link above).</span>
+          <button class="secondary small" style="margin-left:auto;" @click="closeAdd">Cancel</button>
+          <button class="small" @click="confirmAddIncoming"><i class="fas fa-check"></i> Add to inventory</button>
+        </div>
+      </div>
+    </div>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
+/* ── Incoming chemicals ── */
+.inc-panel { border: 1px solid var(--acc); border-radius: var(--rc); background: var(--acs); margin-bottom: 14px; overflow: hidden; }
+.inc-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; background: none; border: none; box-shadow: none; cursor: pointer; color: var(--tx); text-align: left; }
+.inc-head:hover { filter: none; }
+.inc-title { font-weight: 700; font-size: 0.9rem; color: var(--acc); }
+.inc-count { font-size: 0.72rem; font-weight: 700; color: #fff; background: var(--acc); border-radius: 999px; padding: 1px 8px; }
+.inc-sub { font-size: 0.74rem; color: var(--tx2); }
+.inc-refresh { margin-left: auto; color: var(--tx2); font-size: 0.82rem; padding: 2px 6px; }
+.inc-refresh:hover { color: var(--acc); }
+.inc-list { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 10px; }
+.inc-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--surface-solid); border: 1px solid var(--ln2); border-radius: var(--rc); }
+.inc-rowmain { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.inc-name { font-size: 0.86rem; font-weight: 600; color: var(--tx); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inc-meta { font-size: 0.72rem; color: var(--tx2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inc-cat { font-family: ui-monospace, Menlo, monospace; }
+
+/* Add-from-incoming window */
+.inc-modal { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 16px; }
+.inc-dialog { background: var(--modal, var(--surface)); border: 1px solid var(--cdl, var(--border)); border-radius: var(--r, 14px); box-shadow: var(--sh); width: 100%; max-width: 620px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; }
+.inc-dialog-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; font-weight: 600; color: var(--tx); border-bottom: 1px solid var(--ln); }
+.inc-x { width: 28px; height: 28px; border-radius: 50%; background: var(--fl); color: var(--tx2); border: none; box-shadow: none; cursor: pointer; }
+.inc-dialog-body { padding: 14px 16px; overflow-y: auto; }
+.inc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.inc-f { display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; min-width: 0; }
+.inc-f.grow { grid-column: 1 / -1; }
+.inc-f > span { font-size: 0.72rem; font-weight: 600; color: var(--tx2); }
+.inc-lookup { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ln); }
+.inc-lookup-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.inc-ok { font-size: 0.78rem; color: var(--ok); font-weight: 600; }
+.inc-err { font-size: 0.78rem; color: var(--wr); }
+.inc-struct { display: block; margin-top: 10px; max-width: 220px; max-height: 200px; background: #fff; border: 1px solid var(--ln2); border-radius: var(--rc); padding: 6px; }
+.inc-dialog-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--ln); flex-wrap: wrap; }
+.inc-hint { font-size: 0.72rem; color: var(--tx2); flex: 1; min-width: 160px; }
+@media (max-width: 620px) { .inc-grid { grid-template-columns: 1fr; } }
+
 /* Dense inventory table — clearer cell definition + readable inputs. */
 .table-responsive table { font-size: 0.84rem; }
 .table-responsive table input,

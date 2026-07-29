@@ -3,7 +3,7 @@ import { ref, computed, nextTick, onMounted, onUnmounted, watch, defineAsyncComp
 import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase' // Using your Supabase client
 import { esc, sanitize } from '../utils/htmlSafe'
-import { persistJournalEntry } from '../utils/journalPersist'
+import { persistJournalEntry, isBlankJournalContent } from '../utils/journalPersist'
 import * as XLSX from 'xlsx'
 import html2pdf from 'html2pdf.js'
 import Protocols from './Protocols.vue'
@@ -59,6 +59,13 @@ const saveToDb = () => {
     clearTimeout(saveTimeout)
     const e = activeJournalEntry.value
     saveTimeout = setTimeout(() => persistEntry(e), 1000) // Saves 1 second after you stop typing
+}
+// Persist any pending debounced edit right now — on module switch or tab close —
+// so the last second of typing isn't dropped.
+const flushPendingSave = () => {
+    clearTimeout(saveTimeout)
+    const e = activeJournalEntry.value
+    if (e) persistEntry(e)
 }
 
 // Map a `journals` row into the in-memory entry shape (shared by fetch + realtime).
@@ -198,13 +205,30 @@ function onRemoteJournalChange(payload) {
     const local = store.journal.entries[idx]
     const remoteEditor = row.data?.lastEditor
     const iAmEditing = store.journal.activeId === row.id && (Date.now() - lastLocalEditAt) < 4000
-    if (iAmEditing && remoteEditor && remoteEditor !== store.user?.email) {
-        // Don't overwrite what I'm typing — surface a co-edit warning, sync only the metadata.
-        coEditNotice.value = { id: row.id, by: remoteEditor }
+
+    // Take the metadata columns from a remote row without touching the editor body.
+    const syncMetaOnly = () => {
         local.status = mapped.status; local.category = mapped.category
         local.scope = mapped.scope; local.sharedWith = mapped.sharedWith
+    }
+
+    // If I'm actively editing this entry, my editor holds the freshest content — never
+    // let a realtime row replace it, whether it's a co-editor's write or my own save
+    // echoing back (the latter used to revert the last keystrokes). Banner only when
+    // the writer is someone else.
+    if (iAmEditing) {
+        if (remoteEditor && remoteEditor !== store.user?.email) coEditNotice.value = { id: row.id, by: remoteEditor }
+        syncMetaOnly()
         return
     }
+
+    // Don't let a blank remote row wipe content we still hold (e.g. a stale tab that
+    // saved empty). Keep our body; take the rest.
+    if (isBlankJournalContent(mapped.content) && !isBlankJournalContent(local.content)) {
+        syncMetaOnly()
+        return
+    }
+
     Object.assign(local, mapped)
     if (store.journal.activeId === row.id) nextTick(() => syncEditor())
 }
@@ -212,7 +236,11 @@ function reloadCoEdited() {
     coEditNotice.value = null
     nextTick(() => syncEditor())
 }
-onUnmounted(() => { if (realtimeChannel) { try { db.removeChannel(realtimeChannel) } catch { /* noop */ } } })
+onUnmounted(() => {
+    flushPendingSave()
+    window.removeEventListener('beforeunload', flushPendingSave)
+    if (realtimeChannel) { try { db.removeChannel(realtimeChannel) } catch { /* noop */ } }
+})
 
 // ═══ Chemical structure drawing (Ketcher) + RDKit descriptors ═══════════════
 const showKetcher = ref(false)
@@ -642,6 +670,7 @@ const onEditorClick = (e) => {
 // --- Fetch from Supabase on Mount ---
 onMounted(async () => {
     if (journalEditor.value) journalEditor.value.addEventListener('click', onEditorClick)
+    window.addEventListener('beforeunload', flushPendingSave)
     const { data: { user } } = await db.auth.getUser();
 
     if (user) {

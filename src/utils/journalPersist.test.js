@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { journalEntryPayload } from './journalPersist.js'
+import { journalEntryPayload, isBlankJournalContent } from './journalPersist.js'
 
 // journalPersist imports the Supabase client at module load; stub it so the test
 // doesn't need VITE_SUPABASE_* env (absent in CI). journalEntryPayload is pure.
@@ -40,5 +40,30 @@ describe('journalEntryPayload', () => {
     expect(p.data.linkedProtocols).toEqual([])
     expect(p.scope).toBe('Personal')
     expect(p.shared_with).toEqual([])
+  })
+})
+
+// Guards the anti-overwrite safety net: a blank editor must not be allowed to
+// wipe an entry, but media/refs with no text must NOT be mistaken for blank.
+describe('isBlankJournalContent', () => {
+  it('treats empty, whitespace, and text-less markup as blank', () => {
+    expect(isBlankJournalContent('')).toBe(true)
+    expect(isBlankJournalContent('   \n ')).toBe(true)
+    expect(isBlankJournalContent('<p></p>')).toBe(true)
+    expect(isBlankJournalContent('<div><br></div>')).toBe(true)
+    expect(isBlankJournalContent('&nbsp; &nbsp;')).toBe(true)
+    expect(isBlankJournalContent(null)).toBe(true)
+  })
+
+  it('treats real text as content', () => {
+    expect(isBlankJournalContent('<p>Added 5 uL buffer</p>')).toBe(false)
+  })
+
+  it('treats embedded media and references as content even without text', () => {
+    expect(isBlankJournalContent('<table><tr><td></td></tr></table>')).toBe(false)
+    expect(isBlankJournalContent('<img src="x">')).toBe(false)
+    expect(isBlankJournalContent('<div class="chem-struct" data-ket="..."></div>')).toBe(false)
+    expect(isBlankJournalContent('<span class="file-attach"></span>')).toBe(false)
+    expect(isBlankJournalContent('<span class="inv-ref"></span>')).toBe(false)
   })
 })

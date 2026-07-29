@@ -3,7 +3,7 @@ import { ref, computed, onMounted, watch, defineAsyncComponent } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase'
 import { protocolHtml, isRecipeType } from '../utils/protocolView'
-import { mergeInstrumentList } from '../utils/instruments'
+import { mergeInstrumentGroups } from '../utils/instruments'
 
 // Ketcher is heavy (React + editor); only load it when a scheme is drawn.
 const KetcherField = defineAsyncComponent(() => import('./KetcherField.vue'))
@@ -48,10 +48,29 @@ const paramKeyPlaceholder = computed(() => {
   return 'Setting'
 })
 
-// Instrument options for the "link to instrument" field (built-ins + lab-added).
+// Instrument options come live from the Instrument Booking catalogue (built-ins +
+// lab-added rows). The choice is scoped to the protocol type: recipe types have no
+// instrument, Confocal offers only the confocal microscopes, HPLC only the HPLC
+// group, everything else the full list.
 const instrumentRows = ref([])
 onMounted(async () => { try { const { data } = await db.from('instruments').select('*'); if (data) instrumentRows.value = data } catch { /* table may not exist yet */ } })
-const instrumentOptions = computed(() => mergeInstrumentList(instrumentRows.value))
+const instrumentGroups = computed(() => mergeInstrumentGroups(instrumentRows.value))
+const allInstruments = computed(() => instrumentGroups.value.flatMap(g => g.instruments))
+const RECIPE_TYPE_LIST = ['Synthesis', 'Peptide', 'DNA']
+const showInstrumentField = computed(() => !!editing.value && !RECIPE_TYPE_LIST.includes(editing.value.type))
+const instrumentChoices = computed(() => {
+  const t = editing.value?.type
+  if (t === 'Confocal') return allInstruments.value.filter(n => n.toLowerCase().startsWith('confocal'))
+  if (t === 'HPLC') return instrumentGroups.value.find(g => g.name === 'HPLC')?.instruments || allInstruments.value
+  return allInstruments.value
+})
+// Keep the instrument valid for the current type: cleared for recipe types, and
+// dropped if it isn't among the new type's choices (e.g. switching to Confocal).
+watch(() => editing.value?.type, (t) => {
+  if (!editing.value) return
+  if (RECIPE_TYPE_LIST.includes(t)) { editing.value.instrument = ''; return }
+  if (editing.value.instrument && !instrumentChoices.value.includes(editing.value.instrument)) editing.value.instrument = ''
+})
 
 // ── Library ──
 const protocols = ref([])
@@ -127,10 +146,15 @@ async function saveScheme() {
   try {
     const ket = await k.getKet()
     let img = ''
-    try { const blob = await k.generateImage(ket, { outputFormat: 'png', backgroundColor: 'FFFFFF' }); img = await blobToDataURL(blob) } catch { /* empty canvas */ }
-    editing.value.scheme = img ? { ket, img } : null
+    for (const outputFormat of ['png', 'svg']) {
+      try { const blob = await k.generateImage(ket, { outputFormat, backgroundColor: 'FFFFFF' }); img = await blobToDataURL(blob); if (img) break } catch { /* try next format */ }
+    }
+    // A blank Ketcher canvas serializes to a tiny KET; treat that as "nothing drawn".
+    const drawn = !!img || (ket && ket.length > 60)
+    editing.value.scheme = drawn ? { ket, img } : null
+    if (!drawn) store.toast('Canvas looked empty — nothing saved')
     showScheme.value = false
-  } catch { msg.value = 'Could not read the scheme — try again.' } finally { schemeBusy.value = false }
+  } catch { store.toast('Could not read the scheme — try again') } finally { schemeBusy.value = false }
 }
 function clearScheme() { editing.value.scheme = null }
 
@@ -229,10 +253,12 @@ function linkToJournal(p) {
         <label class="pr-field"><span>Type</span><select v-model="editing.type"><option v-for="t in TYPES" :key="t" :value="t">{{ t }}</option></select></label>
         <label class="pr-field"><span>Share</span><select v-model="editing.scope"><option value="Global">Lab</option><option value="Personal">Private</option></select></label>
       </div>
-      <div class="pr-row">
-        <label class="pr-field grow"><span>Instrument <span style="font-weight:400;opacity:.6;">(shows in that instrument's logbook)</span></span>
-          <input v-model="editing.instrument" list="pr-instruments" placeholder="(optional) e.g. HPLC-MS">
-          <datalist id="pr-instruments"><option v-for="i in instrumentOptions" :key="i" :value="i"></option></datalist>
+      <div v-if="showInstrumentField" class="pr-row">
+        <label class="pr-field grow"><span>Instrument <span style="font-weight:400;opacity:.6;">(from Instrument Booking — shows in that instrument's logbook)</span></span>
+          <select v-model="editing.instrument">
+            <option value="">— none —</option>
+            <option v-for="i in instrumentChoices" :key="i" :value="i">{{ i }}</option>
+          </select>
         </label>
       </div>
       <div v-if="editing.scope !== 'Global'" class="pr-row">
@@ -439,8 +465,9 @@ function linkToJournal(p) {
       </template>
     </template>
 
-    <!-- ── Reaction scheme editor (Ketcher) ── -->
-    <div v-if="showScheme" class="pr-modal" @click.self="showScheme = false">
+    <!-- ── Reaction scheme editor (Ketcher) — teleported so it centres on the viewport ── -->
+    <Teleport to="body">
+    <div v-if="showScheme" class="pr-modal" :class="{ 'dark-mode': store.isDarkMode }" @click.self="showScheme = false">
       <div class="pr-scheme-dialog">
         <div class="pr-scheme-head"><span><i class="fas fa-diagram-project"></i> Reaction scheme</span><button class="pr-x" @click="showScheme = false">✕</button></div>
         <div class="pr-scheme-canvas">
@@ -455,6 +482,7 @@ function linkToJournal(p) {
         </div>
       </div>
     </div>
+    </Teleport>
   </div>
 </template>
 

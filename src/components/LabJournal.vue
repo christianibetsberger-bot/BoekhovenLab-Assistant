@@ -1028,7 +1028,9 @@ onMounted(async () => {
 
     <!-- ═══ Share entry ═══ -->
     <!-- ═══ ELN version history ═══ -->
-    <div v-if="showHistory" class="ket-modal" @click.self="closeHistory">
+    <!-- Modals teleported to <body> so a transformed ancestor can't push them off-centre; dark-mode class carried since they render outside #body-wrapper -->
+    <Teleport to="body">
+    <div v-if="showHistory" class="ket-modal" :class="{ 'dark-mode': store.isDarkMode }" @click.self="closeHistory">
       <div class="sh-dialog eln-dialog">
         <div class="ket-head">
           <span><i class="fas fa-clock-rotate-left"></i> Version history — {{ activeJournalEntry?.expId }}</span>
@@ -1113,7 +1115,7 @@ onMounted(async () => {
     </div>
 
     <!-- ═══ Electronic signature ═══ -->
-    <div v-if="signDialog" class="ket-modal" @click.self="closeSign">
+    <div v-if="signDialog" class="ket-modal" :class="{ 'dark-mode': store.isDarkMode }" @click.self="closeSign">
       <div class="sh-dialog">
         <div class="ket-head"><span><i class="fas fa-signature"></i> Sign “{{ activeJournalEntry?.expId }}”</span><button class="ket-x" @click="closeSign">✕</button></div>
         <div class="sh-body">
@@ -1138,7 +1140,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-if="shareDialog" class="ket-modal" @click.self="shareDialog = null">
+    <div v-if="shareDialog" class="ket-modal" :class="{ 'dark-mode': store.isDarkMode }" @click.self="shareDialog = null">
       <div class="sh-dialog">
         <div class="ket-head">
           <span><i class="fas fa-user-plus"></i> Share “{{ shareDialog.entry.expId }}”</span>
@@ -1170,7 +1172,7 @@ onMounted(async () => {
     </div>
 
     <!-- ═══ Ketcher structure editor ═══ -->
-    <div v-if="showKetcher" class="ket-modal" @click.self="showKetcher = false">
+    <div v-if="showKetcher" class="ket-modal" :class="{ 'dark-mode': store.isDarkMode }" @click.self="showKetcher = false">
       <div class="ket-dialog">
         <div class="ket-head">
           <span><i class="fas fa-atom"></i> {{ editingStructEl ? 'Edit structure' : 'Draw chemical structure' }}</span>
@@ -1216,6 +1218,7 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+    </Teleport>
   </div>
 </template>
 

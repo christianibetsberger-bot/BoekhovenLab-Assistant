@@ -64,14 +64,6 @@ const instrumentChoices = computed(() => {
   if (t === 'HPLC') return instrumentGroups.value.find(g => g.name === 'HPLC')?.instruments || allInstruments.value
   return allInstruments.value
 })
-// Keep the instrument valid for the current type: cleared for recipe types, and
-// dropped if it isn't among the new type's choices (e.g. switching to Confocal).
-watch(() => editing.value?.type, (t) => {
-  if (!editing.value) return
-  if (RECIPE_TYPE_LIST.includes(t)) { editing.value.instrument = ''; return }
-  if (editing.value.instrument && !instrumentChoices.value.includes(editing.value.instrument)) editing.value.instrument = ''
-})
-
 // ── Library ──
 const protocols = ref([])
 const loadError = ref('')
@@ -97,6 +89,13 @@ const knownProtoEmails = computed(() => [...new Set(protocols.value.flatMap(p =>
 // ── Editor ──
 const editing = ref(null)
 const msg = ref('')
+// Keep the instrument valid for the current type: cleared for recipe types, and
+// dropped if it isn't among the new type's choices (e.g. switching to Confocal).
+watch(() => editing.value?.type, (t) => {
+  if (!editing.value) return
+  if (RECIPE_TYPE_LIST.includes(t)) { editing.value.instrument = ''; return }
+  if (editing.value.instrument && !instrumentChoices.value.includes(editing.value.instrument)) editing.value.instrument = ''
+})
 function newProtocol() { editing.value = blank(); msg.value = '' }
 function editProtocol(p) {
   editing.value = JSON.parse(JSON.stringify(p))

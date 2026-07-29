@@ -1,14 +1,17 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, defineAsyncComponent } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase'
-import { protocolHtml } from '../utils/protocolView'
+import { protocolHtml, isRecipeType } from '../utils/protocolView'
 import { mergeInstrumentList } from '../utils/instruments'
+
+// Ketcher is heavy (React + editor); only load it when a scheme is drawn.
+const KetcherField = defineAsyncComponent(() => import('./KetcherField.vue'))
 
 const store = useLabStore()
 const props = defineProps({ openId: { type: String, default: '' } })
 
-const TYPES = ['HPLC', 'Confocal', 'Synthesis', 'Stock prep', 'General']
+const TYPES = ['HPLC', 'Confocal', 'Synthesis', 'Peptide', 'DNA', 'Stock prep', 'General']
 const uuid = () => 'proto_' + (globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2))
 
 function blank(type = 'HPLC') {
@@ -19,11 +22,31 @@ function blank(type = 'HPLC') {
     eluents: { A: '', B: '', C: '', D: '' },
     gradient: [{ time: 0, pctB: 5, curve: 5 }, { time: 20, pctB: 95, curve: 5 }],
     peaks: [],
+    // Synthesis / Peptide / DNA (recipe model)
+    scheme: null,                 // { ket, img } reaction scheme drawn in Ketcher
+    sequence: '', scale: null, scaleUnit: type === 'DNA' ? 'µmol' : 'mmol',
+    reagents: [],                 // [{ name, amount, equiv }]
+    steps: [],                    // [{ text, temp, time, atmosphere }]
     // Generic / other
     params: [],
     procedure: '',
   }
 }
+const isRecipe = computed(() => !!editing.value && isRecipeType(editing.value.type))
+const paramsLabel = computed(() => {
+  const t = editing.value?.type
+  if (t === 'Confocal') return 'Confocal settings'
+  if (t === 'Peptide' || t === 'DNA') return 'Synthesizer settings'
+  if (t === 'Synthesis') return 'Other conditions'
+  return 'Parameters'
+})
+const paramKeyPlaceholder = computed(() => {
+  const t = editing.value?.type
+  if (t === 'Confocal') return 'e.g. Laser 488 nm power'
+  if (t === 'Peptide') return 'e.g. Resin / Coupling / Deprotection'
+  if (t === 'DNA') return 'e.g. Activator / Oxidizer / Cap'
+  return 'Setting'
+})
 
 // Instrument options for the "link to instrument" field (built-ins + lab-added).
 const instrumentRows = ref([])
@@ -56,11 +79,60 @@ const knownProtoEmails = computed(() => [...new Set(protocols.value.flatMap(p =>
 const editing = ref(null)
 const msg = ref('')
 function newProtocol() { editing.value = blank(); msg.value = '' }
-function editProtocol(p) { editing.value = JSON.parse(JSON.stringify(p)); if (!editing.value.eluents) editing.value.eluents = { A: '', B: '', C: '', D: '' }; if (!editing.value.gradient) editing.value.gradient = []; if (!editing.value.peaks) editing.value.peaks = []; if (!editing.value.params) editing.value.params = []; if (!editing.value.sharedWith) editing.value.sharedWith = []; msg.value = '' }
+function editProtocol(p) {
+  editing.value = JSON.parse(JSON.stringify(p))
+  const e = editing.value
+  if (!e.eluents) e.eluents = { A: '', B: '', C: '', D: '' }
+  if (!e.gradient) e.gradient = []
+  if (!e.peaks) e.peaks = []
+  if (!e.params) e.params = []
+  if (!e.sharedWith) e.sharedWith = []
+  // Recipe fields (older protocols predate them)
+  if (e.scheme === undefined) e.scheme = null
+  if (e.sequence === undefined) e.sequence = ''
+  if (e.scale === undefined) e.scale = null
+  if (!e.scaleUnit) e.scaleUnit = e.type === 'DNA' ? 'µmol' : 'mmol'
+  if (!e.reagents) e.reagents = []
+  if (!e.steps) e.steps = []
+  msg.value = ''
+}
 function cancelEdit() { editing.value = null }
 function addGradRow() { editing.value.gradient.push({ time: (editing.value.gradient.at(-1)?.time || 0) + 5, pctB: 95, curve: 5 }) }
 function addPeak() { editing.value.peaks.push({ name: '', rt: null }) }
 function addParam() { editing.value.params.push({ key: '', value: '' }) }
+
+// ── Recipe (reagents + steps) ──
+function addReagent() { editing.value.reagents.push({ name: '', amount: '', equiv: '' }) }
+function addStep() { editing.value.steps.push({ text: '', temp: null, time: '', atmosphere: '' }) }
+function moveStep(i, d) {
+  const s = editing.value.steps, j = i + d
+  if (j < 0 || j >= s.length) return
+  ;[s[i], s[j]] = [s[j], s[i]]
+}
+
+// ── Reaction scheme (Ketcher) ──
+const showScheme = ref(false)
+let schemeKetcher = null
+const schemeReady = ref(false)
+const schemeBusy = ref(false)
+const schemeInitKet = ref('')
+function openScheme() { schemeInitKet.value = editing.value.scheme?.ket || ''; schemeReady.value = false; showScheme.value = true }
+function onSchemeReady(k) { schemeKetcher = k; schemeReady.value = true }
+watch(showScheme, (open) => { if (!open) schemeKetcher = null })
+function blobToDataURL(blob) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob) }) }
+async function saveScheme() {
+  const k = schemeKetcher
+  if (!k) return
+  schemeBusy.value = true
+  try {
+    const ket = await k.getKet()
+    let img = ''
+    try { const blob = await k.generateImage(ket, { outputFormat: 'png', backgroundColor: 'FFFFFF' }); img = await blobToDataURL(blob) } catch { /* empty canvas */ }
+    editing.value.scheme = img ? { ket, img } : null
+    showScheme.value = false
+  } catch { msg.value = 'Could not read the scheme — try again.' } finally { schemeBusy.value = false }
+}
+function clearScheme() { editing.value.scheme = null }
 
 // Share with specific users (emails)
 const shareInput = ref('')
@@ -238,13 +310,74 @@ function linkToJournal(p) {
         </div>
       </template>
 
-      <!-- Parameters (all types) -->
+      <!-- Reaction scheme (Synthesis) -->
+      <div v-if="editing.type === 'Synthesis'" class="pr-mini">
+        <div class="pr-mini-head"><span>Reaction scheme</span>
+          <span>
+            <button class="pr-link" @click="openScheme"><i class="fas fa-pen-nib"></i> {{ editing.scheme ? 'Edit' : 'Draw' }} scheme</button>
+            <button v-if="editing.scheme" class="pr-link danger" @click="clearScheme">Clear</button>
+          </span>
+        </div>
+        <div v-if="editing.scheme?.img" class="pr-scheme" @click="openScheme"><img :src="editing.scheme.img" alt="Reaction scheme"></div>
+        <div v-else class="pr-scheme-empty" @click="openScheme">Draw reactants → products with the reaction-arrow tool; put reagents/conditions above the arrow.</div>
+      </div>
+
+      <!-- Sequence + scale (Peptide / DNA) -->
+      <div v-if="editing.type === 'Peptide' || editing.type === 'DNA'" class="pr-row">
+        <label class="pr-field grow"><span>Sequence ({{ editing.type === 'DNA' ? "5'→3'" : 'N→C' }})</span>
+          <input v-model="editing.sequence" :placeholder="editing.type === 'DNA' ? 'e.g. 5-ACGT ATCG GGCC-3' : 'e.g. H-FLFLF-NH2 (one- or three-letter)'">
+        </label>
+        <label class="pr-field"><span>Scale</span><input type="number" step="any" v-model.number="editing.scale"></label>
+        <label class="pr-field"><span>Unit</span><select v-model="editing.scaleUnit"><option>µmol</option><option>mmol</option><option>mg</option><option>g</option></select></label>
+      </div>
+
+      <!-- Reagents (recipe types) -->
+      <div v-if="isRecipe" class="pr-mini">
+        <div class="pr-mini-head"><span>Reagents</span><button class="pr-link" @click="addReagent">+ reagent</button></div>
+        <table class="pr-table"><thead><tr><th>Reagent</th><th>Amount</th><th>Equiv</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="(r, i) in editing.reagents" :key="i">
+              <td><input v-model="r.name" placeholder="e.g. Fmoc-Ala-OH / DIC"></td>
+              <td><input v-model="r.amount" placeholder="e.g. 3 mmol"></td>
+              <td><input v-model="r.equiv" placeholder="e.g. 3"></td>
+              <td><button class="pr-link danger" @click="editing.reagents.splice(i, 1)">×</button></td>
+            </tr>
+            <tr v-if="!editing.reagents.length"><td colspan="4" style="opacity:.5;font-size:.78rem;">No reagents yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Procedure steps with conditions (recipe types) -->
+      <div v-if="isRecipe" class="pr-mini">
+        <div class="pr-mini-head"><span>Procedure steps</span><button class="pr-link" @click="addStep">+ step</button></div>
+        <div class="pr-steps">
+          <div v-for="(s, i) in editing.steps" :key="i" class="pr-step">
+            <span class="pr-step-no">{{ i + 1 }}</span>
+            <div class="pr-step-body">
+              <textarea v-model="s.text" rows="2" placeholder="What to do in this step…"></textarea>
+              <div class="pr-step-conds">
+                <label>Temp (°C) <input type="number" step="any" v-model.number="s.temp" placeholder="rt"></label>
+                <label>Time <input v-model="s.time" placeholder="e.g. 2 h"></label>
+                <label>Atmosphere <input v-model="s.atmosphere" placeholder="e.g. N₂"></label>
+              </div>
+            </div>
+            <div class="pr-step-actions">
+              <button class="pr-link" @click="moveStep(i, -1)" :disabled="i === 0" title="Move up">↑</button>
+              <button class="pr-link" @click="moveStep(i, 1)" :disabled="i === editing.steps.length - 1" title="Move down">↓</button>
+              <button class="pr-link danger" @click="editing.steps.splice(i, 1)" title="Remove">×</button>
+            </div>
+          </div>
+          <div v-if="!editing.steps.length" class="pr-empty">No steps yet — add the first step.</div>
+        </div>
+      </div>
+
+      <!-- Parameters / synthesizer settings (all types) -->
       <div class="pr-mini">
-        <div class="pr-mini-head"><span>{{ editing.type === 'Confocal' ? 'Confocal settings' : 'Parameters' }}</span><button class="pr-link" @click="addParam">+ parameter</button></div>
+        <div class="pr-mini-head"><span>{{ paramsLabel }}</span><button class="pr-link" @click="addParam">+ parameter</button></div>
         <table class="pr-table"><thead><tr><th>Setting</th><th>Value</th><th></th></tr></thead>
           <tbody><tr v-for="(r, i) in editing.params" :key="i">
-            <td><input v-model="r.key" :placeholder="editing.type === 'Confocal' ? 'e.g. Laser 488 nm power' : 'Setting'"></td>
-            <td><input v-model="r.value" :placeholder="editing.type === 'Confocal' ? 'e.g. 5 %' : 'Value'"></td>
+            <td><input v-model="r.key" :placeholder="paramKeyPlaceholder"></td>
+            <td><input v-model="r.value" placeholder="Value"></td>
             <td><button class="pr-link danger" @click="editing.params.splice(i, 1)">×</button></td>
           </tr>
           <tr v-if="!editing.params.length"><td colspan="3" style="opacity:.5;font-size:.78rem;">No parameters yet.</td></tr></tbody>
@@ -305,6 +438,23 @@ function linkToJournal(p) {
         </div>
       </template>
     </template>
+
+    <!-- ── Reaction scheme editor (Ketcher) ── -->
+    <div v-if="showScheme" class="pr-modal" @click.self="showScheme = false">
+      <div class="pr-scheme-dialog">
+        <div class="pr-scheme-head"><span><i class="fas fa-diagram-project"></i> Reaction scheme</span><button class="pr-x" @click="showScheme = false">✕</button></div>
+        <div class="pr-scheme-canvas">
+          <div v-if="!schemeReady" class="pr-scheme-loading"><i class="fas fa-spinner fa-spin"></i> Loading structure editor…</div>
+          <KetcherField :initial-ket="schemeInitKet" @ready="onSchemeReady" />
+        </div>
+        <div class="pr-scheme-foot">
+          <span class="pr-hint">Use the reaction-arrow tool to link reactants → products; add reagents/conditions above the arrow.</span>
+          <span v-if="schemeBusy" class="pr-msg"><i class="fas fa-spinner fa-spin"></i> Saving…</span>
+          <button class="secondary small" style="margin-left:auto;" @click="showScheme = false">Cancel</button>
+          <button class="small" @click="saveScheme" :disabled="schemeBusy || !schemeReady"><i class="fas fa-check"></i> Save scheme</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -345,4 +495,32 @@ function linkToJournal(p) {
 .pr-link.danger { color: var(--danger-color); font-size: 0.95rem; }
 .pr-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--ln); }
 .pr-msg { font-size: 0.78rem; color: var(--tx2); }
+
+/* Reaction scheme preview */
+.pr-scheme { border: 1px solid var(--ln2); border-radius: var(--rc); padding: 8px; background: #fff; cursor: pointer; text-align: center; }
+.pr-scheme img { max-width: 100%; max-height: 260px; }
+.pr-scheme-empty { border: 1px dashed var(--ln2); border-radius: var(--rc); padding: 16px; font-size: 0.78rem; color: var(--tx3); text-align: center; cursor: pointer; }
+.pr-scheme-empty:hover, .pr-scheme:hover { border-color: var(--acc); }
+
+/* Recipe steps */
+.pr-steps { display: flex; flex-direction: column; gap: 8px; }
+.pr-step { display: flex; gap: 8px; align-items: flex-start; padding: 8px; border: 1px solid var(--ln2); border-radius: var(--rc); background: var(--surface-solid); }
+.pr-step-no { flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--acs); color: var(--acc); font-size: 0.74rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.pr-step-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.pr-step-body textarea { width: 100%; resize: vertical; }
+.pr-step-conds { display: flex; flex-wrap: wrap; gap: 8px; }
+.pr-step-conds label { display: inline-flex; align-items: center; gap: 5px; font-size: 0.7rem; color: var(--tx2); }
+.pr-step-conds input { width: 90px; padding: 4px 6px; }
+.pr-step-actions { display: flex; flex-direction: column; gap: 2px; flex: none; }
+.pr-step-actions .pr-link:disabled { opacity: 0.3; cursor: default; }
+
+/* Ketcher scheme modal */
+.pr-modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 16px; }
+.pr-scheme-dialog { background: var(--modal, var(--surface)); border: 1px solid var(--cdl, var(--border)); border-radius: var(--r, 14px); box-shadow: var(--sh); width: 100%; max-width: 900px; display: flex; flex-direction: column; overflow: hidden; }
+.pr-scheme-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; font-weight: 600; color: var(--tx); border-bottom: 1px solid var(--ln); }
+.pr-x { width: 28px; height: 28px; border-radius: 50%; background: var(--fl); color: var(--tx2); border: none; box-shadow: none; cursor: pointer; font-size: 13px; }
+.pr-scheme-canvas { position: relative; }
+.pr-scheme-loading { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--surface-solid); color: var(--tx2); font-size: 0.85rem; }
+.pr-scheme-foot { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--ln); flex-wrap: wrap; }
+.pr-hint { font-size: 0.72rem; color: var(--tx2); flex: 1; min-width: 160px; }
 </style>

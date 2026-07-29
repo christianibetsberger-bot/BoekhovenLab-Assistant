@@ -77,6 +77,9 @@ const versionsBusy = ref(false)
 const versionsErr = ref('')          // '' | 'setup' | error message
 const previewVersion = ref(null)     // a past version shown read-only
 const diffView = ref(null)           // { version, ops } — a version compared to now
+const historyFilter = ref('all')     // 'all' | 'signed' — timeline filter
+const shownVersions = computed(() => historyFilter.value === 'signed' ? versions.value.filter(v => v.signed) : versions.value)
+const signedCount = computed(() => versions.value.filter(v => v.signed).length)
 const signDialog = ref(null)         // { meaning, password, msg, busy }
 const entrySignature = ref(null)     // latest signature on the active entry (header badge)
 let elnUnavailable = false           // set once if the journal_versions table is absent
@@ -1037,18 +1040,22 @@ onMounted(async () => {
           <div v-else-if="versionsErr" class="eln-setup"><i class="fas fa-triangle-exclamation"></i> {{ versionsErr }}</div>
           <template v-else>
           <div class="eln-bar">
-            <span class="eln-note"><i class="fas fa-circle-info"></i> Versions are recorded when you finish an entry or click Save version — not on every keystroke.</span>
+            <div class="eln-filter">
+              <button class="scope-chip" :class="{ active: historyFilter === 'all' }" @click="historyFilter = 'all'">All versions</button>
+              <button class="scope-chip" :class="{ active: historyFilter === 'signed' }" @click="historyFilter = 'signed'"><i class="fas fa-lock"></i> Signed{{ signedCount ? ' (' + signedCount + ')' : '' }}</button>
+            </div>
             <button class="small" @click="saveVersionNow" :disabled="versionsBusy"><i class="fas fa-floppy-disk"></i> Save version</button>
           </div>
+          <div class="eln-hint"><i class="fas fa-circle-info"></i> Versions are recorded when you finish an entry or click Save version — not on every keystroke.</div>
           <div class="eln-cols">
             <div class="eln-list">
-              <button v-if="hasUnsavedDraft" class="eln-vrow draft" :class="{ active: previewVersion && previewVersion.__draft }" @click="viewDraft">
+              <button v-if="hasUnsavedDraft && historyFilter === 'all'" class="eln-vrow draft" :class="{ active: previewVersion && previewVersion.__draft }" @click="viewDraft">
                 <span class="eln-vno">now</span>
                 <span class="eln-vmeta"><span class="eln-vwho">Current draft</span><span class="eln-vtime">unsaved</span></span>
                 <span class="eln-vsum">Not yet a version — click Save version to keep it</span>
               </button>
-              <div v-if="!versions.length && !hasUnsavedDraft" class="eln-empty">No versions yet.</div>
-              <button v-for="v in versions" :key="v.id" class="eln-vrow"
+              <div v-if="!shownVersions.length && !(hasUnsavedDraft && historyFilter === 'all')" class="eln-empty">{{ historyFilter === 'signed' ? 'No signed versions yet — use the ✍ Sign button to sign this entry.' : 'No versions yet.' }}</div>
+              <button v-for="v in shownVersions" :key="v.id" class="eln-vrow"
                       :class="{ active: (previewVersion && previewVersion.id === v.id) || (diffView && diffView.version.id === v.id), signed: v.signed }"
                       @click="viewVersion(v)">
                 <span class="eln-vno">v{{ v.version_no }}</span>
@@ -1056,8 +1063,10 @@ onMounted(async () => {
                   <span class="eln-vwho">{{ (v.author_email || '').split('@')[0] || '—' }}</span>
                   <span class="eln-vtime">{{ fmtStamp(v.created_at) }}</span>
                 </span>
-                <span v-if="v.signed" class="eln-vsig" title="Signed version"><i class="fas fa-lock"></i></span>
-                <span v-if="v.change_summary" class="eln-vsum">{{ v.change_summary }}</span>
+                <span v-if="v.change_summary && !v.signed" class="eln-vsum">{{ v.change_summary }}</span>
+                <span v-if="v.signed" class="eln-vsigline">
+                  <i class="fas fa-lock"></i> Signed by {{ (v.signed_by_email || '').split('@')[0] }} · {{ fmtStamp(v.signed_at) }}<template v-if="v.signature_meaning"> · {{ v.signature_meaning }}</template>
+                </span>
               </button>
             </div>
             <div class="eln-detail">
@@ -1300,10 +1309,16 @@ onMounted(async () => {
 .je-signed.stale { color: #C77700; background: rgba(199,119,0,.12); }
 .eln-dialog { max-width: 780px; }
 .eln-body { padding: 14px 16px; }
-.eln-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.eln-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.eln-filter { display: inline-flex; }
+.eln-filter .scope-chip { display: inline-flex; align-items: center; gap: 5px; }
+.eln-hint { font-size: 0.74rem; color: var(--tx2); display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
 .eln-note { font-size: 0.74rem; color: var(--tx2); display: inline-flex; align-items: center; gap: 6px; flex: 1; }
 .eln-vrow.draft { border-style: dashed; border-left: 3px solid #C77700; }
 .eln-vrow.draft .eln-vno { color: #C77700; }
+.eln-vrow.signed { background: rgba(0,158,115,.07); }
+.eln-vsigline { grid-column: 1 / -1; display: inline-flex; align-items: baseline; gap: 5px; font-size: 0.7rem; font-weight: 600; color: var(--ok); margin-top: 2px; }
+.eln-vsigline i { font-size: 0.66rem; }
 .eln-state, .eln-empty, .eln-detail-empty { font-size: 0.85rem; color: var(--tx2); padding: 10px 0; }
 .eln-setup { font-size: 0.85rem; color: var(--wr); padding: 10px 0; display: flex; gap: 8px; align-items: baseline; }
 .eln-setup code { font-family: ui-monospace, monospace; }

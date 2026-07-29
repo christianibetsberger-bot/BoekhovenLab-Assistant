@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase'
+import { vendorLinks } from '../utils/vendorSearch'
 import * as XLSX from 'xlsx'
 import { jsPDF } from 'jspdf'
 import { calcSeqExtinction, calcSeqMw, calcSeqTm, calcSeqGc } from '../utils/seqUtils'
@@ -945,6 +946,10 @@ const generateLabelsPDF = () => {
                         </div>
                     </div>
                     <div v-else-if="!pubchem.loading && !pubchem.error" style="font-size: 0.76rem; color: var(--tx3); margin-top: 8px;">Looks up the compound by CAS or name and shows its 2D structure.</div>
+                    <div class="inv-vendors">
+                        <span class="inv-vendors-label"><i class="fas fa-store"></i> Look up on vendor:</span>
+                        <a v-for="v in vendorLinks(viewingItem)" :key="v.key" :href="v.url" target="_blank" rel="noopener" class="secondary small">{{ v.name }} <i class="fas fa-up-right-from-square" style="font-size:.7em;"></i></a>
+                    </div>
                 </div>
             </template>
             <div style="display: flex; gap: 12px; align-items: flex-end; margin-top: 15px;">
@@ -1369,9 +1374,13 @@ const generateLabelsPDF = () => {
           <div class="inc-lookup">
             <div class="inc-lookup-actions">
               <button class="secondary small" @click="lookupAddDialog" :disabled="addDialog.lookup.loading"><i class="fas fa-magnifying-glass"></i> {{ addDialog.lookup.loading ? 'Looking up…' : 'PubChem lookup' }}</button>
-              <a v-if="addDialog.item.weblink" :href="addDialog.item.weblink" target="_blank" rel="noopener" class="secondary small"><i class="fas fa-up-right-from-square"></i> Vendor page</a>
+              <a v-if="addDialog.item.weblink" :href="addDialog.item.weblink" target="_blank" rel="noopener" class="secondary small"><i class="fas fa-up-right-from-square"></i> Order link</a>
               <span v-if="addDialog.lookup.error" class="inc-err">{{ addDialog.lookup.error }}</span>
               <span v-else-if="addDialog.lookup.formula" class="inc-ok">{{ addDialog.lookup.formula }}<template v-if="addDialog.lookup.mw"> · {{ Number(addDialog.lookup.mw).toFixed(2) }} g/mol</template></span>
+            </div>
+            <div class="inv-vendors">
+              <span class="inv-vendors-label"><i class="fas fa-store"></i> Look up on vendor:</span>
+              <a v-for="v in vendorLinks(addDialog.item)" :key="v.key" :href="v.url" target="_blank" rel="noopener" class="secondary small">{{ v.name }} <i class="fas fa-up-right-from-square" style="font-size:.7em;"></i></a>
             </div>
             <img v-if="addDialog.lookup.img" :src="addDialog.lookup.img" alt="structure" class="inc-struct">
           </div>
@@ -1388,6 +1397,10 @@ const generateLabelsPDF = () => {
 </template>
 
 <style scoped>
+/* Vendor lookup buttons (item view + add window) */
+.inv-vendors { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.inv-vendors-label { font-size: 0.74rem; font-weight: 600; color: var(--tx2); display: inline-flex; align-items: center; gap: 5px; }
+
 /* ── Incoming chemicals ── */
 .inc-panel { border: 1px solid var(--acc); border-radius: var(--rc); background: var(--acs); margin-bottom: 14px; overflow: hidden; }
 .inc-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; background: none; border: none; box-shadow: none; cursor: pointer; color: var(--tx); text-align: left; }

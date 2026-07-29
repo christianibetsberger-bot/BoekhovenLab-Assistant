@@ -4,6 +4,8 @@ import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase' // Using your Supabase client
 import { esc, sanitize } from '../utils/htmlSafe'
 import { persistJournalEntry, isBlankJournalContent } from '../utils/journalPersist'
+import { createVersion, listVersions, signCurrent, JournalVersionsTableMissing } from '../utils/journalVersions'
+import { diffLines } from '../utils/textDiff'
 import * as XLSX from 'xlsx'
 import html2pdf from 'html2pdf.js'
 import Protocols from './Protocols.vue'
@@ -67,6 +69,91 @@ const flushPendingSave = () => {
     const e = activeJournalEntry.value
     if (e) persistEntry(e)
 }
+
+// ═══ ELN: version history + Part 11-style electronic signatures ═════════════
+const showHistory = ref(false)
+const versions = ref([])
+const versionsBusy = ref(false)
+const versionsErr = ref('')          // '' | 'setup' | error message
+const previewVersion = ref(null)     // a past version shown read-only
+const diffView = ref(null)           // { version, ops } — a version compared to now
+const signDialog = ref(null)         // { meaning, password, msg, busy }
+const entrySignature = ref(null)     // latest signature on the active entry (header badge)
+let elnUnavailable = false           // set once if the journal_versions table is absent
+
+const fmtStamp = (x) => x ? new Date(x).toLocaleString() : ''
+
+// Snapshot the entry's current content (skips when unchanged). Best-effort — never
+// blocks editing; only flips the "not set up" flag if the table is missing.
+async function captureVersion(entry, summary = '') {
+    if (!entry || elnUnavailable) return
+    try { await createVersion(entry, store.user, { changeSummary: summary }) }
+    catch (e) { if (e instanceof JournalVersionsTableMissing) elnUnavailable = true }
+}
+async function refreshSignatureBadge() {
+    entrySignature.value = null
+    const e = activeJournalEntry.value
+    if (!e || elnUnavailable) return
+    try {
+        const { data, error } = await db.from('journal_versions')
+            .select('version_no, signed_by_email, signed_at, signature_meaning')
+            .eq('entry_id', e.id).eq('signed', true)
+            .order('version_no', { ascending: false }).limit(1).maybeSingle()
+        if (error) { if (/journal_versions|does not exist|schema cache|42P01/i.test(error.message || '')) elnUnavailable = true; return }
+        entrySignature.value = data || null
+    } catch { /* ignore */ }
+}
+async function loadVersions() {
+    const e = activeJournalEntry.value
+    if (!e) return
+    versionsBusy.value = true; versionsErr.value = ''
+    try { versions.value = await listVersions(e.id) }
+    catch (err) { versionsErr.value = err instanceof JournalVersionsTableMissing ? 'setup' : (err.message || String(err)) }
+    finally { versionsBusy.value = false }
+}
+async function openHistory() {
+    await captureVersion(activeJournalEntry.value, 'Checkpoint')
+    previewVersion.value = null; diffView.value = null; showHistory.value = true
+    await loadVersions()
+}
+function closeHistory() { showHistory.value = false; previewVersion.value = null; diffView.value = null }
+function viewVersion(v) { previewVersion.value = v; diffView.value = null }
+function compareToNow(v) { diffView.value = { version: v, ops: diffLines(v.content, activeJournalEntry.value?.content || '') }; previewVersion.value = null }
+async function restoreVersion(v) {
+    if (!confirm(`Restore version ${v.version_no}? It becomes the current content as a NEW version — no history is deleted.`)) return
+    activeJournalEntry.value.content = v.content
+    lastLocalEditAt = Date.now()
+    syncEditor()
+    await persistEntry(activeJournalEntry.value)
+    await captureVersion(activeJournalEntry.value, `Restored v${v.version_no}`)
+    await loadVersions()
+    store.toast(`Restored version ${v.version_no}`)
+}
+function openSign() { signDialog.value = { meaning: '', password: '', msg: '', busy: false } }
+function closeSign() { signDialog.value = null }
+async function doSign() {
+    const d = signDialog.value
+    if (!d.meaning.trim()) { d.msg = 'State the meaning of your signature.'; return }
+    if (!d.password) { d.msg = 'Enter your password.'; return }
+    d.busy = true; d.msg = 'Signing…'
+    const res = await signCurrent(activeJournalEntry.value, store.user, { password: d.password, meaning: d.meaning })
+    d.busy = false
+    if (res.error) { d.msg = res.error; return }
+    signDialog.value = null
+    store.toast('Entry signed')
+    await refreshSignatureBadge()
+    if (showHistory.value) await loadVersions()
+}
+
+// When you switch entries, snapshot the one you're leaving (if it changed) and
+// refresh the signature badge for the one you land on.
+watch(() => store.journal.activeId, (newId, oldId) => {
+    if (oldId && oldId !== newId) {
+        const prev = store.journal.entries.find(e => e.id === oldId)
+        if (prev) captureVersion(prev, 'Auto-checkpoint')
+    }
+    refreshSignatureBadge()
+})
 
 // Map a `journals` row into the in-memory entry shape (shared by fetch + realtime).
 function mapRow(row) {
@@ -237,6 +324,7 @@ function reloadCoEdited() {
     nextTick(() => syncEditor())
 }
 onUnmounted(() => {
+    captureVersion(activeJournalEntry.value, 'Auto-checkpoint')
     flushPendingSave()
     window.removeEventListener('beforeunload', flushPendingSave)
     if (realtimeChannel) { try { db.removeChannel(realtimeChannel) } catch { /* noop */ } }
@@ -698,6 +786,7 @@ onMounted(async () => {
         if (store.journal.entries.length > 0) {
             store.journal.activeId = store.journal.entries[0].id;
             nextTick(() => syncEditor());
+            refreshSignatureBadge();
         }
         subscribeRealtime();
     }
@@ -773,6 +862,8 @@ onMounted(async () => {
                     <input type="date" v-model="activeJournalEntry.date" @change="updateHeaderAndSave">
                 </div>
                 <div style="display: flex; align-items: flex-end; gap: 8px;">
+                    <button class="small" @click="openHistory" title="Version history &amp; changes"><i class="fas fa-clock-rotate-left"></i></button>
+                    <button class="small" @click="openSign" title="Sign this entry (electronic signature)"><i class="fas fa-signature"></i></button>
                     <button class="small" @click="exportJournal('pdf')" title="Export to PDF"><i class="fas fa-file-pdf"></i></button>
                     <button class="small" @click="exportJournal('word')" title="Export to Word"><i class="fas fa-file-word"></i></button>
                     <button class="small" @click="exportJournal('excel')" title="Export to Excel"><i class="fas fa-file-excel"></i></button>
@@ -801,6 +892,10 @@ onMounted(async () => {
                     </select>
                     <button class="secondary small" title="New lab-wide category" @click="addCategoryAndAssign(activeJournalEntry)"><i class="fas fa-plus"></i></button>
                 </div>
+
+                <span v-if="entrySignature" class="je-signed" :title="`Signed by ${entrySignature.signed_by_email} · ${fmtStamp(entrySignature.signed_at)} · ${entrySignature.signature_meaning}`">
+                    <i class="fas fa-lock"></i> Signed v{{ entrySignature.version_no }}
+                </span>
 
                 <button class="secondary small" style="margin-left: auto;" :disabled="!isEntryOwner(activeJournalEntry)" :title="isEntryOwner(activeJournalEntry) ? 'Share this entry with specific users' : 'Only the owner can change sharing'" @click="openShare(activeJournalEntry)">
                     <i class="fas fa-user-plus"></i> {{ shareSummary(activeJournalEntry) }}
@@ -891,6 +986,94 @@ onMounted(async () => {
     <Protocols v-else :open-id="openProtocolId" />
 
     <!-- ═══ Share entry ═══ -->
+    <!-- ═══ ELN version history ═══ -->
+    <div v-if="showHistory" class="ket-modal" @click.self="closeHistory">
+      <div class="sh-dialog eln-dialog">
+        <div class="ket-head">
+          <span><i class="fas fa-clock-rotate-left"></i> Version history — {{ activeJournalEntry?.expId }}</span>
+          <button class="ket-x" @click="closeHistory">✕</button>
+        </div>
+        <div class="eln-body">
+          <div v-if="versionsBusy" class="eln-state"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+          <div v-else-if="versionsErr === 'setup'" class="eln-setup"><i class="fas fa-triangle-exclamation"></i> Version history isn’t set up yet. Run <code>supabase/journal_eln.sql</code> in the Supabase SQL editor to enable it.</div>
+          <div v-else-if="versionsErr" class="eln-setup"><i class="fas fa-triangle-exclamation"></i> {{ versionsErr }}</div>
+          <div v-else class="eln-cols">
+            <div class="eln-list">
+              <div v-if="!versions.length" class="eln-empty">No versions yet.</div>
+              <button v-for="v in versions" :key="v.id" class="eln-vrow"
+                      :class="{ active: (previewVersion && previewVersion.id === v.id) || (diffView && diffView.version.id === v.id), signed: v.signed }"
+                      @click="viewVersion(v)">
+                <span class="eln-vno">v{{ v.version_no }}</span>
+                <span class="eln-vmeta">
+                  <span class="eln-vwho">{{ (v.author_email || '').split('@')[0] || '—' }}</span>
+                  <span class="eln-vtime">{{ fmtStamp(v.created_at) }}</span>
+                </span>
+                <span v-if="v.signed" class="eln-vsig" title="Signed version"><i class="fas fa-lock"></i></span>
+                <span v-if="v.change_summary" class="eln-vsum">{{ v.change_summary }}</span>
+              </button>
+            </div>
+            <div class="eln-detail">
+              <template v-if="diffView">
+                <div class="eln-detail-head">
+                  <span><i class="fas fa-code-compare"></i> Changes: v{{ diffView.version.version_no }} → current</span>
+                  <button class="secondary small" @click="viewVersion(diffView.version)">View full</button>
+                </div>
+                <div class="eln-diff">
+                  <div v-for="(op, i) in diffView.ops" :key="i" class="eln-diff-line" :class="op.type">
+                    <span class="eln-diff-sign">{{ op.type === 'add' ? '+' : op.type === 'del' ? '−' : '' }}</span>{{ op.text || ' ' }}
+                  </div>
+                  <div v-if="!diffView.ops.some(o => o.type !== 'ctx')" class="eln-empty">No textual changes since this version.</div>
+                </div>
+              </template>
+              <template v-else-if="previewVersion">
+                <div class="eln-detail-head">
+                  <span>v{{ previewVersion.version_no }} · {{ fmtStamp(previewVersion.created_at) }}</span>
+                  <span v-if="previewVersion.signed" class="eln-signed-tag"><i class="fas fa-lock"></i> {{ previewVersion.signature_meaning }} — {{ (previewVersion.signed_by_email || '').split('@')[0] }}</span>
+                </div>
+                <div class="eln-hash" :title="previewVersion.content_hash">SHA-256 {{ (previewVersion.content_hash || '').slice(0, 20) }}…</div>
+                <div class="eln-preview" v-html="sanitize(previewVersion.content || '<em style=&quot;opacity:.6&quot;>empty</em>')"></div>
+                <div class="eln-detail-actions">
+                  <button class="secondary small" @click="compareToNow(previewVersion)"><i class="fas fa-code-compare"></i> Compare to current</button>
+                  <button class="small" @click="restoreVersion(previewVersion)"><i class="fas fa-rotate-left"></i> Restore</button>
+                </div>
+              </template>
+              <div v-else class="eln-detail-empty">Select a version to view it or its changes.</div>
+            </div>
+          </div>
+        </div>
+        <div class="sh-actions">
+          <span class="eln-foot-note"><i class="fas fa-shield-halved"></i> Append-only — restoring adds a new version and never deletes history.</span>
+          <button class="secondary small" style="margin-left: auto;" @click="closeHistory">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Electronic signature ═══ -->
+    <div v-if="signDialog" class="ket-modal" @click.self="closeSign">
+      <div class="sh-dialog">
+        <div class="ket-head"><span><i class="fas fa-signature"></i> Sign “{{ activeJournalEntry?.expId }}”</span><button class="ket-x" @click="closeSign">✕</button></div>
+        <div class="sh-body">
+          <p class="eln-sign-intro">Your electronic signature records who you are, the exact time, and your stated intent, and binds them to a SHA-256 hash of the current content. It writes a locked, signed version — nothing existing is changed.</p>
+          <label class="sh-label">Meaning of signature</label>
+          <select v-model="signDialog.meaning">
+            <option value="">— choose, or type below —</option>
+            <option>Reviewed and approved</option>
+            <option>Authored — record complete</option>
+            <option>Witnessed</option>
+          </select>
+          <input v-model="signDialog.meaning" placeholder="…or type a custom meaning">
+          <label class="sh-label">Confirm your password</label>
+          <input type="password" v-model="signDialog.password" placeholder="Your account password" @keydown.enter.prevent="doSign">
+          <p v-if="signDialog.msg" class="eln-sign-msg">{{ signDialog.msg }}</p>
+        </div>
+        <div class="sh-actions">
+          <span class="eln-foot-note">Signing as <b>{{ store.user?.email }}</b></span>
+          <button class="secondary small" style="margin-left: auto;" @click="closeSign" :disabled="signDialog.busy">Cancel</button>
+          <button class="small" @click="doSign" :disabled="signDialog.busy"><i class="fas fa-lock"></i> Sign</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="shareDialog" class="ket-modal" @click.self="shareDialog = null">
       <div class="sh-dialog">
         <div class="ket-head">
@@ -1056,4 +1239,38 @@ onMounted(async () => {
 .journal-container {
   flex: 1;
 }
+
+/* ── ELN: signature badge, version history, diff ── */
+.je-signed { display: inline-flex; align-items: center; gap: 5px; font-size: 0.74rem; font-weight: 700; color: var(--ok); background: rgba(0,158,115,.12); border-radius: 999px; padding: 3px 10px; }
+.eln-dialog { max-width: 780px; }
+.eln-body { padding: 14px 16px; }
+.eln-state, .eln-empty, .eln-detail-empty { font-size: 0.85rem; color: var(--tx2); padding: 10px 0; }
+.eln-setup { font-size: 0.85rem; color: var(--wr); padding: 10px 0; display: flex; gap: 8px; align-items: baseline; }
+.eln-setup code { font-family: ui-monospace, monospace; }
+.eln-cols { display: flex; gap: 14px; min-height: 320px; }
+.eln-list { width: 250px; flex: none; display: flex; flex-direction: column; gap: 4px; max-height: 60vh; overflow-y: auto; border-right: 1px solid var(--ln); padding-right: 10px; }
+.eln-vrow { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 8px; align-items: center; text-align: left; padding: 7px 9px; border: 1px solid var(--ln2); border-radius: var(--rc); background: var(--fl); cursor: pointer; box-shadow: none; color: var(--tx); }
+.eln-vrow:hover { border-color: var(--acc); filter: none; }
+.eln-vrow.active { border-color: var(--acc); background: var(--acs); }
+.eln-vrow.signed { border-left: 3px solid var(--ok); }
+.eln-vno { font-weight: 700; font-size: 0.8rem; color: var(--acc); }
+.eln-vmeta { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+.eln-vwho { font-size: 0.8rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eln-vtime { font-size: 0.68rem; color: var(--tx3); }
+.eln-vsig { color: var(--ok); }
+.eln-vsum { grid-column: 1 / -1; font-size: 0.7rem; color: var(--tx2); }
+.eln-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.eln-detail-head { font-size: 0.82rem; font-weight: 600; color: var(--tx); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
+.eln-signed-tag { font-size: 0.72rem; color: var(--ok); font-weight: 600; }
+.eln-hash { font-family: ui-monospace, monospace; font-size: 0.68rem; color: var(--tx3); }
+.eln-preview { border: 1px solid var(--ln2); border-radius: var(--rc); padding: 10px; max-height: 42vh; overflow: auto; font-size: 0.85rem; background: var(--surface-solid); color: var(--tx); }
+.eln-detail-actions { display: flex; gap: 8px; }
+.eln-diff { border: 1px solid var(--ln2); border-radius: var(--rc); overflow: auto; max-height: 50vh; font-family: ui-monospace, monospace; font-size: 0.78rem; }
+.eln-diff-line { display: flex; gap: 6px; padding: 1px 8px; white-space: pre-wrap; color: var(--tx); }
+.eln-diff-line .eln-diff-sign { width: 10px; flex: none; opacity: .6; }
+.eln-diff-line.add { background: rgba(0,158,115,.14); }
+.eln-diff-line.del { background: rgba(213,94,0,.14); text-decoration: line-through; opacity: .8; }
+.eln-foot-note { font-size: 0.72rem; color: var(--tx2); }
+.eln-sign-intro { font-size: 0.82rem; color: var(--tx2); line-height: 1.5; margin: 0; }
+.eln-sign-msg { font-size: 0.8rem; color: var(--wr); margin: 0; }
 </style>

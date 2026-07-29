@@ -4,6 +4,7 @@ import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase'
 import { INSTRUMENT_CATEGORIES, mergeInstrumentGroups, isBuiltinInstrument, categoryOf } from '../utils/instruments'
 import { protocolHtml, protocolSummary } from '../utils/protocolView'
+import { getOrCreateFeedToken, rotateFeedToken, feedUrls, CalendarTokenTableMissing } from '../utils/calendarFeed'
 
 const store = useLabStore()
 
@@ -335,6 +336,51 @@ async function removeMeeting() {
 }
 function scrollMtgMorning() { nextTick(() => { if (mtgEl.value) mtgEl.value.scrollTop = 7 * HOUR_H }) }
 
+// ── Calendar sync — subscribe Apple/Google Calendar to a personal meetings feed ──
+// The feed is served by the `calendar-feed` Edge Function; the app only ever hands
+// the user their private link. Subscribing is opt-in and per person.
+const syncDialog = ref(false)
+const syncBusy = ref(false)
+const syncUrls = ref(null)      // { https, webcal, google } once a token is loaded
+const syncErr = ref('')         // '' | 'setup' | error message
+const copiedKey = ref('')       // which link was last copied (for the ✓ flash)
+async function openSync() {
+  syncDialog.value = true; syncErr.value = ''; copiedKey.value = ''
+  if (syncUrls.value) return
+  await loadFeed()
+}
+async function loadFeed() {
+  if (!store.user?.id) { syncErr.value = 'Sign in to get your calendar link.'; return }
+  syncBusy.value = true; syncErr.value = ''
+  try {
+    const token = await getOrCreateFeedToken(store.user)
+    syncUrls.value = feedUrls(token)
+  } catch (e) {
+    syncErr.value = e instanceof CalendarTokenTableMissing ? 'setup' : ('Couldn’t load your link: ' + (e.message || e))
+  } finally { syncBusy.value = false }
+}
+async function regenerateFeed() {
+  if (!confirm('Generate a new link and revoke the old one?\nCalendars still using the old link will stop updating until re-added.')) return
+  syncBusy.value = true; syncErr.value = ''; copiedKey.value = ''
+  try {
+    const token = await rotateFeedToken(store.user)
+    syncUrls.value = feedUrls(token)
+    store.toast('New calendar link generated')
+  } catch (e) {
+    syncErr.value = e instanceof CalendarTokenTableMissing ? 'setup' : ('Couldn’t regenerate: ' + (e.message || e))
+  } finally { syncBusy.value = false }
+}
+async function copyLink(key) {
+  const url = syncUrls.value?.[key]
+  if (!url) return
+  try {
+    await navigator.clipboard.writeText(url)
+    copiedKey.value = key
+    setTimeout(() => { if (copiedKey.value === key) copiedKey.value = '' }, 1800)
+  } catch { window.prompt('Copy this link:', url) }
+}
+function closeSync() { syncDialog.value = false }
+
 // ══ Instrument errors / maintenance log ══
 const errors = ref([])
 async function loadErrors() {
@@ -514,7 +560,8 @@ watch(view, (v) => { if (v === 'calendar') scrollToMorning(); if (v === 'meeting
         <button class="secondary small" @click="goToday" :class="{ 'is-today': isTodayView }">Today</button>
         <button class="secondary small" @click="shiftDay(1)"><i class="fas fa-chevron-right"></i></button>
         <span class="bk-daylabel">{{ dayLabel }}</span>
-        <button class="small" style="margin-left:auto;" @click="newMeetingAt(null)"><i class="fas fa-plus"></i> New meeting</button>
+        <button class="secondary small" style="margin-left:auto;" @click="openSync"><i class="fas fa-calendar-plus"></i> Sync to calendar</button>
+        <button class="small" @click="newMeetingAt(null)"><i class="fas fa-plus"></i> New meeting</button>
       </div>
       <div ref="mtgEl" class="cal">
         <div class="cal-bodyrow">
@@ -715,6 +762,48 @@ watch(view, (v) => { if (v === 'calendar') scrollToMorning(); if (v === 'meeting
           <div class="bk-dialog-actions">
             <span v-if="mtgMsg" class="bk-msg">{{ mtgMsg }}</span>
             <button class="small" style="margin-left:auto;" @click="saveMeeting"><i class="fas fa-check"></i> {{ mtgDialog.mode === 'edit' ? 'Save' : 'Create' }}</button>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ════ CALENDAR SYNC DIALOG ════ -->
+    <div v-if="syncDialog" class="bk-modal" @click.self="closeSync">
+      <div class="bk-dialog">
+        <div class="bk-dialog-head"><span><i class="fas fa-calendar-plus"></i> Sync meetings to your calendar</span><button class="bk-x" @click="closeSync">✕</button></div>
+
+        <p class="sy-intro">Subscribe once and your calendar keeps itself up to date — new, changed, and cancelled meetings flow through automatically. The link shows only the meetings shared with you.</p>
+
+        <div v-if="syncBusy" class="sy-state"><i class="fas fa-spinner fa-spin"></i> Loading your link…</div>
+
+        <div v-else-if="syncErr === 'setup'" class="bk-error" style="margin:0;">
+          <i class="fas fa-triangle-exclamation"></i> Calendar sync isn’t set up yet. Run <code>supabase/calendar_sync.sql</code> in Supabase and deploy the <code>calendar-feed</code> function (<code>--no-verify-jwt</code>). Details are in the SQL file.
+        </div>
+        <div v-else-if="syncErr" class="bk-error" style="margin:0;"><i class="fas fa-triangle-exclamation"></i> {{ syncErr }} <button class="secondary small" @click="loadFeed">Retry</button></div>
+
+        <template v-else-if="syncUrls">
+          <div class="sy-actions">
+            <a class="sy-btn primary" :href="syncUrls.webcal"><i class="fab fa-apple"></i> Add to Apple Calendar</a>
+            <a class="sy-btn" :href="syncUrls.google" target="_blank" rel="noopener"><i class="fab fa-google"></i> Add to Google Calendar</a>
+          </div>
+
+          <div class="sy-link">
+            <span class="sy-link-label">Feed link (paste into any calendar app)</span>
+            <div class="sy-link-row">
+              <input class="sy-link-input" :value="syncUrls.https" readonly @focus="$event.target.select()">
+              <button class="small" @click="copyLink('https')"><i class="fas" :class="copiedKey === 'https' ? 'fa-check' : 'fa-copy'"></i> {{ copiedKey === 'https' ? 'Copied' : 'Copy' }}</button>
+            </div>
+          </div>
+
+          <details class="sy-help">
+            <summary>How to add it manually</summary>
+            <p><b>Apple Calendar (iPhone/Mac):</b> the button above opens Calendar and asks you to subscribe. Or: Calendar → File → New Calendar Subscription → paste the feed link.</p>
+            <p><b>Google Calendar:</b> the button opens the “from URL” screen. Or: Other calendars → <i class="fas fa-plus"></i> → From URL → paste the link. Google refreshes subscribed URLs every few hours.</p>
+          </details>
+
+          <div class="sy-foot">
+            <span class="bk-hint"><i class="fas fa-lock"></i> Keep this link private — anyone with it can see your meetings.</span>
+            <button class="secondary small" @click="regenerateFeed" :disabled="syncBusy"><i class="fas fa-rotate"></i> Regenerate</button>
           </div>
         </template>
       </div>
@@ -927,4 +1016,22 @@ watch(view, (v) => { if (v === 'calendar') scrollToMorning(); if (v === 'meeting
 .bk-view-row > b { color: var(--tx); }
 .bk-dialog-actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
 .bk-msg { font-size: 0.78rem; color: var(--wr); }
+
+/* Calendar sync dialog */
+.sy-intro { font-size: 0.82rem; color: var(--tx2); line-height: 1.5; margin: 0 0 14px; }
+.sy-state { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--tx2); padding: 10px 0; }
+.sy-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.sy-btn { flex: 1; min-width: 150px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 12px; border-radius: var(--rc); border: 1px solid var(--ln2); background: var(--fl); color: var(--tx); font-size: 0.82rem; font-weight: 600; text-decoration: none; cursor: pointer; }
+.sy-btn:hover { border-color: var(--acc); color: var(--acc); }
+.sy-btn.primary { background: var(--acc); color: #fff; border-color: transparent; box-shadow: 0 2px 6px var(--acsh); }
+.sy-btn.primary:hover { color: #fff; filter: brightness(1.05); }
+.sy-link { margin-bottom: 12px; }
+.sy-link-label { display: block; font-size: 0.72rem; font-weight: 600; color: var(--tx2); margin-bottom: 4px; }
+.sy-link-row { display: flex; gap: 6px; }
+.sy-link-input { flex: 1; min-width: 0; font: 0.76rem ui-monospace, Menlo, monospace; color: var(--tx2); }
+.sy-help { font-size: 0.8rem; color: var(--tx2); border-top: 1px solid var(--ln); padding-top: 10px; }
+.sy-help summary { cursor: pointer; font-weight: 600; color: var(--tx); }
+.sy-help p { margin: 8px 0 0; line-height: 1.5; }
+.sy-foot { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.sy-foot .bk-hint { flex: 1; }
 </style>

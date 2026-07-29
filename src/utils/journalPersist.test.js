@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { journalEntryPayload } from './journalPersist.js'
+
+// journalPersist imports the Supabase client at module load; stub it so the test
+// doesn't need VITE_SUPABASE_* env (absent in CI). journalEntryPayload is pure.
+vi.mock('../services/supabase', () => ({ db: {} }))
 
 // This payload shape is shared by LabJournal's autosave and the store's
 // cross-module "Log to Journal" writes. If the two ever disagree, logged content

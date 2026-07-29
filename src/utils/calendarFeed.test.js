@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 
+// calendarFeed imports the Supabase client at module load; stub it so the test
+// doesn't need VITE_SUPABASE_* env (absent in CI). feedUrls only reads env.
+vi.mock('../services/supabase', () => ({ db: {} }))
+
 // feedUrls reads VITE_SUPABASE_URL at call time, so stub it per test.
 async function withBase(base, fn) {
   vi.stubEnv('VITE_SUPABASE_URL', base)

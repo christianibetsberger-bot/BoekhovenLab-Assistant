@@ -138,20 +138,59 @@ function openScheme() { schemeInitKet.value = editing.value.scheme?.ket || ''; s
 function onSchemeReady(k) { schemeKetcher = k; schemeReady.value = true }
 watch(showScheme, (open) => { if (!open) schemeKetcher = null })
 function blobToDataURL(blob) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob) }) }
+// Rasterize an SVG data-URL onto a canvas → PNG data-URL (sanitizer-safe, renders
+// anywhere a plain <img> does).
+function svgToPng(svgUrl, w, h) {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas'); c.width = w; c.height = h
+        const ctx = c.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h)
+        ctx.drawImage(img, 0, 0, w, h)
+        resolve(c.toDataURL('image/png'))
+      } catch { resolve('') }
+    }
+    img.onerror = () => resolve('')
+    img.src = svgUrl
+  })
+}
+// Get a picture of the scheme. Ketcher's generateImage needs the Indigo worker
+// (flaky under the app's base path); the reliable path is the SVG Ketcher already
+// drew in the DOM, rasterized to PNG.
+async function captureSchemeImage(k, ket) {
+  try {
+    const blob = await k.generateImage(ket, { outputFormat: 'png', backgroundColor: 'FFFFFF' })
+    const url = await blobToDataURL(blob)
+    if (url && url.length > 200) return url
+  } catch { /* Indigo unavailable — fall back to the DOM SVG */ }
+  const host = document.querySelector('.pr-scheme-canvas')
+  if (!host) return ''
+  let svg = host.querySelector('svg.cliparea')
+  if (!svg) { let best = 0; host.querySelectorAll('svg').forEach(s => { const r = s.getBoundingClientRect(); const a = r.width * r.height; if (a > best) { best = a; svg = s } }) }
+  if (!svg) return ''
+  try {
+    const clone = svg.cloneNode(true)
+    let w = 640, h = 420
+    try { const b = svg.getBBox(); if (b && b.width) { w = Math.ceil(b.width + 40); h = Math.ceil(b.height + 40); clone.setAttribute('viewBox', `${b.x - 20} ${b.y - 20} ${w} ${h}`) } } catch { /* getBBox can throw */ }
+    clone.setAttribute('width', w); clone.setAttribute('height', h)
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+    const xml = new XMLSerializer().serializeToString(clone)
+    const svgUrl = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(xml)))
+    return (await svgToPng(svgUrl, w, h)) || svgUrl
+  } catch { return '' }
+}
 async function saveScheme() {
   const k = schemeKetcher
   if (!k) return
   schemeBusy.value = true
   try {
     const ket = await k.getKet()
-    let img = ''
-    for (const outputFormat of ['png', 'svg']) {
-      try { const blob = await k.generateImage(ket, { outputFormat, backgroundColor: 'FFFFFF' }); img = await blobToDataURL(blob); if (img) break } catch { /* try next format */ }
-    }
-    // A blank Ketcher canvas serializes to a tiny KET; treat that as "nothing drawn".
-    const drawn = !!img || (ket && ket.length > 60)
+    const img = await captureSchemeImage(k, ket)
+    const drawn = !!img || (ket && ket.length > 60)   // blank canvas → tiny KET
     editing.value.scheme = drawn ? { ket, img } : null
     if (!drawn) store.toast('Canvas looked empty — nothing saved')
+    else if (!img) store.toast('Saved, but the preview image could not be generated')
     showScheme.value = false
   } catch { store.toast('Could not read the scheme — try again') } finally { schemeBusy.value = false }
 }

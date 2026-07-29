@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { db } from '../services/supabase'
+import { persistJournalEntry } from '../utils/journalPersist'
 
 // Debounce timer for layout cloud saves (layout changes on every drag event)
 let _layoutSaveTimer = null
@@ -302,6 +303,11 @@ export const useLabStore = defineStore('lab', {
       if (!entry) return false
       entry.content = (entry.content || '') + html
       this.journalNeedsSync++
+      // Persist right away. The Log buttons live in other modules, so LabJournal
+      // (whose watcher normally saves) is unmounted — without this the append is
+      // lost when LabJournal next mounts and re-fetches from Supabase.
+      // Fire-and-forget so callers keep their synchronous boolean result.
+      persistJournalEntry(entry, this.user?.email)
       return true
     },
 

@@ -3,6 +3,7 @@ import { ref, computed, nextTick, onMounted, onUnmounted, watch, defineAsyncComp
 import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase' // Using your Supabase client
 import { esc, sanitize } from '../utils/htmlSafe'
+import { persistJournalEntry } from '../utils/journalPersist'
 import * as XLSX from 'xlsx'
 import html2pdf from 'html2pdf.js'
 import Protocols from './Protocols.vue'
@@ -51,30 +52,9 @@ function unlinkProtocol(id) {
 // --- Auto-Save Logic (Debounced to prevent spamming DB) ---
 let saveTimeout;
 let lastLocalEditAt = 0;   // used to avoid clobbering while co-editing
-function entryPayload(e) {
-    return {
-        data: {
-            expId: e.expId, date: e.date, content: e.content,
-            linkedProtocols: e.linkedProtocols || [],
-            status: e.status || 'in_progress', category: e.category || '',
-            ownerEmail: e.owner_email || store.user?.email || '',
-            lastEditor: store.user?.email || '',
-        },
-        scope: e.scope || 'Personal',
-        shared_with: e.sharedWith || [],
-    }
-}
-// Persist an entry. Retries without the sharing columns if they haven't been
-// added to the table yet, so status/content still save either way.
-async function persistEntry(e) {
-    if (!e || !e.id || typeof e.id !== 'string') return
-    const payload = entryPayload(e)
-    let { error } = await db.from('journals').update(payload).eq('id', e.id)
-    if (error && /shared_with|scope|column|schema/i.test(error.message)) {
-        ({ error } = await db.from('journals').update({ data: payload.data }).eq('id', e.id))
-    }
-    if (error) console.error('journal save failed:', error)
-}
+// Persistence lives in ../utils/journalPersist so the store's cross-module "Log
+// to Journal" writes use the exact same row shape as this component's autosave.
+const persistEntry = (e) => persistJournalEntry(e, store.user?.email)
 const saveToDb = () => {
     clearTimeout(saveTimeout)
     const e = activeJournalEntry.value

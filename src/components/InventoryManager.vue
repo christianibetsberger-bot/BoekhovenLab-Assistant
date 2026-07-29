@@ -128,6 +128,17 @@ function openAddFromIncoming(row) {
     addDialog.value = { row, item, lookup: { loading: false, error: '', img: '', formula: '', mw: '', cid: null } }
 }
 function closeAdd() { addDialog.value = null }
+// The main "Add to Lab/Private" entry point — opens the same window with a blank
+// draft, all specification fields, and the PubChem + vendor lookups.
+function openAddNew() {
+    const item = {
+        id: 'inv_' + crypto.randomUUID(), code: '', cas: '', itemClass: 'Other', name: '',
+        stock: null, stockUnit: 'µM', location: '', sequence: '', oligoType: 'DNA',
+        manualMw: null, tm: 0, scope: inventoryMode.value,
+        vendor: '', catalogue: '', bottleSize: '', weblink: '',
+    }
+    addDialog.value = { row: null, item, lookup: { loading: false, error: '', img: '', formula: '', mw: '', cid: null } }
+}
 async function lookupAddDialog() {
     const d = addDialog.value; if (!d) return
     d.lookup = { loading: true, error: '', img: '', formula: '', mw: '', cid: null }
@@ -141,14 +152,26 @@ async function lookupAddDialog() {
         d.lookup = { loading: false, error: '', img: `${PUG}/cid/${cid}/PNG`, formula, mw, cid }
     } catch { d.lookup = { loading: false, error: 'Lookup failed — are you online?', img: '', formula: '', mw: '', cid: null } }
 }
-async function confirmAddIncoming() {
+async function confirmAdd() {
     const d = addDialog.value; if (!d) return
     if (!d.item.name?.trim()) { store.toast('Give it a name'); return }
     if (!d.item.code?.trim()) d.item.code = (d.item.name || 'NEW').trim().slice(0, 12)
+    // Oligos: derive length / extinction / MW / Tm from the sequence.
+    if ((d.item.itemClass === 'DNA' || d.item.itemClass === 'RNA') && d.item.sequence?.trim()) {
+        d.item.oligoType = d.item.oligoType || d.item.itemClass
+        const cleanSeq = d.item.sequence.replace(/\[.*?\]/g, '').toUpperCase().replace(/[^ACGTU]/g, '')
+        d.item.length = cleanSeq.length
+        d.item.extinction = calcSeqExtinction(d.item.sequence, d.item.oligoType)
+        d.item.mw = d.item.manualMw ? d.item.manualMw : calcSeqMw(d.item.sequence, d.item.oligoType)
+        d.item.tm = calcSeqTm(d.item.sequence)
+        d.item.gc = calcSeqGc(d.item.sequence)
+    }
     store.inventory.unshift(d.item)
     store.saveItemToCloud(d.item)
-    try { await db.from('incoming_chemicals').update({ app_status: 'added', updated_at: new Date().toISOString() }).eq('id', d.row.id) } catch { /* best effort */ }
-    incoming.value = incoming.value.filter(r => r.id !== d.row.id)
+    if (d.row) {   // came from the Incoming queue → mark the order row handled
+        try { await db.from('incoming_chemicals').update({ app_status: 'added', updated_at: new Date().toISOString() }).eq('id', d.row.id) } catch { /* best effort */ }
+        incoming.value = incoming.value.filter(r => r.id !== d.row.id)
+    }
     addDialog.value = null
     store.toast('Added to inventory')
 }
@@ -207,11 +230,6 @@ const saveViewingItem = () => {
         store.promoteLocationToGlobal(viewingItem.value.location)
     store.saveItemToCloud(viewingItem.value)
     viewingItem.value = null
-}
-const addInventoryItem = () => {
-    const newItem = { id: 'inv_' + crypto.randomUUID(), code: 'NEW', cas: '', itemClass: 'Other', name: 'New Stock', stock: 100, stockUnit: 'µM', location: '', sequence: '', oligoType: 'DNA', manualMw: null, tm: 0, scope: inventoryMode.value };
-    store.inventory.unshift(newItem);
-    store.saveItemToCloud(newItem);
 }
 const removeInventoryItem = (id) => {
     const idx = store.inventory.findIndex(i => i.id === id);
@@ -1330,7 +1348,7 @@ const generateLabelsPDF = () => {
         </div>
 
         <div style="display: flex; gap: 10px; margin-top: 15px;">
-            <button @click="addInventoryItem" style="flex-grow: 1; height: 40px;"><i class="fas fa-plus"></i> Add to {{ inventoryMode === 'Personal' ? 'Private' : 'Lab' }}</button>
+            <button @click="openAddNew" style="flex-grow: 1; height: 40px;"><i class="fas fa-plus"></i> Add to {{ inventoryMode === 'Personal' ? 'Private' : 'Lab' }}</button>
             <button @click="importTargetMode = inventoryMode; excelUpload.click()" style="flex-grow: 1; height: 40px;">
                 <i class="fas fa-file-excel"></i> Import
             </button>
@@ -1358,6 +1376,7 @@ const generateLabelsPDF = () => {
             <label class="inc-f"><span>Code</span><input v-model="addDialog.item.code" placeholder="short code"></label>
             <label class="inc-f"><span>CAS</span><input v-model="addDialog.item.cas"></label>
             <label class="inc-f"><span>Class</span><select v-model="addDialog.item.itemClass"><option v-for="cls in store.classOptions" :key="cls" :value="cls">{{ cls }}</option></select></label>
+            <label v-if="addDialog.item.itemClass === 'DNA' || addDialog.item.itemClass === 'RNA'" class="inc-f grow"><span>Sequence (5'→3')</span><textarea v-model="addDialog.item.sequence" rows="2" placeholder="e.g. ACGT ATCG GGCC — length, MW &amp; Tm are computed on add"></textarea></label>
             <label class="inc-f"><span>Conc / unit</span>
               <div class="input-with-select">
                 <input type="number" step="any" v-model.number="addDialog.item.stock" style="width:70px;">
@@ -1388,7 +1407,7 @@ const generateLabelsPDF = () => {
         <div class="inc-dialog-foot">
           <span class="inc-hint">PubChem fills the chemical identity; bottle size comes from the vendor page (link above).</span>
           <button class="secondary small" style="margin-left:auto;" @click="closeAdd">Cancel</button>
-          <button class="small" @click="confirmAddIncoming"><i class="fas fa-check"></i> Add to inventory</button>
+          <button class="small" @click="confirmAdd"><i class="fas fa-check"></i> Add to inventory</button>
         </div>
       </div>
     </div>

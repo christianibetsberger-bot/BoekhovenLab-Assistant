@@ -40,6 +40,9 @@ export const useLabStore = defineStore('lab', {
     // Predefined storage locations. Global ones are shared with everyone; Personal ones
     // are only visible to their creator. Each: { id, name, scope, owner_id }.
     locations: [],
+    // Saved buffers for the Phase Predictor's Na⁺ media. Each: { id, name, naMM, pH }.
+    // Personal to the user, persisted in prefs.
+    buffers: [],
     sourceLabwares: [
         { uuid: 'eda1c3ac-a089-4244-b0bc-9e5beb322475', name: '0.5 mL DNA LoBind microtube' },
         { uuid: '201812180800', name: '1.5 mL Fisherbrand Premium microtube' },
@@ -426,6 +429,7 @@ export const useLabStore = defineStore('lab', {
         if (p.isDarkMode     !== undefined) this.isDarkMode     = p.isDarkMode;
         if (p.uiSettings)                   this.uiSettings     = { ...this.uiSettings,     ...p.uiSettings };
         if (p.globalSettings)               this.globalSettings = { ...this.globalSettings, ...p.globalSettings };
+        if (Array.isArray(p.buffers))       this.buffers        = p.buffers;
         // Apply theme to DOM without re-triggering a cloud save
         this.applyThemeToDOM();
         // Keep localStorage in sync with cloud truth
@@ -446,9 +450,30 @@ export const useLabStore = defineStore('lab', {
         isDarkMode:     this.isDarkMode,
         uiSettings:     { ...this.uiSettings },
         globalSettings: { ...this.globalSettings },
+        buffers:        [...this.buffers],
       };
       localStorage.setItem(`lab_user_prefs_${this.user.id}`, JSON.stringify(prefs));
       this.saveCloudSettings({ prefs });
+    },
+
+    // ── Phase Predictor buffer library (personal, stored in prefs) ───────────
+    addBuffer(buf) {
+      const b = { id: 'buf_' + (globalThis.crypto?.randomUUID?.() || Date.now().toString(36)), name: (buf.name || '').trim(), naMM: Number(buf.naMM) || 0, pH: buf.pH == null ? 7.0 : Number(buf.pH) };
+      this.buffers.push(b);
+      this.saveUserPreferences();
+      return b;
+    },
+    updateBuffer(id, patch) {
+      const b = this.buffers.find(x => x.id === id);
+      if (!b) return;
+      if (patch.name != null) b.name = String(patch.name).trim();
+      if (patch.naMM != null) b.naMM = Number(patch.naMM) || 0;
+      if (patch.pH != null) b.pH = Number(patch.pH);
+      this.saveUserPreferences();
+    },
+    removeBuffer(id) {
+      this.buffers = this.buffers.filter(b => b.id !== id);
+      this.saveUserPreferences();
     },
 
     loadUserPreferences() {
@@ -460,6 +485,7 @@ export const useLabStore = defineStore('lab', {
         if (prefs.isDarkMode     !== undefined) this.isDarkMode     = prefs.isDarkMode;
         if (prefs.uiSettings)                   this.uiSettings     = { ...this.uiSettings,     ...prefs.uiSettings };
         if (prefs.globalSettings)               this.globalSettings = { ...this.globalSettings, ...prefs.globalSettings };
+        if (Array.isArray(prefs.buffers))       this.buffers        = prefs.buffers;
       } catch { /* corrupted cache — ignore */ }
       this.applyThemeToDOM();
     },

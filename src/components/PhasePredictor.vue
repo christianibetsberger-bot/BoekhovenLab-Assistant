@@ -223,9 +223,12 @@
                   <option value="water">MQ Water</option>
                   <option value="buffer">Buffer</option>
                 </select>
-                <input v-if="config.anionMedium.type === 'buffer'" type="text" v-model="config.anionMedium.bufName" placeholder="e.g. Tris-HCl 50 mM" style="font-size:0.78rem; padding:3px 5px;">
+                <PhaseBufferSelect v-if="config.anionMedium.type === 'buffer'" :medium="config.anionMedium" />
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
-                <input v-if="config.anionMedium.type === 'buffer'" type="number" v-model.number="config.anionMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
+                <template v-if="config.anionMedium.type === 'buffer'">
+                  <input v-if="!config.anionMedium.bufferId" type="number" v-model.number="config.anionMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
+                  <span v-else class="na-locked" title="Locked from the selected buffer"><i class="fas fa-lock"></i> {{ config.anionMedium.naMM }}</span>
+                </template>
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
                 <input v-if="config.anionMedium.type === 'buffer'" type="number" v-model.number="config.anionMedium.pH" step="0.1" min="0" max="14" placeholder="7.0" style="font-size:0.78rem; padding:3px 5px;">
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
@@ -238,9 +241,12 @@
                   <option value="water">MQ Water</option>
                   <option value="buffer">Buffer</option>
                 </select>
-                <input v-if="config.cationMedium.type === 'buffer'" type="text" v-model="config.cationMedium.bufName" placeholder="e.g. PBS 1× pH 7.4" style="font-size:0.78rem; padding:3px 5px;">
+                <PhaseBufferSelect v-if="config.cationMedium.type === 'buffer'" :medium="config.cationMedium" />
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
-                <input v-if="config.cationMedium.type === 'buffer'" type="number" v-model.number="config.cationMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
+                <template v-if="config.cationMedium.type === 'buffer'">
+                  <input v-if="!config.cationMedium.bufferId" type="number" v-model.number="config.cationMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
+                  <span v-else class="na-locked" title="Locked from the selected buffer"><i class="fas fa-lock"></i> {{ config.cationMedium.naMM }}</span>
+                </template>
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
                 <input v-if="config.cationMedium.type === 'buffer'" type="number" v-model.number="config.cationMedium.pH" step="0.1" min="0" max="14" placeholder="7.0" style="font-size:0.78rem; padding:3px 5px;">
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
@@ -253,9 +259,12 @@
                   <option value="water">MQ Water</option>
                   <option value="buffer">Buffer</option>
                 </select>
-                <input v-if="config.saltMedium.type === 'buffer'" type="text" v-model="config.saltMedium.bufName" placeholder="buffer name" style="font-size:0.78rem; padding:3px 5px;">
+                <PhaseBufferSelect v-if="config.saltMedium.type === 'buffer'" :medium="config.saltMedium" />
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
-                <input v-if="config.saltMedium.type === 'buffer'" type="number" v-model.number="config.saltMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
+                <template v-if="config.saltMedium.type === 'buffer'">
+                  <input v-if="!config.saltMedium.bufferId" type="number" v-model.number="config.saltMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
+                  <span v-else class="na-locked" title="Locked from the selected buffer"><i class="fas fa-lock"></i> {{ config.saltMedium.naMM }}</span>
+                </template>
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
                 <input v-if="config.saltMedium.type === 'buffer'" type="number" v-model.number="config.saltMedium.pH" step="0.1" min="0" max="14" placeholder="7.0" style="font-size:0.78rem; padding:3px 5px;">
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
@@ -268,9 +277,12 @@
                   <option value="water">MQ Water</option>
                   <option value="buffer">Buffer</option>
                 </select>
-                <input v-if="config.compDMedium.type === 'buffer'" type="text" v-model="config.compDMedium.bufName" placeholder="buffer name" style="font-size:0.78rem; padding:3px 5px;">
+                <PhaseBufferSelect v-if="config.compDMedium.type === 'buffer'" :medium="config.compDMedium" />
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
-                <input v-if="config.compDMedium.type === 'buffer'" type="number" v-model.number="config.compDMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
+                <template v-if="config.compDMedium.type === 'buffer'">
+                  <input v-if="!config.compDMedium.bufferId" type="number" v-model.number="config.compDMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
+                  <span v-else class="na-locked" title="Locked from the selected buffer"><i class="fas fa-lock"></i> {{ config.compDMedium.naMM }}</span>
+                </template>
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
                 <input v-if="config.compDMedium.type === 'buffer'" type="number" v-model.number="config.compDMedium.pH" step="0.1" min="0" max="14" placeholder="7.0" style="font-size:0.78rem; padding:3px 5px;">
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
@@ -288,7 +300,7 @@
                 </select>
                 <template v-if="config.fillupMedium.type === 'buffer'">
                   <div style="position:relative; display:flex; flex-direction:column; gap:3px;" @click.stop>
-                    <input type="text" v-model="config.fillupMedium.bufName" placeholder="Buffer name" style="font-size:0.78rem; padding:3px 5px;">
+                    <PhaseBufferSelect :medium="config.fillupMedium" />
                     <!-- Inventory link for fill-up buffer -->
                     <div @click="activeDropdown = activeDropdown === 'fillup' ? null : 'fillup'" class="inventory-select-box" style="font-size:0.72rem; padding:2px 5px;">
                       <span class="truncate-text">{{ config.fillupMedium.inv ? `[${config.fillupMedium.inv.code}] ${config.fillupMedium.inv.name}` : 'Link inventory…' }}</span>
@@ -316,7 +328,10 @@
                   </div>
                 </template>
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
-                <input v-if="config.fillupMedium.type === 'buffer'" type="number" v-model.number="config.fillupMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
+                <template v-if="config.fillupMedium.type === 'buffer'">
+                  <input v-if="!config.fillupMedium.bufferId" type="number" v-model.number="config.fillupMedium.naMM" step="any" min="0" placeholder="0" style="font-size:0.78rem; padding:3px 5px;">
+                  <span v-else class="na-locked" title="Locked from the selected buffer"><i class="fas fa-lock"></i> {{ config.fillupMedium.naMM }}</span>
+                </template>
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
                 <input v-if="config.fillupMedium.type === 'buffer'" type="number" v-model.number="config.fillupMedium.pH" step="0.1" min="0" max="14" placeholder="7.0" style="font-size:0.78rem; padding:3px 5px;">
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
@@ -882,6 +897,7 @@ import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import { db } from '../services/supabase'
 import { esc } from '../utils/htmlSafe'
 import { useLabStore } from '../stores/labStore'
+import PhaseBufferSelect from './PhaseBufferSelect.vue'
 import Plotly from 'plotly.js-dist-min'
 
 const store = useLabStore()
@@ -944,11 +960,11 @@ const config = ref({
   minDistanceFactor: 0.05,
   // Advanced medium / background salt / pH settings
   showMediumSettings: false,
-  anionMedium:  { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
-  cationMedium: { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
-  saltMedium:   { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
-  compDMedium:  { type: 'water', bufName: '', naMM: 0, pH: 7.0 },
-  fillupMedium: { type: 'water', bufName: '', naMM: 0, pH: 7.0, inv: null, searchQuery: '', searchScope: 'Global' },
+  anionMedium:  { type: 'water', bufName: '', naMM: 0, pH: 7.0, bufferId: null },
+  cationMedium: { type: 'water', bufName: '', naMM: 0, pH: 7.0, bufferId: null },
+  saltMedium:   { type: 'water', bufName: '', naMM: 0, pH: 7.0, bufferId: null },
+  compDMedium:  { type: 'water', bufName: '', naMM: 0, pH: 7.0, bufferId: null },
+  fillupMedium: { type: 'water', bufName: '', naMM: 0, pH: 7.0, bufferId: null, inv: null, searchQuery: '', searchScope: 'Global' },
   // Component dependency links: target = source * factor + offset (stored-unit arithmetic)
   dependencies: [],
   showDependencies: false,
@@ -2314,4 +2330,6 @@ onMounted(async () => {
 .export-controls { display: flex; align-items: center; gap: 10px; }
 .compact-select { width: 120px; padding: 4px; background: transparent; color: inherit; border: 1px solid var(--border-color, #475569); border-radius: 4px; font-size: 0.8rem; }
 .compact-input { width: 60px; padding: 4px; background: transparent; color: inherit; border: 1px solid var(--border-color, #475569); border-radius: 4px; font-size: 0.8rem; text-align: center; }
+.na-locked { display: inline-flex; align-items: center; gap: 4px; font-size: 0.76rem; font-weight: 600; color: var(--acc, #2563eb); font-variant-numeric: tabular-nums; }
+.na-locked i { font-size: 0.62rem; opacity: 0.7; }
 </style>

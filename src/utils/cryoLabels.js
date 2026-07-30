@@ -71,9 +71,12 @@ export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
   const pad = 0.03
   const qr = sp.qr / 25.4
   const circ = sp.cap ? (sp.circ / 25.4) : 0
-  const qrX = sp.cap ? (r.x + r.w - (circ + qr) / 2) : (r.x + r.w - pad - qr)
+  // QR / SnapPEEL cap sits at the LEFT end (matching the die-cut in DYMO Connect);
+  // the name/CAS/code text block runs to its right.
+  const qrX = sp.cap ? (r.x + (circ - qr) / 2) : (r.x + pad)
   const qrY = r.y + (r.h - qr) / 2
-  const tx = r.x + pad, tw = sp.cap ? (r.w - circ - 2 * pad) : ((r.x + r.w - pad - qr - pad) - tx)
+  const tx = sp.cap ? (r.x + circ + pad) : (r.x + qr + 2 * pad)
+  const tw = sp.cap ? (r.w - circ - 2 * pad) : (r.w - qr - 3 * pad)
   const nH = r.h * 0.46, cH = r.h * 0.20, kH = r.h * 0.26
   const nY = r.y + pad, cY = nY + nH, kY = cY + cH
   const url = labelPayload(rec.code, mode, shortHost)

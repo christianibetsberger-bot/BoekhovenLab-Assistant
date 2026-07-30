@@ -22,14 +22,16 @@ const shortHost = ref('boek.li')
 const pickerSearch = ref('')
 const sheetRef = ref(null)
 
-// Selected records: { code, name, cas }
+// Selected records: { code, name, cas, copies }
 const records = ref([])
-function seedFrom(item) {
+function addRecord(item) {
   if (!item) return
-  const rec = { code: item.code || '', name: item.name || '', cas: item.cas || '' }
-  if (!records.value.some(r => r.code === rec.code && r.name === rec.name)) records.value.push(rec)
+  const found = records.value.find(r => r.code === (item.code || '') && r.name === (item.name || ''))
+  if (found) { found.copies++; return }
+  records.value.push({ code: item.code || '', name: item.name || '', cas: item.cas || '', copies: 1 })
 }
-onMounted(() => { seedFrom(props.seed) })
+function setCopies(rec, n) { rec.copies = Math.max(1, Math.min(999, (n | 0) || 1)) }
+onMounted(() => { addRecord(props.seed) })
 
 const sizeKey = computed(() => media.value === 'dymo' ? dymoSize.value : hermaSize.value)
 const sp = computed(() => media.value === 'dymo' ? LWCS[dymoSize.value] : HERMA[hermaSize.value])
@@ -41,11 +43,6 @@ const pickList = computed(() => {
   const q = pickerSearch.value.trim().toLowerCase()
   return store.inventory.filter(i => !q || (i.code || '').toLowerCase().includes(q) || (i.name || '').toLowerCase().includes(q)).slice(0, 200)
 })
-function addItem(i) {
-  const rec = { code: i.code || '', name: i.name || '', cas: i.cas || '' }
-  if (!records.value.some(r => r.code === rec.code && r.name === rec.name)) records.value.push(rec)
-}
-function removeRecord(i) { records.value.splice(i, 1) }
 
 // Scan-size verdict for the current size + payload (shown as a warning banner).
 const scanInfo = computed(() => {
@@ -107,11 +104,11 @@ function hermaTile(rec, s) {
   const right = h('div', { style: { flex: '0 0 auto', display: 'flex', alignItems: 'center' } }, qrImg(rec.code, s))
   return h('div', { style: { width: s.tileW + 'mm', height: s.tileH + 'mm', boxSizing: 'border-box', border: '0.15mm solid #b7b6b1', borderRadius: '0.5mm', background: '#fff', padding: '0.7mm', display: 'flex', gap: '0.7mm', alignItems: 'stretch', fontFamily: COND } }, [left, right])
 }
-// A full HERMA 105×48 cell filled with cols×rows identical tiles of one record.
-function hermaCell(rec, s) {
-  const tiles = []
-  for (let i = 0; i < s.cols * s.rows; i++) tiles.push(hermaTile(rec, s))
-  return h('div', { style: { width: HERMA.cell.w + 'mm', height: HERMA.cell.h + 'mm', boxSizing: 'border-box', background: '#fff', display: 'grid', gridTemplateColumns: `repeat(${s.cols}, ${s.tileW}mm)`, gridAutoRows: s.tileH + 'mm', gap: s.gutter + 'mm', justifyContent: 'center', alignContent: 'center', padding: '1.5mm' } }, tiles)
+// A HERMA 105×48 cell holding the given tiles (up to cols×rows). Partial cells
+// leave the remaining slots blank — so "1 label" prints exactly one tile.
+function hermaCellFromTiles(recs, s) {
+  const tiles = recs.map(rec => hermaTile(rec, s))
+  return h('div', { style: { width: HERMA.cell.w + 'mm', height: HERMA.cell.h + 'mm', boxSizing: 'border-box', background: '#fff', display: 'grid', gridTemplateColumns: `repeat(${s.cols}, ${s.tileW}mm)`, gridAutoRows: s.tileH + 'mm', gap: s.gutter + 'mm', justifyContent: 'center', alignContent: 'flex-start', alignItems: 'start', padding: '1.5mm' } }, tiles)
 }
 // HERMA falcon wrap — content block repeated `repeat` times across the 105 mm cell.
 function hermaWrap(rec, s) {
@@ -129,14 +126,29 @@ function hermaWrap(rec, s) {
   return h('div', { style: { width: HERMA.cell.w + 'mm', height: HERMA.cell.h + 'mm', boxSizing: 'border-box', background: '#fff', border: '0.15mm solid #b7b6b1', borderRadius: '0.8mm', display: 'flex', fontFamily: COND } }, blocks)
 }
 
-// One rendered unit per record (a die-cut DYMO label, or a HERMA cell/wrap).
-function renderUnit(rec) {
+// Every label to print, flattened by copies, then grouped into print units:
+// DYMO → one die-cut label each; HERMA falcon → one wrap cell each; HERMA eppi →
+// tiles packed into 105×48 cells (only as many tiles as requested).
+const totalLabels = computed(() => records.value.reduce((s, r) => s + Math.max(1, r.copies || 1), 0))
+const flatUnits = computed(() => records.value.flatMap(r => Array(Math.max(1, r.copies || 1)).fill(r)))
+const perCell = computed(() => (media.value === 'herma' && sp.value.kind === 'eppi') ? sp.value.cols * sp.value.rows : 1)
+const printUnits = computed(() => {
+  const units = flatUnits.value
+  if (media.value === 'dymo') return units.map(rec => ({ k: 'dymo', rec }))
+  if (sp.value.kind === 'wrap') return units.map(rec => ({ k: 'wrap', rec }))
+  const cells = []
+  for (let i = 0; i < units.length; i += perCell.value) cells.push({ k: 'cell', tiles: units.slice(i, i + perCell.value) })
+  return cells
+})
+
+function renderUnit(u) {
   const s = sp.value
-  if (media.value === 'dymo') return dymoLabel(rec, s)
-  return s.kind === 'wrap' ? hermaWrap(rec, s) : hermaCell(rec, s)
+  if (u.k === 'dymo') return dymoLabel(u.rec, s)
+  if (u.k === 'wrap') return hermaWrap(u.rec, s)
+  return hermaCellFromTiles(u.tiles, s)
 }
-const LabelUnit = (p) => renderUnit(p.rec)
-LabelUnit.props = ['rec']
+const LabelUnit = (p) => renderUnit(p.u)
+LabelUnit.props = ['u']
 
 // ── Shrink-to-fit: mirror the reference's fitAll over [data-fit] elements ──
 function fitAll() {
@@ -213,7 +225,10 @@ function printLabels() {
           <button :class="{ on: qrMode === 'code' }" @click="qrMode = 'code'">Code only</button>
         </div>
         <input v-if="qrMode === 'short'" v-model="shortHost" class="cl-host" placeholder="boek.li">
-        <button class="cl-print" :disabled="!records.length" @click="printLabels"><i class="fas fa-print"></i> Print {{ records.length }}</button>
+        <button class="cl-print" :disabled="!records.length" @click="printLabels"><i class="fas fa-print"></i> Print {{ printUnits.length }}</button>
+      </div>
+      <div v-if="qrMode === 'short'" class="cl-shortnote">
+        <i class="fas fa-triangle-exclamation"></i> Short URLs only open the inventory if <strong>{{ shortHost }}</strong> is a redirect host you control (forwarding <code>/{{ '{code}' }}</code> → the inventory page). It isn't set up yet — “Full URL” works everywhere today.
       </div>
 
       <div class="cl-scan" :style="{ color: scanInfo.c }">
@@ -225,20 +240,32 @@ function printLabels() {
         <div class="cl-picker">
           <div class="cl-search"><i class="fas fa-search"></i><input v-model="pickerSearch" placeholder="Add from inventory…"></div>
           <div class="cl-picklist">
-            <button v-for="i in pickList" :key="i.id" class="cl-pickrow" @click="addItem(i)" :title="i.name">
+            <button v-for="i in pickList" :key="i.id" class="cl-pickrow" @click="addRecord(i)" :title="i.name">
               <span class="cl-pickcode">{{ i.code }}</span><span class="cl-pickname">{{ i.name }}</span><i class="fas fa-plus"></i>
             </button>
             <div v-if="!pickList.length" class="cl-empty">No inventory items.</div>
+          </div>
+          <div v-if="records.length" class="cl-selected">
+            <div class="cl-sel-title">Selected · {{ totalLabels }} label{{ totalLabels === 1 ? '' : 's' }}</div>
+            <div v-for="(r, i) in records" :key="i" class="cl-sel-row">
+              <span class="cl-selcode">{{ r.code }}</span>
+              <span class="cl-selname" :title="r.name">{{ r.name }}</span>
+              <div class="cl-copies">
+                <button @click="setCopies(r, r.copies - 1)" :disabled="r.copies <= 1">−</button>
+                <input type="number" min="1" :value="r.copies" @input="setCopies(r, +$event.target.value)">
+                <button @click="setCopies(r, r.copies + 1)">+</button>
+              </div>
+              <button class="cl-sel-x" @click="records.splice(i, 1)" title="Remove">✕</button>
+            </div>
           </div>
         </div>
 
         <div class="cl-preview">
           <div v-if="!records.length" class="cl-empty" style="margin:auto;">Add items from the left to preview labels.</div>
           <div v-else ref="sheetRef" class="cl-sheet">
-            <div v-for="(rec, i) in records" :key="i" class="cl-unit">
-              <button class="cl-unit-x" @click="removeRecord(i)" title="Remove">✕</button>
-              <div data-unit><LabelUnit :rec="rec" /></div>
-              <div class="cl-unit-cap">{{ rec.code }} · {{ sp.label }}</div>
+            <div v-for="(u, i) in printUnits" :key="i" class="cl-unit">
+              <div data-unit><LabelUnit :u="u" /></div>
+              <div class="cl-unit-cap">{{ u.k === 'cell' ? u.tiles.length + ' label' + (u.tiles.length > 1 ? 's' : '') : u.rec.code }} · {{ sp.label }}</div>
             </div>
           </div>
         </div>
@@ -262,6 +289,8 @@ function printLabels() {
 .cl-print:disabled { opacity: .5; cursor: default; }
 .cl-scan { font-size: 0.78rem; padding: 8px 16px; border-bottom: 1px solid var(--ln, #eee); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cl-scan-tip { opacity: .7; font-style: italic; }
+.cl-shortnote { font-size: 0.74rem; color: #9a6b00; background: rgba(154,107,0,.09); padding: 7px 16px; display: flex; gap: 7px; align-items: baseline; }
+.cl-shortnote code { font-family: ui-monospace, monospace; }
 .cl-body { display: flex; min-height: 0; flex: 1; }
 .cl-picker { width: 260px; flex: none; border-right: 1px solid var(--ln, #eee); display: flex; flex-direction: column; min-height: 0; }
 .cl-search { display: flex; align-items: center; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--ln, #eee); color: var(--tx2, #64748b); }
@@ -272,6 +301,18 @@ function printLabels() {
 .cl-pickcode { font: 600 0.74rem/1 ui-monospace, monospace; color: var(--acc, #2563eb); flex: none; }
 .cl-pickname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem; }
 .cl-pickrow i { opacity: .4; font-size: 0.72rem; }
+.cl-selected { border-top: 1px solid var(--ln, #eee); padding: 8px 6px; overflow-y: auto; max-height: 42%; }
+.cl-sel-title { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--tx2, #64748b); padding: 2px 6px 6px; }
+.cl-sel-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; }
+.cl-selcode { font: 600 0.72rem/1 ui-monospace, monospace; color: var(--acc, #2563eb); flex: none; }
+.cl-selname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.76rem; }
+.cl-copies { display: inline-flex; align-items: center; flex: none; border: 1px solid var(--ln2, #cbd5e1); border-radius: 6px; overflow: hidden; }
+.cl-copies button { width: 20px; height: 22px; border: none; background: var(--fl, #eef2f7); color: var(--tx2, #475569); cursor: pointer; font-size: 0.9rem; line-height: 1; box-shadow: none; }
+.cl-copies button:disabled { opacity: .4; cursor: default; }
+.cl-copies input { width: 30px; height: 22px; border: none; border-left: 1px solid var(--ln2, #cbd5e1); border-right: 1px solid var(--ln2, #cbd5e1); text-align: center; background: transparent; color: inherit; font-size: 0.76rem; -moz-appearance: textfield; }
+.cl-copies input::-webkit-outer-spin-button, .cl-copies input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.cl-sel-x { width: 18px; height: 18px; border-radius: 50%; border: none; background: none; color: var(--tx3, #94a3b8); cursor: pointer; font-size: 11px; flex: none; }
+.cl-sel-x:hover { color: var(--wr, #dc2626); }
 .cl-preview { flex: 1; min-width: 0; overflow: auto; background: repeating-conic-gradient(#f4f4f2 0 25%, #ececea 0 50%) 0 0 / 16px 16px; padding: 20px; }
 .cl-sheet { display: flex; flex-wrap: wrap; gap: 18px; align-content: flex-start; }
 .cl-unit { position: relative; background: #fff; padding: 10px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,.12); display: flex; flex-direction: column; align-items: center; gap: 6px; }

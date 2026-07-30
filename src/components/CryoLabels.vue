@@ -5,7 +5,7 @@
 // scannable QR codes and full/short/code payload modes. Prints black-on-white.
 import { h, ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useLabStore } from '../stores/labStore'
-import { LWCS, HERMA, labelPayload, qrSvg, moduleMM, scanVerdict } from '../utils/cryoLabels'
+import { LWCS, HERMA, labelPayload, qrSvg, moduleMM, scanVerdict, dymoXml } from '../utils/cryoLabels'
 
 const store = useLabStore()
 const props = defineProps({ seed: { type: Object, default: null } })
@@ -74,24 +74,18 @@ function ruleEl(o = 0.4, m = '0.35mm 0 0.3mm') {
 function eppiInner(rec, s) {
   return [nameEl(rec.name, s), ruleEl(), casEl(rec.cas, s), codeEl(rec.code, s)]
 }
-function falconInner(rec, s) {
-  const left = h('div', { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column' } }, [
-    nameEl(rec.name, s, '1.4'),
-    ruleEl(0.4, '0.5mm 0 0.4mm'),
-    casEl(rec.cas, s),
-    codeEl(rec.code, s, '0.6mm'),
-  ])
-  const right = h('div', { style: { flex: '0 0 auto', display: 'flex', alignItems: 'center' } }, qrImg(rec.code, s))
-  return [left, right]
-}
-// DYMO die-cut label (cap circle + wrap rect for eppis; flat rect for falcon).
+// DYMO landscape strip: name/CAS/code column on the left, QR at the right end —
+// inscribed in the SnapPEEL cap circle for eppis (506/507), plain for 503.
 function dymoLabel(rec, s) {
-  const is503 = s.cd === 0
-  const rect = h('div', { style: { position: s.cd ? 'absolute' : 'relative', left: 0, bottom: 0, width: s.rw + 'mm', height: s.rh + 'mm', background: '#fff', border: '0.15mm solid #b7b6b1', borderRadius: '0.6mm', boxSizing: 'border-box', padding: is503 ? '1mm' : '0.9mm', display: 'flex', flexDirection: is503 ? 'row' : 'column', gap: is503 ? '0.9mm' : '0' } }, is503 ? falconInner(rec, s) : eppiInner(rec, s))
-  if (!s.cd) return h('div', { style: { position: 'relative', width: s.rw + 'mm', height: s.rh + 'mm', fontFamily: COND } }, rect)
-  const bboxH = s.cd + s.rh - s.ov
-  const circle = h('div', { style: { position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: s.cd + 'mm', height: s.cd + 'mm', borderRadius: '50%', background: '#fff', border: '0.15mm solid #b7b6b1', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 } }, qrImg(rec.code, s))
-  return h('div', { style: { position: 'relative', width: s.rw + 'mm', height: bboxH + 'mm', fontFamily: COND } }, [circle, rect])
+  const qr = qrImg(rec.code, s)
+  if (!s.cap) {
+    const textCol = h('div', { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' } }, eppiInner(rec, s))
+    const qrBox = h('div', { style: { flex: '0 0 auto', display: 'flex', alignItems: 'center' } }, qr)
+    return h('div', { style: { width: s.W + 'mm', height: s.H + 'mm', boxSizing: 'border-box', background: '#fff', border: '0.15mm solid #b7b6b1', borderRadius: '0.7mm', padding: '1.1mm 1.6mm', display: 'flex', alignItems: 'stretch', gap: '1mm', fontFamily: COND } }, [textCol, qrBox])
+  }
+  const wrap = h('div', { style: { position: 'absolute', left: 0, top: 0, width: s.wrapW + 'mm', height: s.H + 'mm', background: '#fff', border: '0.15mm solid #b7b6b1', borderRadius: '0.7mm', boxSizing: 'border-box', padding: '0.9mm', display: 'flex', flexDirection: 'column', justifyContent: 'center' } }, eppiInner(rec, s))
+  const circle = h('div', { style: { position: 'absolute', left: (s.wrapW - 0.6) + 'mm', top: ((s.H - s.circ) / 2) + 'mm', width: s.circ + 'mm', height: s.circ + 'mm', borderRadius: '50%', background: '#fff', border: '0.15mm solid #b7b6b1', display: 'flex', alignItems: 'center', justifyContent: 'center' } }, qr)
+  return h('div', { style: { position: 'relative', width: s.W + 'mm', height: s.H + 'mm', fontFamily: COND } }, [wrap, circle])
 }
 // HERMA small eppi tile (QR on the tile — no die-cut cap).
 function hermaTile(rec, s) {
@@ -181,9 +175,8 @@ function printLabels() {
     const cells = units.map(u => `<div class="cell">${u}</div>`).join('')
     body = `<div class="sheet">${cells}</div>`
   } else {
-    // One die-cut label per page (the roll feeds one at a time).
-    const bboxH = s.cd ? (s.cd + s.rh - s.ov) : s.rh
-    pageCss = `@page { size: ${s.rw}mm ${bboxH}mm; margin: 0; }`
+    // One DYMO strip per page (the roll feeds one at a time).
+    pageCss = `@page { size: ${s.W}mm ${s.H}mm; margin: 0; }`
     body = units.map(u => `<div class="dymo">${u}</div>`).join('')
   }
   const w = window.open('', '_blank', 'width=900,height=700')
@@ -199,6 +192,37 @@ function printLabels() {
       img{ image-rendering:pixelated; }
     </style></head><body>${body}<script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script></body></html>`)
   w.document.close()
+}
+
+// ── DYMO Connect outputs (per the handoff): download a filled .dymo, or print
+// straight to the LabelWriter 550 via the DYMO Connect Web Service if present. ──
+function triggerDownload(xml, filename) {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([xml], { type: 'application/xml' }))
+  a.download = filename
+  document.body.appendChild(a); a.click()
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove() }, 150)
+}
+function downloadDymoAll() {
+  const key = dymoSize.value
+  records.value.forEach((rec, i) => setTimeout(() => {
+    triggerDownload(dymoXml(key, rec, qrMode.value, shortHost.value), `${LWCS[key].labelName}_${rec.code || 'label'}.dymo`)
+  }, i * 250))   // stagger so the browser doesn't block the batch
+}
+function printToDymo() {
+  const fw = window.dymo?.label?.framework
+  const key = dymoSize.value
+  if (!fw) {
+    alert('Direct printing needs DYMO Connect + its Web Service running on this computer.\n\nUse “.dymo” to download the label(s) and print from DYMO Connect — or run this app on the lab PC with DYMO Connect installed, then this prints straight to the LabelWriter 550.')
+    return
+  }
+  try {
+    const printers = (fw.getPrinters() || []).filter(p => p && p.isConnected !== false)
+    if (!printers.length) { alert('No DYMO printer detected. Switch on the LabelWriter 550, then try again — or use the .dymo download.'); return }
+    flatUnits.value.forEach(rec => fw.openLabelXml(dymoXml(key, rec, qrMode.value, shortHost.value)).print(printers[0].name))
+  } catch (e) {
+    alert('DYMO print failed: ' + ((e && e.message) || e) + '\nUse the .dymo download and print from DYMO Connect instead.')
+  }
 }
 </script>
 
@@ -225,7 +249,12 @@ function printLabels() {
           <button :class="{ on: qrMode === 'code' }" @click="qrMode = 'code'">Code only</button>
         </div>
         <input v-if="qrMode === 'short'" v-model="shortHost" class="cl-host" placeholder="boek.li">
-        <button class="cl-print" :disabled="!records.length" @click="printLabels"><i class="fas fa-print"></i> Print {{ printUnits.length }}</button>
+        <template v-if="media === 'dymo'">
+          <button class="cl-print" :disabled="!records.length" @click="printToDymo" title="Print straight to a connected LabelWriter 550 (needs DYMO Connect)"><i class="fas fa-print"></i> Print to DYMO 550</button>
+          <button class="cl-print ghost" :disabled="!records.length" @click="downloadDymoAll" title="Download a .dymo file per item to open in DYMO Connect"><i class="fas fa-download"></i> .dymo</button>
+          <button class="cl-print ghost" :disabled="!records.length" @click="printLabels" title="Print a paper proof from the browser"><i class="fas fa-file-lines"></i> Proof</button>
+        </template>
+        <button v-else class="cl-print" :disabled="!records.length" @click="printLabels"><i class="fas fa-print"></i> Print sheet</button>
       </div>
       <div v-if="qrMode === 'short'" class="cl-shortnote">
         <i class="fas fa-triangle-exclamation"></i> Short URLs only open the inventory if <strong>{{ shortHost }}</strong> is a redirect host you control (forwarding <code>/{{ '{code}' }}</code> → the inventory page). It isn't set up yet — “Full URL” works everywhere today.
@@ -287,6 +316,8 @@ function printLabels() {
 .cl-host { padding: 6px 9px; border: 1px solid var(--ln2, #cbd5e1); border-radius: 8px; background: var(--fl, transparent); color: inherit; font: 500 12.5px/1 ui-monospace, monospace; width: 120px; }
 .cl-print { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; font: 600 13px/1 inherit; padding: 8px 14px; border: none; border-radius: 8px; background: var(--acc, #2563eb); color: #fff; cursor: pointer; }
 .cl-print:disabled { opacity: .5; cursor: default; }
+.cl-print.ghost { background: var(--fl, #eef2f7); color: var(--tx2, #475569); }
+.cl-print ~ .cl-print { margin-left: 0; }   /* only the first print button gets the auto margin */
 .cl-scan { font-size: 0.78rem; padding: 8px 16px; border-bottom: 1px solid var(--ln, #eee); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cl-scan-tip { opacity: .7; font-style: italic; }
 .cl-shortnote { font-size: 0.74rem; color: #9a6b00; background: rgba(154,107,0,.09); padding: 7px 16px; display: flex; gap: 7px; align-items: baseline; }

@@ -5,13 +5,14 @@ import qrcode from './qrcode.mjs'
 
 export const INVENTORY_BASE = 'https://christianibetsberger-bot.github.io/BoekhovenLab-Assistant/?qr='
 
-// DYMO CryoSTUCK LWCS — rect wrap (+ optional cap circle for eppis). Exact mm.
-//   rw/rh = wrap rectangle · cd = cap circle Ø · ov = cap/rect overlap
-//   qr = QR square · ecc = error correction · f* = start font size (mm), shrink-to-fit
+// DYMO CryoSTUCK LWCS — landscape strip: name/CAS/code left, QR at the right end
+// (inscribed in the SnapPEEL cap circle for eppis). Geometry from the real .dymo
+// print areas. W/H = print strip (mm) · wrapW/circ = eppi wrap panel + cap Ø ·
+// qr = QR square · rect = DYMORect in inches (for the generated .dymo).
 export const LWCS = {
-  '506': { label: '0.5 mL Eppendorf', tube: 'eppi', rw: 23.9, rh: 12.7, cd: 9.5, ov: 0.8, qr: 6.8, ecc: 'L', fName: 2.5, fCas: 1.7, fCode: 2.3 },
-  '507': { label: '1.5 mL Eppendorf', tube: 'eppi', rw: 28.6, rh: 15.9, cd: 11.1, ov: 0.9, qr: 7.9, ecc: 'L', fName: 3.0, fCas: 1.9, fCode: 2.6 },
-  '503': { label: 'Falcon 15 & 50 mL', tube: 'falcon', rw: 38.1, rh: 19.1, cd: 0, ov: 0, qr: 14, ecc: 'M', fName: 3.6, fCas: 2.2, fCode: 3.0 },
+  '506': { label: '0.5 mL Eppendorf', tube: 'eppi', cap: true, W: 32.8, H: 12.7, wrapW: 23.9, circ: 9.5, qr: 6.5, ecc: 'L', fName: 2.4, fCas: 1.7, fCode: 2.3, labelName: 'LWCS506', rect: { x: 0.012187534, y: 0.0075000003, w: 1.2833055, h: 0.43402776 } },
+  '507': { label: '1.5 mL Eppendorf', tube: 'eppi', cap: true, W: 39.1, H: 15.9, wrapW: 28.6, circ: 11.1, qr: 7.6, ecc: 'L', fName: 2.9, fCas: 1.9, fCode: 2.6, labelName: 'LWCS507', rect: { x: 0.14513889, y: 0.045138888, w: 1.5, h: 0.5509028 } },
+  '503': { label: 'Falcon 15 & 50 mL', tube: 'falcon', cap: false, W: 38.1, H: 19.1, qr: 14, ecc: 'M', fName: 3.4, fCas: 2.1, fCode: 3.0, labelName: 'LWCS503', rect: { x: 0.060000032, y: 0.045, w: 1.38, h: 0.675 } },
 }
 
 // HERMA 4363 — A4 sheet, 105 × 48 mm cells. Eppis tile inside a cell (cut apart);
@@ -59,4 +60,45 @@ export function scanVerdict(mm) {
   if (mm >= 0.33) return { t: 'Scannable', c: '#1c7d54' }
   if (mm >= 0.25) return { t: 'Borderline', c: '#9a6b00' }
   return { t: 'Below spec', c: '#a2361f' }
+}
+
+// A filled DYMO Connect DesktopLabel (v4) XML for one record — one QR + NAME/CAS/
+// CODE TextObjects with ShrinkToFit, positioned in the label's DYMORect (inches).
+// Ported verbatim from the design handoff so DYMO Connect opens/prints it as-is.
+function escXml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
+export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
+  const sp = LWCS[key], r = sp.rect, esc = escXml, f = (n) => (+n).toFixed(4)
+  const pad = 0.03
+  const qr = sp.qr / 25.4
+  const circ = sp.cap ? (sp.circ / 25.4) : 0
+  const qrX = sp.cap ? (r.x + r.w - (circ + qr) / 2) : (r.x + r.w - pad - qr)
+  const qrY = r.y + (r.h - qr) / 2
+  const tx = r.x + pad, tw = sp.cap ? (r.w - circ - 2 * pad) : ((r.x + r.w - pad - qr - pad) - tx)
+  const nH = r.h * 0.46, cH = r.h * 0.20, kH = r.h * 0.26
+  const nY = r.y + pad, cY = nY + nH, kY = cY + cH
+  const url = labelPayload(rec.code, mode, shortHost)
+  const nSz = key === '503' ? 13 : (key === '507' ? 11 : 9), cSz = key === '503' ? 9 : (key === '507' ? 8 : 6), kSz = key === '503' ? 13 : (key === '507' ? 11 : 9)
+  const brT = `<Brushes><BackgroundBrush><SolidColorBrush><Color A="0" R="1" G="1" B="1"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes>`
+  const brQ = `<Brushes><BackgroundBrush><SolidColorBrush><Color A="1" R="1" G="1" B="1"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes>`
+  const T = (name, text, x, y, w, hh, font, size, bold, va) => `<TextObject><Name>${name}</Name>${brT}<Rotation>Rotation0</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle><Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin><HorizontalAlignment>Left</HorizontalAlignment><VerticalAlignment>${va}</VerticalAlignment><FitMode>ShrinkToFit</FitMode><IsVertical>False</IsVertical><FormattedText><FitMode>ShrinkToFit</FitMode><HorizontalAlignment>Left</HorizontalAlignment><VerticalAlignment>${va}</VerticalAlignment><IsVertical>False</IsVertical><LineTextSpan><TextSpan><Text>${esc(text)}</Text><FontInfo><FontName>${font}</FontName><FontSize>${size}</FontSize><IsBold>${bold}</IsBold><IsItalic>False</IsItalic><IsUnderline>False</IsUnderline><FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush></FontInfo></TextSpan></LineTextSpan></FormattedText><ObjectLayout><DYMOPoint><X>${f(x)}</X><Y>${f(y)}</Y></DYMOPoint><Size><Width>${f(w)}</Width><Height>${f(hh)}</Height></Size></ObjectLayout></TextObject>`
+  const Q = `<QRCodeObject><Name>QR</Name>${brQ}<Rotation>Rotation0</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle><Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin><BarcodeFormat>QRCode</BarcodeFormat><Data><DataString>${esc(url)}</DataString></Data><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><Size>Medium</Size><EQRCodeType>QRCodeText</EQRCodeType><TextDataHolder><Value>${esc(url)}</Value></TextDataHolder><ObjectLayout><DYMOPoint><X>${f(qrX)}</X><Y>${f(qrY)}</Y></DYMOPoint><Size><Width>${f(qr)}</Width><Height>${f(qr)}</Height></Size></ObjectLayout></QRCodeObject>`
+  return `<?xml version="1.0" encoding="utf-8"?>
+<DesktopLabel Version="1">
+  <DYMOLabel Version="4">
+    <Description>Boekhoven Lab - ${sp.labelName}</Description>
+    <Orientation>Portrait</Orientation>
+    <LabelName>${sp.labelName}</LabelName>
+    <InitialLength>0</InitialLength>
+    <BorderStyle>SolidLine</BorderStyle>
+    <DYMORect><DYMOPoint><X>${r.x}</X><Y>${r.y}</Y></DYMOPoint><Size><Width>${r.w}</Width><Height>${r.h}</Height></Size></DYMORect>
+    <BorderColor><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderColor>
+    <BorderThickness>1</BorderThickness>
+    <Show_Border>False</Show_Border>
+    <HasFixedLength>False</HasFixedLength>
+    <FixedLengthValue>0</FixedLengthValue>
+    <DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${Q}${T('NAME', rec.name, tx, nY, tw, nH, 'Arial', nSz, 'True', 'Top')}${T('CAS', 'CAS ' + rec.cas, tx, cY, tw, cH, 'Consolas', cSz, 'False', 'Middle')}${T('CODE', rec.code, tx, kY, tw, kH, 'Consolas', kSz, 'True', 'Middle')}</LabelObjects></DynamicLayoutManager>
+  </DYMOLabel>
+  <LabelApplication>Blank</LabelApplication>
+  <DataTable><Columns></Columns><Rows></Rows></DataTable>
+</DesktopLabel>`
 }

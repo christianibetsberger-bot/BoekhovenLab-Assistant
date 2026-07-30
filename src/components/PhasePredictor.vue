@@ -9,6 +9,17 @@
       </p>
     </div>
 
+    <div class="cond-bar">
+      <span class="cond-blabel"><i class="fas fa-bookmark"></i> Saved conditions</span>
+      <select v-model="selectedConditionId" @change="loadSelectedCondition" class="cond-select">
+        <option value="">Load a preset…</option>
+        <optgroup v-if="myConditions.length" label="Mine"><option v-for="c in myConditions" :key="c.item_id" :value="c.item_id">{{ c.name }}</option></optgroup>
+        <optgroup v-if="globalConditions.length" label="Lab"><option v-for="c in globalConditions" :key="c.item_id" :value="c.item_id">{{ c.name }} · shared</option></optgroup>
+      </select>
+      <button class="cond-btn" @click="openSaveConditions"><i class="fas fa-floppy-disk"></i> Save conditions</button>
+      <button v-if="selectedConditionId && selectedCondIsMine" class="cond-btn ghost" @click="deleteSelectedCondition" title="Delete this saved condition"><i class="fas fa-trash"></i></button>
+    </div>
+
     <div class="layout-columns">
       
       <div class="col-left">
@@ -889,6 +900,27 @@
         </div>
       </template>
     </div>
+
+    <!-- ── Save conditions dialog (teleported to centre on the viewport) ── -->
+    <Teleport to="body">
+    <div v-if="showSaveCond" class="cond-modal" :class="{ 'dark-mode': store.isDarkMode }" @click.self="showSaveCond = false">
+      <div class="cond-dialog">
+        <div class="cond-dhead"><span><i class="fas fa-floppy-disk"></i> Save conditions</span><button class="cond-x" @click="showSaveCond = false">✕</button></div>
+        <label class="cond-f"><span>Name</span><input v-model="saveCondName" placeholder="e.g. CTI-117 coacervate screen" @keydown.enter="doSaveConditions"></label>
+        <div class="cond-f"><span>Scope</span>
+          <div class="scope-chips">
+            <button type="button" class="scope-chip" :class="{ active: saveCondScope === 'Personal' }" @click="saveCondScope = 'Personal'">Private</button>
+            <button type="button" class="scope-chip" :class="{ active: saveCondScope === 'Global' }" @click="saveCondScope = 'Global'">Lab</button>
+          </div>
+        </div>
+        <div class="cond-dfoot">
+          <span v-if="saveCondMsg" class="cond-msg">{{ saveCondMsg }}</span>
+          <button class="cond-btn ghost" style="margin-left:auto;" @click="showSaveCond = false">Cancel</button>
+          <button class="cond-btn" @click="doSaveConditions"><i class="fas fa-check"></i> Save</button>
+        </div>
+      </div>
+    </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1649,6 +1681,59 @@ const fetchDatasets = async () => {
     .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))
 }
 
+// ── Saved condition presets (the config/search-space setup only) ──────────────
+// Distinct from datasets (which also carry experiment points): a named, reusable
+// search-space configuration, Private to you or shared Lab-wide.
+const savedConditions = ref([])
+const selectedConditionId = ref('')
+const showSaveCond = ref(false)
+const saveCondName = ref('')
+const saveCondScope = ref('Personal')
+const saveCondMsg = ref('')
+const myConditions = computed(() => savedConditions.value.filter(c => c.owner_id === store.user?.id))
+const globalConditions = computed(() => savedConditions.value.filter(c => c.scope === 'Global' && c.owner_id !== store.user?.id))
+const selectedCondIsMine = computed(() => savedConditions.value.find(c => c.item_id === selectedConditionId.value)?.owner_id === store.user?.id)
+
+async function loadConditionsList() {
+  try {
+    const { data, error } = await db.from('phase_conditions').select('*').order('created_at', { ascending: false })
+    if (!error && data) savedConditions.value = data.map(r => ({ item_id: r.item_id, owner_id: r.owner_id, scope: r.scope, name: r.name, data: r.data }))
+  } catch { /* table may not exist yet */ }
+}
+function openSaveConditions() { saveCondName.value = ''; saveCondScope.value = 'Personal'; saveCondMsg.value = ''; showSaveCond.value = true }
+async function doSaveConditions() {
+  const name = saveCondName.value.trim()
+  if (!name) { saveCondMsg.value = 'Give it a name.'; return }
+  if (!store.user?.id) { saveCondMsg.value = 'Sign in to save.'; return }
+  saveCondMsg.value = 'Saving…'
+  const payload = {
+    item_id: 'cond_' + (globalThis.crypto?.randomUUID?.() || Date.now().toString(36)),
+    owner_id: store.user.id, scope: saveCondScope.value, name,
+    data: JSON.parse(JSON.stringify(config.value)),
+  }
+  const { error } = await db.from('phase_conditions').upsert(payload, { onConflict: 'item_id' })
+  if (error) { saveCondMsg.value = 'Save failed: ' + error.message; return }
+  showSaveCond.value = false
+  await loadConditionsList()
+  store.toast?.('Conditions saved')
+}
+function loadSelectedCondition() {
+  const c = savedConditions.value.find(x => x.item_id === selectedConditionId.value)
+  if (!c || !c.data) return
+  config.value = { ...config.value, ...JSON.parse(JSON.stringify(c.data)) }
+  nextTick(() => renderPlot())
+  store.toast?.(`Loaded "${c.name}"`)
+}
+async function deleteSelectedCondition() {
+  const id = selectedConditionId.value
+  if (!id || !confirm('Delete this saved condition?')) return
+  const { error } = await db.from('phase_conditions').delete().eq('item_id', id)
+  if (error) { alert('Delete failed: ' + error.message); return }
+  selectedConditionId.value = ''
+  await loadConditionsList()
+}
+onMounted(loadConditionsList)
+
 // Bootstrap from legacy `phase_data` table if the user has no datasets yet.
 // This lets existing users see their old data and save it as their first dataset.
 const bootstrapLegacy = async () => {
@@ -2332,4 +2417,20 @@ onMounted(async () => {
 .compact-input { width: 60px; padding: 4px; background: transparent; color: inherit; border: 1px solid var(--border-color, #475569); border-radius: 4px; font-size: 0.8rem; text-align: center; }
 .na-locked { display: inline-flex; align-items: center; gap: 4px; font-size: 0.76rem; font-weight: 600; color: var(--acc, #2563eb); font-variant-numeric: tabular-nums; }
 .na-locked i { font-size: 0.62rem; opacity: 0.7; }
+
+/* Saved conditions toolbar + dialog */
+.cond-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 14px; }
+.cond-blabel { font-size: 0.78rem; font-weight: 700; opacity: 0.6; display: inline-flex; align-items: center; gap: 6px; }
+.cond-select { min-width: 180px; padding: 5px 8px; font-size: 0.8rem; border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px; background: var(--fl, transparent); color: inherit; }
+.cond-btn { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; padding: 6px 12px; border: none; border-radius: 6px; background: var(--acc, #2563eb); color: #fff; cursor: pointer; box-shadow: none; }
+.cond-btn.ghost { background: var(--fl, #eef2f7); color: var(--tx2, #64748b); }
+.cond-modal { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 16px; }
+.cond-dialog { background: var(--modal, #fff); border: 1px solid var(--cdl, #e2e8f0); border-radius: var(--r, 14px); box-shadow: var(--sh, 0 10px 40px rgba(0,0,0,.2)); width: 100%; max-width: 400px; padding: 16px; color: var(--tx, inherit); }
+.cond-dhead { display: flex; align-items: center; justify-content: space-between; font-weight: 600; margin-bottom: 14px; }
+.cond-x { width: 28px; height: 28px; border-radius: 50%; background: var(--fl, #eef2f7); color: var(--tx2, #64748b); border: none; cursor: pointer; box-shadow: none; }
+.cond-f { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; font-size: 0.8rem; }
+.cond-f > span { font-size: 0.72rem; font-weight: 600; opacity: 0.7; }
+.cond-f input { padding: 7px 9px; border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px; background: var(--fl, transparent); color: inherit; }
+.cond-dfoot { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.cond-msg { font-size: 0.76rem; color: var(--wr, #dc2626); }
 </style>

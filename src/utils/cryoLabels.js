@@ -9,10 +9,13 @@ export const INVENTORY_BASE = 'https://christianibetsberger-bot.github.io/Boekho
 // (inscribed in the SnapPEEL cap circle for eppis). Geometry from the real .dymo
 // print areas. W/H = print strip (mm) · wrapW/circ = eppi wrap panel + cap Ø ·
 // qr = QR square · rect = DYMORect in inches (for the generated .dymo).
+// useShort = print record.short (fall back to name); rule = draw the hairline;
+// fMin = smallest legible font (mm). 507 origin corrected (the uploaded template's
+// X=0.145 pushed content past the die edge → 0.0122, DYMO's own 506 left margin).
 export const LWCS = {
-  '506': { label: '0.5 mL Eppendorf', tube: 'eppi', cap: true, W: 32.8, H: 12.7, wrapW: 23.9, circ: 9.5, qr: 6.5, ecc: 'L', fName: 2.4, fCas: 1.7, fCode: 2.3, labelName: 'LWCS506', rect: { x: 0.012187534, y: 0.0075000003, w: 1.2833055, h: 0.43402776 } },
-  '507': { label: '1.5 mL Eppendorf', tube: 'eppi', cap: true, W: 39.1, H: 15.9, wrapW: 28.6, circ: 11.1, qr: 7.6, ecc: 'L', fName: 2.9, fCas: 1.9, fCode: 2.6, labelName: 'LWCS507', rect: { x: 0.14513889, y: 0.045138888, w: 1.5, h: 0.5509028 } },
-  '503': { label: 'Falcon 15 & 50 mL', tube: 'falcon', cap: false, W: 38.1, H: 19.1, qr: 14, ecc: 'M', fName: 3.4, fCas: 2.1, fCode: 3.0, labelName: 'LWCS503', rect: { x: 0.060000032, y: 0.045, w: 1.38, h: 0.675 } },
+  '506': { label: '0.5 mL Eppendorf', tube: 'eppi', cap: true, W: 33.4, H: 12.7, wrapW: 23.9, circ: 9.5, qr: 6.5, ecc: 'L', fName: 2.6, fCas: 1.6, fCode: 2.6, fMin: 1.7, useShort: true, rule: false, labelName: 'LWCS506', rect: { x: 0.012187534, y: 0.0075000003, w: 1.2833055, h: 0.43402776 } },
+  '507': { label: '1.5 mL Eppendorf', tube: 'eppi', cap: true, W: 39.7, H: 15.9, wrapW: 28.6, circ: 11.1, qr: 7.6, ecc: 'L', fName: 2.7, fCas: 1.8, fCode: 2.7, fMin: 1.6, rule: true, labelName: 'LWCS507', rect: { x: 0.012187534, y: 0.045138888, w: 1.5, h: 0.5509028 } },
+  '503': { label: 'Falcon 15 & 50 mL', tube: 'falcon', cap: false, W: 38.1, H: 19.1, qr: 14, ecc: 'M', fName: 3.2, fCas: 2.1, fCode: 3.0, fMin: 1.8, rule: true, labelName: 'LWCS503', rect: { x: 0.060000032, y: 0.045, w: 1.38, h: 0.675 } },
 }
 
 // HERMA 4363 — A4 sheet, 105 × 48 mm cells. Eppis tile inside a cell (cut apart);
@@ -69,12 +72,15 @@ function escXml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;
 // Estimate a font size (pt) that fits `text` in a wIn × hIn inch box. DYMO Connect
 // often ignores ShrinkToFit on import, so we bake a fitted size in (Arial glyph
 // avg ≈ 0.52 em; bold ≈ 0.56). Never below 4 pt, never above the target size.
-function fitPt(text, wIn, hIn, maxPt, glyph = 0.56) {
+function fitPt(text, wIn, hIn, maxPt, glyph = 0.56, minPt = 4) {
   const L = Math.max(1, String(text ?? '').length)
   const byWidth = (wIn * 72) / (L * glyph)
   const byHeight = hIn * 72 * 0.92
-  return Math.round(Math.max(4, Math.min(maxPt, byWidth, byHeight)) * 10) / 10
+  return Math.round(Math.max(minPt, Math.min(maxPt, byWidth, byHeight)) * 10) / 10
 }
+// The chemical name printed on a label: LWCS506 prints the short name (full IUPAC
+// won't hold at 300 DPI on the tiny cap); others print the full name.
+export function labelTitle(sp, rec) { return sp.useShort ? (rec.short || rec.name || '') : (rec.name || '') }
 export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
   const sp = LWCS[key], r = sp.rect, esc = escXml, f = (n) => (+n).toFixed(4)
   const pad = 0.03
@@ -89,10 +95,13 @@ export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
   const nH = r.h * 0.46, cH = r.h * 0.20, kH = r.h * 0.26
   const nY = r.y + pad, cY = nY + nH, kY = cY + cH
   const url = labelPayload(rec.code, mode, shortHost)
-  // Fit each line to its box so long names/codes don't overflow on import.
-  const nSz = fitPt(rec.name, tw, nH, key === '503' ? 13 : (key === '507' ? 11 : 9))
-  const cSz = fitPt('CAS ' + rec.cas, tw, cH, key === '503' ? 9 : (key === '507' ? 8 : 6), 0.52)
-  const kSz = fitPt(rec.code, tw, kH, key === '503' ? 13 : (key === '507' ? 11 : 9), 0.6)
+  const title = labelTitle(sp, rec)
+  // Fit each line to its box so long names/codes don't overflow on import; the
+  // per-label fMin (mm → pt) keeps the name legible on the tiny caps.
+  const minPt = (sp.fMin || 1.4) * 2.835   // mm → pt
+  const nSz = fitPt(title, tw, nH, (sp.fName || 3) * 2.835, 0.56, minPt)
+  const cSz = fitPt('CAS ' + rec.cas, tw, cH, (sp.fCas || 1.8) * 2.835, 0.52)
+  const kSz = fitPt(rec.code, tw, kH, (sp.fCode || 3) * 2.835, 0.6)
   const brT = `<Brushes><BackgroundBrush><SolidColorBrush><Color A="0" R="1" G="1" B="1"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes>`
   const brQ = `<Brushes><BackgroundBrush><SolidColorBrush><Color A="1" R="1" G="1" B="1"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes>`
   const T = (name, text, x, y, w, hh, font, size, bold, va) => `<TextObject><Name>${name}</Name>${brT}<Rotation>Rotation0</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle><Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin><HorizontalAlignment>Left</HorizontalAlignment><VerticalAlignment>${va}</VerticalAlignment><FitMode>ShrinkToFit</FitMode><IsVertical>False</IsVertical><FormattedText><FitMode>ShrinkToFit</FitMode><HorizontalAlignment>Left</HorizontalAlignment><VerticalAlignment>${va}</VerticalAlignment><IsVertical>False</IsVertical><LineTextSpan><TextSpan><Text>${esc(text)}</Text><FontInfo><FontName>${font}</FontName><FontSize>${size}</FontSize><IsBold>${bold}</IsBold><IsItalic>False</IsItalic><IsUnderline>False</IsUnderline><FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush></FontInfo></TextSpan></LineTextSpan></FormattedText><ObjectLayout><DYMOPoint><X>${f(x)}</X><Y>${f(y)}</Y></DYMOPoint><Size><Width>${f(w)}</Width><Height>${f(hh)}</Height></Size></ObjectLayout></TextObject>`

@@ -5,7 +5,7 @@
 // scannable QR codes and full/short/code payload modes. Prints black-on-white.
 import { h, ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useLabStore } from '../stores/labStore'
-import { LWCS, HERMA, labelPayload, qrSvg, moduleMM, scanVerdict, dymoXml } from '../utils/cryoLabels'
+import { LWCS, HERMA, labelPayload, qrSvg, moduleMM, scanVerdict, dymoXml, labelTitle } from '../utils/cryoLabels'
 
 const store = useLabStore()
 const props = defineProps({ seed: { type: Object, default: null } })
@@ -29,7 +29,7 @@ function addRecord(item) {
   if (!item) return
   const found = records.value.find(r => r.code === (item.code || '') && r.name === (item.name || ''))
   if (found) { found.copies++; return }
-  records.value.push({ code: item.code || '', name: item.name || '', cas: item.cas || '', copies: 1 })
+  records.value.push({ code: item.code || '', name: item.name || '', short: item.short || '', cas: item.cas || '', copies: 1 })
 }
 function setCopies(rec, n) { rec.copies = Math.max(1, Math.min(999, (n | 0) || 1)) }
 onMounted(() => { addRecord(props.seed) })
@@ -73,7 +73,10 @@ function ruleEl(o = 0.4, m = '0.35mm 0 0.3mm') {
 }
 
 function eppiInner(rec, s) {
-  return [nameEl(rec.name, s), ruleEl(), casEl(rec.cas, s), codeEl(rec.code, s)]
+  const els = [nameEl(labelTitle(s, rec), s, String(s.fMin || 1.1))]
+  if (s.rule !== false) els.push(ruleEl())   // LWCS506 drops the rule to buy height
+  els.push(casEl(rec.cas, s), codeEl(rec.code, s))
+  return els
 }
 // DYMO landscape strip: name/CAS/code column on the left, QR at the right end —
 // inscribed in the SnapPEEL cap circle for eppis (506/507), plain for 503.
@@ -278,15 +281,20 @@ function printToDymo() {
           </div>
           <div v-if="records.length" class="cl-selected">
             <div class="cl-sel-title">Selected · {{ totalLabels }} label{{ totalLabels === 1 ? '' : 's' }}</div>
-            <div v-for="(r, i) in records" :key="i" class="cl-sel-row">
-              <span class="cl-selcode">{{ r.code }}</span>
-              <span class="cl-selname" :title="r.name">{{ r.name }}</span>
-              <div class="cl-copies">
-                <button @click="setCopies(r, r.copies - 1)" :disabled="r.copies <= 1">−</button>
-                <input type="number" min="1" :value="r.copies" @input="setCopies(r, +$event.target.value)">
-                <button @click="setCopies(r, r.copies + 1)">+</button>
+            <div v-for="(r, i) in records" :key="i" class="cl-sel-item">
+              <div class="cl-sel-row">
+                <span class="cl-selcode">{{ r.code }}</span>
+                <span class="cl-selname" :title="r.name">{{ r.name }}</span>
+                <div class="cl-copies">
+                  <button @click="setCopies(r, r.copies - 1)" :disabled="r.copies <= 1">−</button>
+                  <input type="number" min="1" :value="r.copies" @input="setCopies(r, +$event.target.value)">
+                  <button @click="setCopies(r, r.copies + 1)">+</button>
+                </div>
+                <button class="cl-sel-x" @click="records.splice(i, 1)" title="Remove">✕</button>
               </div>
-              <button class="cl-sel-x" @click="records.splice(i, 1)" title="Remove">✕</button>
+              <label v-if="media === 'dymo' && dymoSize === '506'" class="cl-shortrow" title="The 0.5 mL cap prints this short name (a full IUPAC name will not fit). Blank = the full name, shrunk.">
+                <span>short</span><input v-model="r.short" :placeholder="r.name">
+              </label>
             </div>
           </div>
         </div>
@@ -336,7 +344,11 @@ function printToDymo() {
 .cl-pickrow i { opacity: .4; font-size: 0.72rem; }
 .cl-selected { border-top: 1px solid var(--ln, #eee); padding: 8px 6px; overflow-y: auto; max-height: 42%; }
 .cl-sel-title { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--tx2, #64748b); padding: 2px 6px 6px; }
+.cl-sel-item { padding: 2px 0; }
 .cl-sel-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; }
+.cl-shortrow { display: flex; align-items: center; gap: 6px; padding: 0 6px 5px 6px; }
+.cl-shortrow > span { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--tx3, #94a3b8); flex: none; }
+.cl-shortrow input { flex: 1; min-width: 0; font-size: 0.76rem; padding: 3px 6px; border: 1px solid var(--ln2, #cbd5e1); border-radius: 5px; background: var(--fl, transparent); color: inherit; }
 .cl-selcode { font: 600 0.72rem/1 ui-monospace, monospace; color: var(--acc, #2563eb); flex: none; }
 .cl-selname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.76rem; }
 .cl-copies { display: inline-flex; align-items: center; flex: none; border: 1px solid var(--ln2, #cbd5e1); border-radius: 6px; overflow: hidden; }

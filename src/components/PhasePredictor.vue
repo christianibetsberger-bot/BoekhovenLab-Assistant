@@ -356,6 +356,7 @@
                     <span>A: <strong>{{ computeWellVolumes(suggestions[0]).vA.toFixed(2) }} µL</strong></span>
                     <span>B: <strong>{{ computeWellVolumes(suggestions[0]).vB.toFixed(2) }} µL</strong></span>
                     <span>C (adj.): <strong>{{ computeWellVolumes(suggestions[0]).vC.toFixed(2) }} µL</strong></span>
+                    <span v-if="computeWellVolumes(suggestions[0]).vConst > 0.001">Const: <strong>{{ computeWellVolumes(suggestions[0]).vConst.toFixed(2) }} µL</strong></span>
                     <span>Fill: <strong>{{ computeWellVolumes(suggestions[0]).vFill.toFixed(2) }} µL</strong></span>
                     <span v-if="computeWellVolumes(suggestions[0]).backgroundNa_mM > 0.001" style="color:#f59e0b;">
                       Bg Na⁺: <strong>{{ computeWellVolumes(suggestions[0]).backgroundNa_mM.toFixed(2) }} mM</strong>
@@ -368,6 +369,30 @@
               </template>
             </div>
           </div>
+        </div>
+
+        <div class="internal-section">
+          <div class="flex-between" style="margin-bottom:8px;">
+            <h3 style="margin:0; border:none; padding:0; font-size:0.95rem;">Constant components <span style="font-weight:400; opacity:0.55; font-size:0.78rem;">(same in every well)</span></h3>
+            <button class="cond-btn ghost" style="padding:4px 10px;" @click="addConstant"><i class="fas fa-plus"></i> Add</button>
+          </div>
+          <p v-if="!config.constants || !config.constants.length" style="font-size:0.78rem; opacity:0.5; margin:0;">
+            Components added here go into every well at a fixed final concentration (e.g. a dye or a background buffer), taking their volume from the fill-up.
+          </p>
+          <template v-else>
+            <div style="display:grid; grid-template-columns:1fr 74px 66px 74px 66px 24px; gap:6px; font-size:0.66rem; font-weight:700; opacity:0.5; padding:0 2px 3px;">
+              <span>Component</span><span>Final</span><span>unit</span><span>Stock</span><span>unit</span><span></span>
+            </div>
+            <div v-for="(k, i) in config.constants" :key="k.id" style="display:grid; grid-template-columns:1fr 74px 66px 74px 66px 24px; gap:6px; align-items:center; margin-bottom:6px;">
+              <input type="text" v-model="k.name" placeholder="e.g. Thioflavin T" style="font-size:0.8rem; padding:5px;">
+              <input type="number" v-model.number="k.conc" min="0" step="any" @change="renderPlot" style="font-size:0.8rem; padding:5px;" title="Final concentration in every well">
+              <select v-model="k.unit" @change="renderPlot" style="font-size:0.76rem; padding:4px;"><option>M</option><option>mM</option><option>µM</option><option>nM</option><option>mg/mL</option><option>µg/µL</option><option>ng/µL</option><option>X</option><option>%</option></select>
+              <input type="number" v-model.number="k.stockConc" min="0" step="any" @change="renderPlot" style="font-size:0.8rem; padding:5px;" title="Stock concentration">
+              <select v-model="k.stockUnit" @change="renderPlot" style="font-size:0.76rem; padding:4px;"><option>M</option><option>mM</option><option>µM</option><option>nM</option><option>mg/mL</option><option>µg/µL</option><option>ng/µL</option><option>X</option><option>%</option></select>
+              <button @click="removeConstant(i)" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:0.9rem;" title="Remove">✕</button>
+            </div>
+            <div style="font-size:0.72rem; opacity:0.6;">Volume per well = final ÷ stock × {{ config.targetVolume }} µL, taken from the fill-up.</div>
+          </template>
         </div>
 
         <div class="internal-section" style="flex-grow: 1;">
@@ -1007,7 +1032,17 @@ const config = ref({
   // Component dependency links: target = source * factor + offset (stored-unit arithmetic)
   dependencies: [],
   showDependencies: false,
+  // Constant components — same final concentration in every well. Each:
+  // { id, name, conc, unit, stockConc, stockUnit }.
+  constants: [],
 })
+
+// ── Constant components (same in every well) ─────────────────────────────────
+const addConstant = () => {
+  if (!config.value.constants) config.value.constants = []
+  config.value.constants.push({ id: 'k_' + (globalThis.crypto?.randomUUID?.() || Date.now().toString(36)), name: '', conc: 0, unit: 'mM', stockConc: 100, stockUnit: 'mM' })
+}
+const removeConstant = (i) => { config.value.constants.splice(i, 1); renderPlot() }
 
 // Current D-slice value for the 4th-component slider in the 3D scatter plot.
 // Points whose |compD − currentDSlice| ≤ compDStep/2 are shown in the scatter.
@@ -1301,7 +1336,18 @@ const computeWellVolumes = (sug) => {
     vC = cfg.stockSalt > 0 ? (sug.salt * V) / cfg.stockSalt : 0
   }
 
-  const vFill = V - vA - vB - vC - vD
+  // Constant components — the same final concentration in every well. Each adds a
+  // fixed volume that reduces the fill-up. (Treated as inert for the Na⁺ balance;
+  // uniform Na⁺ buffers belong in the fill-up/medium fields above.)
+  const consts = Array.isArray(cfg.constants) ? cfg.constants : []
+  const constVols = consts.map(k => {
+    const stockMM = getMM(k.stockConc, k.stockUnit)
+    const cMM = getMM(k.conc, k.unit)
+    return stockMM > 0 ? (cMM / stockMM) * V : 0
+  })
+  const vConst = constVols.reduce((a, b) => a + b, 0)
+
+  const vFill = V - vA - vB - vC - vD - vConst
 
   const medD = cfg.compDMedium || { type: 'water', naMM: 0, pH: 7.0 }
   const naD = (cfg.enableCompD && medD.type === 'buffer') ? (medD.naMM || 0) : 0
@@ -1328,7 +1374,7 @@ const computeWellVolumes = (sug) => {
     mixedPH = +((-Math.log10(totalH / V)).toFixed(2))
   }
 
-  return { vA, vB, vC, vD, vFill: Math.max(0, vFill), backgroundNa_mM, mixedPH, exceeds: vFill < 0 }
+  return { vA, vB, vC, vD, vConst, constVols, vFill: Math.max(0, vFill), backgroundNa_mM, mixedPH, exceeds: vFill < 0 }
 }
 
 // Apply component-dependency links to a (copied) experiment/suggestion object.
@@ -1411,7 +1457,7 @@ const exportSuggestionsToPlate = () => {
             let wId = String.fromCharCode(65 + targetR) + (targetC + 1);
 
             const effectiveSug = applyDependencies({ ...sug })
-            const { vA, vB, vC, vD, vFill, backgroundNa_mM, mixedPH, exceeds } = computeWellVolumes(effectiveSug)
+            const { vA, vB, vC, vD, vFill, constVols, backgroundNa_mM, mixedPH, exceeds } = computeWellVolumes(effectiveSug)
 
             let warningHtml = exceeds ? `<br><span style="color:#ef4444; font-size:0.7rem;">⚠️ Vol Exceeds Limit</span>` : '';
 
@@ -1438,11 +1484,17 @@ const exportSuggestionsToPlate = () => {
                 ? getInventoryTag(config.value.compDInv, fmt(vD), effectiveSug.compD || 0)
                 : '';
 
+            let constHtml = '';
+            (config.value.constants || []).forEach((k, ci) => {
+                const v = (constVols && constVols[ci]) || 0;
+                constHtml += `<strong>${esc(k.name || 'Constant')}:</strong> ${fmt(v)} µL (${esc(String(k.conc))} ${esc(k.unit)})<br>`;
+            });
+
             let cellHtml = `<strong style="color: var(--primary);">AI Target [${sug.sampleId}]</strong><br>
                             ${getInventoryTag(config.value.anionInv, fmt(vA), effectiveSug.anion)}
                             ${getInventoryTag(config.value.cationInv, fmt(vB), effectiveSug.cation)}
                             ${getInventoryTag(config.value.saltInv, fmt(vC), effectiveSug.salt)}
-                            ${dRowHtml}${bgHtml}${fillupHtml}${warningHtml}`;
+                            ${dRowHtml}${constHtml}${bgHtml}${fillupHtml}${warningHtml}`;
 
             plate.wells[wId] = cellHtml;
         }

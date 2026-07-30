@@ -906,7 +906,14 @@
     <div v-if="showSaveCond" class="cond-modal" :class="{ 'dark-mode': store.isDarkMode }" @click.self="showSaveCond = false">
       <div class="cond-dialog">
         <div class="cond-dhead"><span><i class="fas fa-floppy-disk"></i> Save conditions</span><button class="cond-x" @click="showSaveCond = false">✕</button></div>
+        <div v-if="myConditions.length" class="cond-f"><span>Save to</span>
+          <select v-model="saveCondTarget" @change="onSaveTargetChange">
+            <option value="">＋ New preset</option>
+            <option v-for="c in myConditions" :key="c.item_id" :value="c.item_id">Overwrite: {{ c.name }}</option>
+          </select>
+        </div>
         <label class="cond-f"><span>Name</span><input v-model="saveCondName" placeholder="e.g. CTI-117 coacervate screen" @keydown.enter="doSaveConditions"></label>
+        <p v-if="suggestions.length" class="cond-note"><i class="fas fa-circle-info"></i> The generated grid-locked plate ({{ suggestions.length }} wells) will be saved with these conditions.</p>
         <div class="cond-f"><span>Scope</span>
           <div class="scope-chips">
             <button type="button" class="scope-chip" :class="{ active: saveCondScope === 'Personal' }" @click="saveCondScope = 'Personal'">Private</button>
@@ -1690,6 +1697,7 @@ const showSaveCond = ref(false)
 const saveCondName = ref('')
 const saveCondScope = ref('Personal')
 const saveCondMsg = ref('')
+const saveCondTarget = ref('')   // '' = new preset, else an existing item_id to overwrite
 const myConditions = computed(() => savedConditions.value.filter(c => c.owner_id === store.user?.id))
 const globalConditions = computed(() => savedConditions.value.filter(c => c.scope === 'Global' && c.owner_id !== store.user?.id))
 const selectedCondIsMine = computed(() => savedConditions.value.find(c => c.item_id === selectedConditionId.value)?.owner_id === store.user?.id)
@@ -1700,29 +1708,52 @@ async function loadConditionsList() {
     if (!error && data) savedConditions.value = data.map(r => ({ item_id: r.item_id, owner_id: r.owner_id, scope: r.scope, name: r.name, data: r.data }))
   } catch { /* table may not exist yet */ }
 }
-function openSaveConditions() { saveCondName.value = ''; saveCondScope.value = 'Personal'; saveCondMsg.value = ''; showSaveCond.value = true }
+function openSaveConditions() {
+  // Default to overwriting the currently-loaded preset (if it's yours), else new.
+  const cur = savedConditions.value.find(c => c.item_id === selectedConditionId.value && c.owner_id === store.user?.id)
+  saveCondTarget.value = cur ? cur.item_id : ''
+  saveCondName.value = cur ? cur.name : ''
+  saveCondScope.value = cur ? cur.scope : 'Personal'
+  saveCondMsg.value = ''
+  showSaveCond.value = true
+}
+function onSaveTargetChange() {
+  const t = savedConditions.value.find(c => c.item_id === saveCondTarget.value)
+  if (t) { saveCondName.value = t.name; saveCondScope.value = t.scope }
+}
 async function doSaveConditions() {
   const name = saveCondName.value.trim()
   if (!name) { saveCondMsg.value = 'Give it a name.'; return }
   if (!store.user?.id) { saveCondMsg.value = 'Sign in to save.'; return }
   saveCondMsg.value = 'Saving…'
+  const existing = saveCondTarget.value ? savedConditions.value.find(c => c.item_id === saveCondTarget.value) : null
+  const item_id = existing ? existing.item_id : ('cond_' + (globalThis.crypto?.randomUUID?.() || Date.now().toString(36)))
   const payload = {
-    item_id: 'cond_' + (globalThis.crypto?.randomUUID?.() || Date.now().toString(36)),
-    owner_id: store.user.id, scope: saveCondScope.value, name,
-    data: JSON.parse(JSON.stringify(config.value)),
+    item_id, owner_id: store.user.id, scope: saveCondScope.value, name,
+    // Save the config AND the generated grid-locked plate (suggestions) so loading
+    // restores both. Older presets stored a flat config — handled on load.
+    data: {
+      config: JSON.parse(JSON.stringify(config.value)),
+      suggestions: JSON.parse(JSON.stringify(suggestions.value || [])),
+    },
   }
   const { error } = await db.from('phase_conditions').upsert(payload, { onConflict: 'item_id' })
   if (error) { saveCondMsg.value = 'Save failed: ' + error.message; return }
   showSaveCond.value = false
+  selectedConditionId.value = item_id
   await loadConditionsList()
-  store.toast?.('Conditions saved')
+  store.toast?.(existing ? 'Conditions overwritten' : 'Conditions saved')
 }
 function loadSelectedCondition() {
   const c = savedConditions.value.find(x => x.item_id === selectedConditionId.value)
   if (!c || !c.data) return
-  config.value = { ...config.value, ...JSON.parse(JSON.stringify(c.data)) }
+  const d = c.data
+  const cfg = d.config || d   // new {config,suggestions} shape, or a legacy flat config
+  config.value = { ...config.value, ...JSON.parse(JSON.stringify(cfg)) }
+  if (Array.isArray(d.suggestions)) suggestions.value = JSON.parse(JSON.stringify(d.suggestions))
   nextTick(() => renderPlot())
-  store.toast?.(`Loaded "${c.name}"`)
+  const withPlate = Array.isArray(d.suggestions) && d.suggestions.length
+  store.toast?.(`Loaded "${c.name}"${withPlate ? ' + grid-locked plate' : ''}`)
 }
 async function deleteSelectedCondition() {
   const id = selectedConditionId.value
@@ -2433,4 +2464,5 @@ onMounted(async () => {
 .cond-f input { padding: 7px 9px; border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px; background: var(--fl, transparent); color: inherit; }
 .cond-dfoot { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .cond-msg { font-size: 0.76rem; color: var(--wr, #dc2626); }
+.cond-note { font-size: 0.72rem; opacity: 0.7; margin: 0 0 12px; display: flex; gap: 6px; align-items: baseline; }
 </style>

@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase'
+import CryoLabels from './CryoLabels.vue'
 import * as XLSX from 'xlsx'
 import { jsPDF } from 'jspdf'
 import { calcSeqExtinction, calcSeqMw, calcSeqTm, calcSeqGc } from '../utils/seqUtils'
@@ -490,8 +491,12 @@ const importBulk = () => {
     bulkPasteText.value = ''
 }
 
-// ── Label Printing ────────────────────────────────────────────────────────────
+// ── Cryo label studio (DYMO CryoSTUCK + HERMA 4363, per the design handoff) ──
+const showCryoLabels = ref(false)
+const cryoSeed = ref(null)
+const openCryoLabels = (item = null) => { cryoSeed.value = item; showCryoLabels.value = true }
 
+// ── Label Printing (legacy HERMA modal — superseded by the cryo studio above) ──
 const showLabelModal  = ref(false)
 const labelQueue      = ref([])   // [{ item, copies }]
 const startHermaLabel = ref(1)    // 1–12
@@ -531,11 +536,7 @@ const toggleLabelItem = (item) => {
 
 // Quick per-row QR label — works for any item (Global or Personal): queue it and
 // open the label/QR modal straight away.
-const openLabelFor = (item) => {
-    if (!isInQueue(item.id)) labelQueue.value.push({ item, copies: 1 })
-    labelQrMode.value = 'with'
-    showLabelModal.value = true
-}
+const openLabelFor = (item) => openCryoLabels(item)
 
 const labelCapacity = computed(() => {
     const total = labelQueue.value.reduce((s, e) => s + (e.copies || 1), 0)
@@ -1350,8 +1351,8 @@ const generateLabelsPDF = () => {
             <button @click="showBulkModal = true" style="flex-grow: 1; height: 40px;">
                 <i class="fas fa-file-import"></i> Bulk Import
             </button>
-            <button @click="showLabelModal = true" style="flex-grow: 1; height: 40px;">
-                <i class="fas fa-tag"></i> Print Labels
+            <button @click="openCryoLabels()" style="flex-grow: 1; height: 40px;">
+                <i class="fas fa-tags"></i> Print Labels
             </button>
             <button @click="showLocationManager = true" style="flex-grow: 1; height: 40px;">
                 <i class="fas fa-map-marker-alt"></i> Locations
@@ -1402,6 +1403,10 @@ const generateLabelsPDF = () => {
         </div>
       </div>
     </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <CryoLabels v-if="showCryoLabels" :seed="cryoSeed" @close="showCryoLabels = false" />
     </Teleport>
   </div>
 </template>

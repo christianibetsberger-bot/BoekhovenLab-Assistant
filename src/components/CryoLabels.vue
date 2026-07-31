@@ -431,8 +431,8 @@ async function printToDymo() {
 .cl-preview { flex: 1; min-width: 0; overflow: auto; background: repeating-conic-gradient(#f4f4f2 0 25%, #ececea 0 50%) 0 0 / 16px 16px; padding: 20px; }
 .cl-sheet { display: flex; flex-wrap: wrap; gap: 18px; align-content: flex-start; }
 .cl-unit { position: relative; background: #fff; padding: 10px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,.12); display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.cl-unit-x { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; border-radius: 50%; border: none; background: var(--fl, #eef2f7); color: var(--tx2, #64748b); font-size: 11px; line-height: 1; cursor: pointer; z-index: 3; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,.12); transition: background .12s, color .12s; }
-.cl-unit-x:hover { background: var(--wr, #dc2626); color: #fff; }
+.cl-unit-x { position: absolute; top: 5px; right: 5px; width: 16px; height: 14px; border-radius: 3px; border: none; background: var(--wr, #dc2626); color: #fff; font-size: 9px; line-height: 1; cursor: pointer; z-index: 3; display: flex; align-items: center; justify-content: center; padding: 0; transition: background .12s; }
+.cl-unit-x:hover { background: #b91c1c; }
 .cl-unit-cap { font: 500 0.66rem/1 ui-monospace, monospace; color: #64748b; }
 .cl-empty { font-size: 0.82rem; color: var(--tx3, #94a3b8); font-style: italic; padding: 14px; text-align: center; }
 </style>

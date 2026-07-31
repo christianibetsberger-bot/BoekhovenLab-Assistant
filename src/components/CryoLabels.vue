@@ -55,9 +55,16 @@ const scanInfo = computed(() => {
 })
 
 // ── Faithful label renderers (ported from the handoff's h()-based reference) ──
-function qrImg(code, s) {
+function qrImg(code, s, sizeMm = s.qr) {
   const uri = qrSvg(labelPayload(code, qrMode.value, shortHost.value), s.ecc).uri
-  return h('img', { src: uri, alt: 'QR', style: { width: s.qr + 'mm', height: s.qr + 'mm', display: 'block' } })
+  return h('img', { src: uri, alt: 'QR', style: { width: sizeMm + 'mm', height: sizeMm + 'mm', display: 'block' } })
+}
+// Largest QR square that fits inside the round cap with a real corner margin.
+// (A square inscribed in a Ø circle has its corners at circ/√2; back off so the
+// finder-pattern corners never graze the die-cut edge.) Preview-only — the .dymo
+// keeps sp.qr, and DYMO itself renders the tier slightly inset within that box.
+function capQrMm(s) {
+  return Math.min(s.qr, s.circ / Math.SQRT2 - 0.9)
 }
 function nameEl(name, s, min = '1.1') {
   return h('div', { 'data-fit': '1', 'data-max': String(s.fName), 'data-min': min, style: { fontFamily: COND, fontWeight: 700, lineHeight: 1.02, letterSpacing: '-0.01em', color: '#000', flex: '1 1 auto', minHeight: 0, overflow: 'hidden', wordBreak: 'break-word', fontSize: s.fName + 'mm' } }, name)
@@ -81,13 +88,14 @@ function eppiInner(rec, s) {
 // DYMO landscape strip: name/CAS/code column on the left, QR at the right end —
 // inscribed in the SnapPEEL cap circle for eppis (506/507), plain for 503.
 function dymoLabel(rec, s) {
-  const qr = qrImg(rec.code, s)
   if (!s.cap) {
-    const qrBox = h('div', { style: { flex: '0 0 auto', display: 'flex', alignItems: 'center' } }, qr)
+    const qrBox = h('div', { style: { flex: '0 0 auto', display: 'flex', alignItems: 'center' } }, qrImg(rec.code, s))
     const textCol = h('div', { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' } }, eppiInner(rec, s))
     return h('div', { style: { width: s.W + 'mm', height: s.H + 'mm', boxSizing: 'border-box', background: '#fff', border: '0.15mm solid #b7b6b1', borderRadius: '0.7mm', padding: '1.1mm 1.6mm', display: 'flex', alignItems: 'stretch', gap: '1mm', fontFamily: COND } }, [qrBox, textCol])
   }
   // Cap circle (QR) on the LEFT, wrap-panel text on the RIGHT — matches the die-cut.
+  // Inscribe the QR with a corner margin so it never grazes the round cap edge.
+  const qr = qrImg(rec.code, s, capQrMm(s))
   const circle = h('div', { style: { position: 'absolute', left: 0, top: ((s.H - s.circ) / 2) + 'mm', width: s.circ + 'mm', height: s.circ + 'mm', borderRadius: '50%', background: '#fff', border: '0.15mm solid #b7b6b1', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 } }, qr)
   const wrap = h('div', { style: { position: 'absolute', left: (s.circ - 0.6) + 'mm', top: 0, width: s.wrapW + 'mm', height: s.H + 'mm', background: '#fff', border: '0.15mm solid #b7b6b1', borderRadius: '0.7mm', boxSizing: 'border-box', padding: '0.9mm 0.9mm 0.9mm 1.2mm', display: 'flex', flexDirection: 'column', justifyContent: 'center' } }, eppiInner(rec, s))
   return h('div', { style: { position: 'relative', width: s.W + 'mm', height: s.H + 'mm', fontFamily: COND } }, [wrap, circle])

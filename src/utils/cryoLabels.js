@@ -15,7 +15,7 @@ export const INVENTORY_BASE = 'https://christianibetsberger-bot.github.io/Boekho
 export const LWCS = {
   // qrSize = the DYMO QR "Layout" tier so the code fits the cap: Sehr klein / Klein
   // / Mittel → VerySmall / Small / Medium.
-  '506': { label: '0.5 mL Eppendorf', tube: 'eppi', cap: true, W: 33.4, H: 12.7, wrapW: 23.9, circ: 9.5, qr: 5.8, ecc: 'L', qrSize: 'Small', fName: 2.6, fCas: 1.6, fCode: 2.6, fMin: 1.7, useShort: true, rule: false, labelName: 'LWCS506', rect: { x: 0.012187534, y: 0.0075000003, w: 1.2833055, h: 0.43402776 } },
+  '506': { label: '0.5 mL Eppendorf', tube: 'eppi', cap: true, W: 33.4, H: 12.7, wrapW: 23.9, circ: 9.5, qr: 6.5, ecc: 'L', qrSize: 'Small', fName: 2.6, fCas: 1.6, fCode: 2.6, fMin: 1.7, useShort: true, rule: false, labelName: 'LWCS506', rect: { x: 0.012187534, y: 0.0075000003, w: 1.2833055, h: 0.43402776 } },
   '507': { label: '1.5 mL Eppendorf', tube: 'eppi', cap: true, W: 39.7, H: 15.9, wrapW: 28.6, circ: 11.1, qr: 7.6, ecc: 'L', qrSize: 'SmallMedium', fName: 2.7, fCas: 1.8, fCode: 2.7, fMin: 1.6, rule: true, labelName: 'LWCS507', rect: { x: 0.14513889, y: 0.045138888, w: 1.5, h: 0.5509028 } },
   '503': { label: 'Falcon 15 & 50 mL', tube: 'falcon', cap: false, W: 38.1, H: 19.1, qr: 14, ecc: 'M', qrSize: 'Medium', fName: 3.2, fCas: 2.1, fCode: 3.0, fMin: 1.8, rule: true, labelName: 'LWCS503', rect: { x: 0.060000032, y: 0.045, w: 1.38, h: 0.675 } },
 }

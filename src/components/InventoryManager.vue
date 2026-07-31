@@ -236,6 +236,13 @@ const removeInventoryItem = (id) => {
     if (idx !== -1) store.inventory.splice(idx, 1);
     store.deleteItemFromCloud(id);
 }
+const deleteViewingItem = () => {
+    const it = viewingItem.value;
+    if (!it) return;
+    if (!confirm(`Delete "${it.name || it.code || 'this item'}" from inventory? This cannot be undone.`)) return;
+    removeInventoryItem(it.id);
+    viewingItem.value = null;
+}
 const createAliquot = (parentItem) => {
     let newItem = JSON.parse(JSON.stringify(parentItem));
     newItem.id = 'inv_aliq_' + crypto.randomUUID();
@@ -1003,7 +1010,10 @@ const generateLabelsPDF = () => {
                 <label>Notes / Prep Info</label>
                 <textarea v-model="viewingItem.notes" rows="5" placeholder="Preparation details — total volume, buffer, fill-up water, pH, salt load, …" style="width: 100%; font-size: 0.8rem;"></textarea>
             </div>
-            <button @click="saveViewingItem" style="margin-top: 20px; width: 100%;">Save & Close</button>
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button class="danger" @click="deleteViewingItem" title="Delete this item from inventory"><i class="fas fa-trash"></i> Delete</button>
+                <button @click="saveViewingItem" style="flex: 1;">Save & Close</button>
+            </div>
         </div>
     </div>
 
@@ -1335,8 +1345,7 @@ const generateLabelsPDF = () => {
                             </button>
                             <button class="secondary small" @click="createAliquot(item)" title="Create Aliquot" style="margin-right: 5px;"><i class="fas fa-vial"></i></button>
                             <button class="small" @click="openLabelFor(item)" title="Print QR label" style="margin-right: 5px;"><i class="fas fa-qrcode"></i></button>
-                            <button class="secondary small" @click="viewProperties(item)" title="View Properties" style="margin-right: 5px;"><i class="fas fa-info-circle"></i></button>
-                            <button class="danger small" @click="removeInventoryItem(item.id)"><i class="fas fa-times"></i></button>
+                            <button class="secondary small" @click="viewProperties(item)" title="View Properties · info page has Delete"><i class="fas fa-info-circle"></i></button>
                         </td>
                     </tr>
                 </tbody>

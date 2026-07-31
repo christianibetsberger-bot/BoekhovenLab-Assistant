@@ -1410,7 +1410,7 @@ const generateLabelsPDF = () => {
     <!-- ── Inventory archive — deleted items, retained with their usage history ── -->
     <Teleport to="body">
         <div v-if="showArchive" @click.self="showArchive = false" style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1200; padding: 20px;">
-            <div style="position: relative; background: var(--modal); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); padding: 22px; border-radius: var(--r); border: 1px solid var(--cdl); box-shadow: var(--sh); max-width: 720px; width: 95%; max-height: 88vh; overflow-y: auto;">
+            <div style="position: relative; background: var(--modal); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); padding: 22px; border-radius: var(--r); border: 1px solid var(--cdl); box-shadow: var(--sh); max-width: 1100px; width: 95%; max-height: 88vh; overflow-y: auto;">
                 <button @click="showArchive = false" title="Close" style="position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border-radius: 50%; background: var(--fl); color: var(--tx2); border: none; box-shadow: none; cursor: pointer; z-index: 2;">✕</button>
                 <h3 style="margin-top: 0; color: var(--primary); border-bottom: 1px solid var(--ln); padding-bottom: 10px;"><i class="fas fa-box-archive"></i> Inventory archive</h3>
                 <p style="font-size: 0.76rem; color: var(--tx2); margin: 10px 0;">Deleted items are kept here with their full data and usage history, so past experiments stay traceable. Restore one to put it back in the active inventory.</p>
@@ -1418,19 +1418,54 @@ const generateLabelsPDF = () => {
                 <div v-if="archiveMissing" style="font-size: 0.8rem; color: var(--tx2);">Run <code>supabase/inventory_usage.sql</code> to enable the archive.</div>
                 <div v-else-if="archiveLoading" style="font-size: 0.8rem; color: var(--tx2);"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
                 <template v-else>
-                    <input v-model="archiveSearch" placeholder="Search archived items…" style="width: 100%; margin-bottom: 10px;">
-                    <div v-if="!filteredArchive.length" style="font-size: 0.8rem; color: var(--tx2);">No archived items.</div>
-                    <div v-for="row in filteredArchive" :key="row.item_id" style="border: 1px solid var(--ln); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;">
-                        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                            <strong style="font-size: 0.85rem;">{{ row.item_data?.name || '(unnamed)' }}</strong>
-                            <span style="font: 600 0.72rem/1 ui-monospace, monospace; color: var(--primary);">{{ row.item_data?.code }}</span>
-                            <span style="font-size: 0.7rem; color: var(--tx2);">deleted {{ new Date(row.deleted_at).toLocaleDateString() }}<template v-if="row.deleted_by"> · {{ row.deleted_by }}</template></span>
-                            <span style="margin-left: auto; display: flex; gap: 6px;">
-                                <button class="secondary small" @click="archiveViewing = archiveViewing?.item_id === row.item_id ? null : row"><i class="fas fa-clock-rotate-left"></i> History</button>
-                                <button class="small" @click="restoreArchived(row)"><i class="fas fa-rotate-left"></i> Restore</button>
-                            </span>
-                        </div>
-                        <UsageHistory v-if="archiveViewing?.item_id === row.item_id" :itemId="row.item_id" :default-open="true" />
+                    <div class="search-box">
+                        <i class="fas fa-search"></i>
+                        <input type="text" v-model="archiveSearch" placeholder="Search by name, CAS, or code...">
+                    </div>
+                    <!-- Same layout as the live inventory, read-only (archived items aren't edited). -->
+                    <div class="table-responsive" style="max-height: 500px; border: 1px solid var(--ln2); border-radius: var(--rc); background: var(--surface-solid);">
+                        <table style="margin-bottom: 0;">
+                            <thead style="position: sticky; top: 0; z-index: 1;">
+                                <tr>
+                                    <th>Code</th>
+                                    <th>CAS</th>
+                                    <th>Class</th>
+                                    <th>Component Name</th>
+                                    <th>Conc / Unit</th>
+                                    <th>Location</th>
+                                    <th>Deleted</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template v-for="row in filteredArchive" :key="row.item_id">
+                                    <tr>
+                                        <td style="font-family: ui-monospace, Menlo, monospace; font-weight: 600; color: var(--acc);">{{ row.item_data?.code || '—' }}</td>
+                                        <td style="font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem;">{{ row.item_data?.cas || '—' }}</td>
+                                        <td style="font-size: 0.8rem;">{{ row.item_data?.itemClass || '—' }}</td>
+                                        <td>{{ row.item_data?.name || '(unnamed)' }}</td>
+                                        <td style="white-space: nowrap;">{{ row.item_data?.stock ?? '—' }} {{ row.item_data?.stockUnit || '' }}</td>
+                                        <td>{{ row.item_data?.location || '—' }}</td>
+                                        <td style="white-space: nowrap; font-size: 0.75rem; color: var(--tx2);" :title="row.deleted_by ? 'by ' + row.deleted_by : ''">
+                                            {{ new Date(row.deleted_at).toLocaleDateString() }}
+                                            <div v-if="row.deleted_by" style="font-size: 0.68rem; opacity: 0.75;">{{ row.deleted_by }}</div>
+                                        </td>
+                                        <td style="white-space: nowrap;">
+                                            <button class="secondary small" @click="archiveViewing = archiveViewing?.item_id === row.item_id ? null : row" title="Usage history" style="margin-right: 5px;"><i class="fas fa-clock-rotate-left"></i></button>
+                                            <button class="small" @click="restoreArchived(row)" title="Restore to the active inventory"><i class="fas fa-rotate-left"></i></button>
+                                        </td>
+                                    </tr>
+                                    <tr v-if="archiveViewing?.item_id === row.item_id">
+                                        <td colspan="8" style="padding: 0 10px 10px;">
+                                            <UsageHistory :itemId="row.item_id" :default-open="true" />
+                                        </td>
+                                    </tr>
+                                </template>
+                                <tr v-if="!filteredArchive.length">
+                                    <td colspan="8" style="text-align: center; color: var(--tx2); font-size: 0.8rem; padding: 18px;">No archived items.</td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </template>
             </div>

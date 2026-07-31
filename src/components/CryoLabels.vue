@@ -118,7 +118,7 @@ function hermaTile(rec, s) {
 // leave the remaining slots blank — so "1 label" prints exactly one tile.
 function hermaCellFromTiles(recs, s) {
   const tiles = recs.map(rec => hermaTile(rec, s))
-  return h('div', { style: { width: HERMA.cell.w + 'mm', height: HERMA.cell.h + 'mm', boxSizing: 'border-box', background: '#fff', display: 'grid', gridTemplateColumns: `repeat(${s.cols}, ${s.tileW}mm)`, gridAutoRows: s.tileH + 'mm', gap: s.gutter + 'mm', justifyContent: 'center', alignContent: 'flex-start', alignItems: 'start', padding: '1.5mm' } }, tiles)
+  return h('div', { style: { width: HERMA.cell.w + 'mm', height: HERMA.cell.h + 'mm', boxSizing: 'border-box', background: '#fff', display: 'grid', gridTemplateColumns: `repeat(${s.cols}, ${s.tileW}mm)`, gridAutoRows: s.tileH + 'mm', gap: s.gutter + 'mm', justifyContent: 'center', alignContent: 'flex-start', alignItems: 'start', padding: '1mm', overflow: 'hidden' } }, tiles)
 }
 // HERMA falcon wrap — content block repeated `repeat` times across the 105 mm cell.
 function hermaWrap(rec, s) {

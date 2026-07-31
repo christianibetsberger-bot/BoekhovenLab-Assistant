@@ -26,8 +26,10 @@ export const LWCS = {
 // Falcons wrap the tube (15 mL repeats its block twice across the width).
 export const HERMA = {
   cell: { w: 105, h: 48 },
-  e05: { kind: 'eppi', label: '0.5 mL Eppendorf', tileW: 33, tileH: 15, cols: 3, rows: 3, gutter: 1.5, qr: 11.5, ecc: 'L', fName: 2.1, fCas: 1.6, fCode: 2.2 },
-  e15: { kind: 'eppi', label: '1.5 mL Eppendorf', tileW: 33, tileH: 22, cols: 3, rows: 2, gutter: 1.5, qr: 13.5, ecc: 'L', fName: 2.6, fCas: 1.9, fCode: 2.6 },
+  // tileH chosen so rows*tileH + (rows-1)*gutter + 2*cellPad (1mm) <= cell.h (48) with margin,
+  // else the bottom row overflows and prints clipped. e05: 3*14+2*1.5+2 = 47; e15: 2*21.5+1.5+2 = 46.5.
+  e05: { kind: 'eppi', label: '0.5 mL Eppendorf', tileW: 33, tileH: 14, cols: 3, rows: 3, gutter: 1.5, qr: 11.5, ecc: 'L', fName: 2.1, fCas: 1.6, fCode: 2.2 },
+  e15: { kind: 'eppi', label: '1.5 mL Eppendorf', tileW: 33, tileH: 21.5, cols: 3, rows: 2, gutter: 1.5, qr: 13.5, ecc: 'L', fName: 2.6, fCas: 1.9, fCode: 2.6 },
   f15: { kind: 'wrap', label: '15 mL Falcon', repeat: 2, qr: 20, ecc: 'M', fName: 4, fCas: 2.6, fCode: 3.6 },
   f50: { kind: 'wrap', label: '50 mL Falcon', repeat: 1, qr: 34, ecc: 'M', fName: 7, fCas: 3.4, fCode: 5 },
 }

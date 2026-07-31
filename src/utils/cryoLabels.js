@@ -41,24 +41,30 @@ export function labelPayload(code, mode = 'full', shortHost = 'boek.li') {
 
 const _cache = {}
 // A crisp-edges SVG data URI of the QR, plus its module count (for scan-size math).
-export function qrSvg(url, ecc = 'M') {
-  const ck = ecc + '|' + url
+export function qrSvg(url, ecc = 'M', qz = 2) {
+  const ck = ecc + '|' + qz + '|' + url
   if (_cache[ck]) return _cache[ck]
   const q = qrcode(0, ecc)
   q.addData(url); q.make()
   const n = q.getModuleCount()
+  // Pad with a quiet zone (qz modules of white on every side) so the code renders
+  // as a complete QR — not one whose modules run to the edge and read as "cut off"
+  // inside the round cap — and stays scannable. (DYMO adds its own quiet zone on the
+  // printed .dymo; this makes the preview / HERMA-printed SVG match that.)
+  const span = n + 2 * qz
   let cells = ''
-  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) cells += `<rect x='${c}' y='${r}' width='1.02' height='1.02'/>`
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 ${n} ${n}' shape-rendering='crispEdges'><rect width='${n}' height='${n}' fill='#fff'/><g fill='#000'>${cells}</g></svg>`
-  const res = { uri: 'data:image/svg+xml,' + encodeURIComponent(svg), n }
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) cells += `<rect x='${c + qz}' y='${r + qz}' width='1.02' height='1.02'/>`
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 ${span} ${span}' shape-rendering='crispEdges'><rect width='${span}' height='${span}' fill='#fff'/><g fill='#000'>${cells}</g></svg>`
+  const res = { uri: 'data:image/svg+xml,' + encodeURIComponent(svg), n, span }
   _cache[ck] = res
   return res
 }
 
 // Printed module size (mm) for a given QR square — the scannability metric.
+// span includes the quiet zone, matching how the code actually prints.
 export function moduleMM(qrMM, url, ecc) {
-  const { n } = qrSvg(url, ecc)
-  return n ? qrMM / n : null
+  const { span } = qrSvg(url, ecc)
+  return span ? qrMM / span : null
 }
 export function scanVerdict(mm) {
   if (mm == null) return { t: '—', c: '#888' }

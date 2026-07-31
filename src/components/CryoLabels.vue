@@ -59,12 +59,12 @@ function qrImg(code, s, sizeMm = s.qr) {
   const uri = qrSvg(labelPayload(code, qrMode.value, shortHost.value), s.ecc).uri
   return h('img', { src: uri, alt: 'QR', style: { width: sizeMm + 'mm', height: sizeMm + 'mm', display: 'block' } })
 }
-// Largest QR square that fits inside the round cap with a real corner margin.
-// (A square inscribed in a Ø circle has its corners at circ/√2; back off so the
-// finder-pattern corners never graze the die-cut edge.) Preview-only — the .dymo
-// keeps sp.qr, and DYMO itself renders the tier slightly inset within that box.
+// QR square for the round cap. The quiet zone baked into qrSvg keeps the black
+// modules clear of the die-cut edge, so the code can fill the cap; the small
+// back-off just stops the white quiet-zone corner from touching the cap border.
+// Preview-only — the .dymo keeps sp.qr.
 function capQrMm(s) {
-  return Math.min(s.qr, s.circ / Math.SQRT2 - 0.9)
+  return Math.min(s.qr, s.circ / Math.SQRT2 - 0.2)
 }
 function nameEl(name, s, min = '1.1') {
   return h('div', { 'data-fit': '1', 'data-max': String(s.fName), 'data-min': min, style: { fontFamily: COND, fontWeight: 700, lineHeight: 1.02, letterSpacing: '-0.01em', color: '#000', flex: '1 1 auto', minHeight: 0, overflow: 'hidden', wordBreak: 'break-word', fontSize: s.fName + 'mm' } }, name)

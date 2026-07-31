@@ -237,19 +237,65 @@ function downloadDymoAll() {
     triggerDownload(dymoXml(key, rec, qrMode.value, shortHost.value), `${LWCS[key].labelName}_${rec.code || 'label'}.dymo`)
   }, i * 250))   // stagger so the browser doesn't block the batch
 }
-function printToDymo() {
-  const fw = window.dymo?.label?.framework
+// Lazy-load the vendored DYMO Connect JS framework. It talks to the DYMO Connect
+// Web Service on https://127.0.0.1:41951, which only exists when DYMO Connect is
+// installed and running on THIS computer. ~344 KB, so only fetch it on demand.
+let _dymoFw = null
+function loadDymoFramework() {
+  if (window.dymo?.label?.framework) return Promise.resolve(window.dymo.label.framework)
+  if (_dymoFw) return _dymoFw
+  _dymoFw = new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = import.meta.env.BASE_URL + 'dymo/dymo.connect.framework.js'
+    s.onload = async () => {
+      const fw = window.dymo?.label?.framework
+      if (!fw) { reject(new Error('DYMO framework unavailable after load')); return }
+      // init() runs an environment check; best-effort with a timeout so we never hang.
+      try { if (typeof fw.init === 'function') await new Promise(res => { let d = false; const done = () => { if (!d) { d = true; res() } }; fw.init(done); setTimeout(done, 1200) }) } catch { /* ignore */ }
+      resolve(fw)
+    }
+    s.onerror = () => { _dymoFw = null; reject(new Error('could not load the DYMO library')) }
+    document.head.appendChild(s)
+  })
+  return _dymoFw
+}
+// Print EVERY selected label (all copies) to a connected LabelWriter 550 in one click.
+// The 550 holds one roll, so all print at the current DYMO size; swap rolls for another
+// size. Each label is fully rendered (own wrapping/QR/fonts) and queued in order.
+const dymoBusy = ref(false)
+async function printToDymo() {
   const key = dymoSize.value
-  if (!fw) {
-    alert('Direct printing needs DYMO Connect + its Web Service running on this computer.\n\nUse “.dymo” to download the label(s) and print from DYMO Connect — or run this app on the lab PC with DYMO Connect installed, then this prints straight to the LabelWriter 550.')
+  const units = flatUnits.value
+  if (!units.length || dymoBusy.value) return
+  let fw
+  try { fw = await loadDymoFramework() }
+  catch {
+    alert('Direct printing needs DYMO Connect installed and running on this computer (it starts a small local print service).\n\nInstall DYMO Connect, connect the LabelWriter 550, then reload this page. Until then, use “.dymo” to print from DYMO Connect.')
     return
   }
+  dymoBusy.value = true
   try {
-    const printers = (fw.getPrinters() || []).filter(p => p && p.isConnected !== false)
-    if (!printers.length) { alert('No DYMO printer detected. Switch on the LabelWriter 550, then try again — or use the .dymo download.'); return }
-    flatUnits.value.forEach(rec => fw.openLabelXml(dymoXml(key, rec, qrMode.value, shortHost.value)).print(printers[0].name))
+    let printers
+    try { printers = await fw.getPrintersAsync() }
+    catch (e) {
+      alert('Could not reach DYMO Connect. Make sure it is running and the LabelWriter 550 is switched on, then try again.\n\n(' + ((e && e.message) || e) + ')')
+      return
+    }
+    const list = Array.isArray(printers) ? printers : (printers ? [printers] : [])
+    const lw = list.filter(p => p && (p.isConnected ?? true) !== false && (p.printerType === 'LabelWriterPrinter' || /labelwriter|550/i.test(p.name || '')))
+    const chosen = lw[0] || list[0]
+    if (!chosen) { alert('No DYMO printer found. Switch on the LabelWriter 550 and confirm it appears in DYMO Connect, then try again.'); return }
+    const printerName = chosen.name
+    let sent = 0
+    for (const rec of units) {
+      await fw.printLabelAsync(printerName, '', dymoXml(key, rec, qrMode.value, shortHost.value), '')
+      sent++
+    }
+    alert(`Sent ${sent} label${sent === 1 ? '' : 's'} to ${printerName}.`)
   } catch (e) {
     alert('DYMO print failed: ' + ((e && e.message) || e) + '\nUse the .dymo download and print from DYMO Connect instead.')
+  } finally {
+    dymoBusy.value = false
   }
 }
 </script>
@@ -278,7 +324,7 @@ function printToDymo() {
         </div>
         <input v-if="qrMode === 'short'" v-model="shortHost" class="cl-host" placeholder="boek.li">
         <template v-if="media === 'dymo'">
-          <button class="cl-print" :disabled="!records.length" @click="printToDymo" title="Print straight to a connected LabelWriter 550 (needs DYMO Connect)"><i class="fas fa-print"></i> Print to DYMO 550</button>
+          <button class="cl-print" :disabled="!records.length || dymoBusy" @click="printToDymo" title="Print all selected labels straight to a connected LabelWriter 550 (needs DYMO Connect running on this computer)"><i class="fas" :class="dymoBusy ? 'fa-spinner fa-spin' : 'fa-print'"></i> {{ dymoBusy ? 'Printing…' : `Print all to DYMO 550${totalLabels > 1 ? ` (${totalLabels})` : ''}` }}</button>
           <button class="cl-print ghost" :disabled="!records.length" @click="downloadDymoAll" title="Download a .dymo file per item to open in DYMO Connect"><i class="fas fa-download"></i> .dymo</button>
           <button class="cl-print ghost" :disabled="!records.length" @click="printLabels" title="Print a paper proof from the browser"><i class="fas fa-file-lines"></i> Proof</button>
         </template>
@@ -385,7 +431,8 @@ function printToDymo() {
 .cl-preview { flex: 1; min-width: 0; overflow: auto; background: repeating-conic-gradient(#f4f4f2 0 25%, #ececea 0 50%) 0 0 / 16px 16px; padding: 20px; }
 .cl-sheet { display: flex; flex-wrap: wrap; gap: 18px; align-content: flex-start; }
 .cl-unit { position: relative; background: #fff; padding: 10px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,.12); display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.cl-unit-x { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; border-radius: 50%; border: none; background: rgba(0,0,0,.35); color: #fff; font-size: 10px; cursor: pointer; z-index: 3; line-height: 1; }
+.cl-unit-x { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; border-radius: 50%; border: none; background: var(--fl, #eef2f7); color: var(--tx2, #64748b); font-size: 11px; line-height: 1; cursor: pointer; z-index: 3; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,.12); transition: background .12s, color .12s; }
+.cl-unit-x:hover { background: var(--wr, #dc2626); color: #fff; }
 .cl-unit-cap { font: 500 0.66rem/1 ui-monospace, monospace; color: #64748b; }
 .cl-empty { font-size: 0.82rem; color: var(--tx3, #94a3b8); font-style: italic; padding: 14px; text-align: center; }
 </style>

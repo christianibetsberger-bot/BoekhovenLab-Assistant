@@ -151,6 +151,11 @@ const printUnits = computed(() => {
   return cells
 })
 
+// Remove the record(s) a clicked preview tile represents (all copies) from the selection.
+function removeUnit(u) {
+  const refs = new Set(u.k === 'cell' ? u.tiles : [u.rec])
+  records.value = records.value.filter(r => !refs.has(r))
+}
 function renderUnit(u) {
   const s = sp.value
   if (u.k === 'dymo') return dymoLabel(u.rec, s)
@@ -187,9 +192,15 @@ function printLabels() {
   let pageCss, body
   if (isHerma) {
     // A4 sheet: HERMA 4363 = 2 columns × 6 rows of 105×48 mm cells (12/sheet).
+    // Paginate into sheets of 12 so more than one page of labels doesn't overflow
+    // a single fixed-height sheet (that overflow was pushing rows off the top).
     pageCss = '@page { size: A4; margin: 0; }'
-    const cells = units.map(u => `<div class="cell">${u}</div>`).join('')
-    body = `<div class="sheet">${cells}</div>`
+    let sheets = ''
+    for (let i = 0; i < units.length; i += 12) {
+      const cells = units.slice(i, i + 12).map(u => `<div class="cell">${u}</div>`).join('')
+      sheets += `<div class="sheet">${cells}</div>`
+    }
+    body = sheets
   } else {
     // One DYMO strip per page (the roll feeds one at a time).
     pageCss = `@page { size: ${s.W}mm ${s.H}mm; margin: 0; }`
@@ -203,7 +214,8 @@ function printLabels() {
       html,body{margin:0;padding:0;background:#fff;}
       ${pageCss}
       .dymo{ page-break-after:always; break-after:page; }
-      .sheet{ width:210mm; height:297mm; padding:4.5mm 0; box-sizing:border-box; display:grid; grid-template-columns:repeat(2,105mm); grid-auto-rows:48mm; }
+      .sheet{ width:210mm; height:297mm; padding:4.5mm 0; box-sizing:border-box; display:grid; grid-template-columns:repeat(2,105mm); grid-auto-rows:48mm; align-content:start; overflow:hidden; break-after:page; page-break-after:always; }
+      .sheet:last-child{ break-after:auto; page-break-after:auto; }
       .cell{ overflow:hidden; }
       img{ image-rendering:pixelated; }
     </style></head><body>${body}<script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script></body></html>`)
@@ -314,6 +326,7 @@ function printToDymo() {
           <div v-if="!records.length" class="cl-empty" style="margin:auto;">Add items from the left to preview labels.</div>
           <div v-else ref="sheetRef" class="cl-sheet">
             <div v-for="(u, i) in printUnits" :key="i" class="cl-unit">
+              <button class="cl-unit-x" @click="removeUnit(u)" title="Remove from preview">✕</button>
               <div data-unit><LabelUnit :u="u" /></div>
               <div class="cl-unit-cap">{{ u.k === 'cell' ? u.tiles.length + ' label' + (u.tiles.length > 1 ? 's' : '') : u.rec.code }} · {{ sp.label }}</div>
             </div>

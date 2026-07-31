@@ -90,6 +90,33 @@ function fitPt(text, wIn, hIn, maxPt, glyph = 0.6, minPt = 4) {
   const byHeight = hIn * 72 * 0.88
   return Math.round(Math.max(minPt, Math.min(maxPt, byWidth, byHeight)) * 10) / 10
 }
+// Greedy word-wrap to <= maxChars per line; hard-breaks any single word longer than a line.
+function wrapWords(text, maxChars) {
+  const words = String(text ?? '').trim().split(/\s+/).filter(Boolean)
+  const lines = []
+  let cur = ''
+  const push = () => { if (cur) { lines.push(cur); cur = '' } }
+  for (let w of words) {
+    while (w.length > maxChars) { push(); lines.push(w.slice(0, maxChars)); w = w.slice(maxChars) }
+    const trial = cur ? cur + ' ' + w : w
+    if (!cur || trial.length <= maxChars) cur = trial
+    else { push(); cur = w }
+  }
+  push()
+  return lines.length ? lines : ['']
+}
+// Largest font size (pt) at which `text` wraps into <= maxLines lines inside wIn×hIn.
+// DYMO's AlwaysFit shrinks a long name to ONE line on a wide box instead of wrapping,
+// so we pre-compute the line breaks and emit them explicitly (mirrors the preview).
+function fitWrap(text, wIn, hIn, maxPt, glyph = 0.56, minPt = 4, maxLines = 3, lineH = 1.16) {
+  for (let pt = maxPt; pt >= minPt; pt -= 0.5) {
+    const maxChars = Math.max(1, Math.floor((wIn * 72 * 0.9) / (pt * glyph)))
+    const lines = wrapWords(text, maxChars)
+    if (lines.length <= maxLines && lines.length * pt * lineH <= hIn * 72 * 0.94) return { pt: Math.round(pt * 10) / 10, lines }
+  }
+  const maxChars = Math.max(1, Math.floor((wIn * 72 * 0.9) / (minPt * glyph)))
+  return { pt: minPt, lines: wrapWords(text, maxChars).slice(0, maxLines) }
+}
 // The chemical name printed on a label: LWCS506 prints the short name (full IUPAC
 // won't hold at 300 DPI on the tiny cap); others print the full name.
 export function labelTitle(sp, rec) { return sp.useShort ? (rec.short || rec.name || '') : (rec.name || '') }
@@ -113,12 +140,17 @@ export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
   // Fit each line to its box so long names/codes don't overflow on import; the
   // per-label fMin (mm → pt) keeps the name legible on the tiny caps.
   const minPt = (sp.fMin || 1.4) * 2.835   // mm → pt
-  const nSz = fitPt(title, tw, nH, (sp.fName || 3) * 2.835, 0.56, minPt)
+  const { pt: nSz, lines: nameLines } = fitWrap(title, tw, nH, (sp.fName || 3) * 2.835, 0.56, minPt, 3)
   const cSz = fitPt('CAS ' + rec.cas, tw, cH, (sp.fCas || 1.8) * 2.835, 0.52)
   const kSz = fitPt(rec.code, tw, kH, (sp.fCode || 3) * 2.835, 0.6)
   const brT = `<Brushes><BackgroundBrush><SolidColorBrush><Color A="0" R="1" G="1" B="1"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes>`
   const brQ = `<Brushes><BackgroundBrush><SolidColorBrush><Color A="1" R="1" G="1" B="1"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes>`
-  const T = (name, text, x, y, w, hh, font, size, bold, va) => `<TextObject><Name>${name}</Name>${brT}<Rotation>Rotation0</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle><Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin><HorizontalAlignment>Left</HorizontalAlignment><VerticalAlignment>${va}</VerticalAlignment><FitMode>AlwaysFit</FitMode><IsVertical>False</IsVertical><FormattedText><FitMode>AlwaysFit</FitMode><HorizontalAlignment>Left</HorizontalAlignment><VerticalAlignment>${va}</VerticalAlignment><IsVertical>False</IsVertical><LineTextSpan><TextSpan><Text>${esc(text)}</Text><FontInfo><FontName>${font}</FontName><FontSize>${size}</FontSize><IsBold>${bold}</IsBold><IsItalic>False</IsItalic><IsUnderline>False</IsUnderline><FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush></FontInfo></TextSpan></LineTextSpan></FormattedText><ObjectLayout><DYMOPoint><X>${f(x)}</X><Y>${f(y)}</Y></DYMOPoint><Size><Width>${f(w)}</Width><Height>${f(hh)}</Height></Size></ObjectLayout></TextObject>`
+  const fInfo = (font, size, bold) => `<FontInfo><FontName>${font}</FontName><FontSize>${size}</FontSize><IsBold>${bold}</IsBold><IsItalic>False</IsItalic><IsUnderline>False</IsUnderline><FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush></FontInfo>`
+  // text may be a string (one line) or an array of pre-wrapped lines (multiple LineTextSpans).
+  const T = (name, text, x, y, w, hh, font, size, bold, va) => {
+    const spans = (Array.isArray(text) ? text : [text]).map(t => `<LineTextSpan><TextSpan><Text>${esc(t)}</Text>${fInfo(font, size, bold)}</TextSpan></LineTextSpan>`).join('')
+    return `<TextObject><Name>${name}</Name>${brT}<Rotation>Rotation0</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle><Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin><HorizontalAlignment>Left</HorizontalAlignment><VerticalAlignment>${va}</VerticalAlignment><FitMode>AlwaysFit</FitMode><IsVertical>False</IsVertical><FormattedText><FitMode>AlwaysFit</FitMode><HorizontalAlignment>Left</HorizontalAlignment><VerticalAlignment>${va}</VerticalAlignment><IsVertical>False</IsVertical>${spans}</FormattedText><ObjectLayout><DYMOPoint><X>${f(x)}</X><Y>${f(y)}</Y></DYMOPoint><Size><Width>${f(w)}</Width><Height>${f(hh)}</Height></Size></ObjectLayout></TextObject>`
+  }
   const Q = `<QRCodeObject><Name>QR</Name>${brQ}<Rotation>Rotation0</Rotation><OutlineThickness>1</OutlineThickness><IsOutlined>False</IsOutlined><BorderStyle>SolidLine</BorderStyle><Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin><BarcodeFormat>QRCode</BarcodeFormat><Data><DataString>${esc(url)}</DataString></Data><HorizontalAlignment>Center</HorizontalAlignment><VerticalAlignment>Middle</VerticalAlignment><Size>${sp.qrSize || 'Medium'}</Size><EQRCodeType>QRCodeText</EQRCodeType><TextDataHolder><Value>${esc(url)}</Value></TextDataHolder><ObjectLayout><DYMOPoint><X>${f(qrX)}</X><Y>${f(qrY)}</Y></DYMOPoint><Size><Width>${f(qr)}</Width><Height>${f(qr)}</Height></Size></ObjectLayout></QRCodeObject>`
   return `<?xml version="1.0" encoding="utf-8"?>
 <DesktopLabel Version="1">
@@ -134,7 +166,7 @@ export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
     <Show_Border>False</Show_Border>
     <HasFixedLength>False</HasFixedLength>
     <FixedLengthValue>0</FixedLengthValue>
-    <DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${Q}${T('NAME', rec.name, tx, nY, tw, nH, 'Arial Narrow', nSz, 'True', 'Top')}${T('CAS', 'CAS ' + rec.cas, tx, cY, tw, cH, 'Consolas', cSz, 'False', 'Middle')}${T('CODE', rec.code, tx, kY, tw, kH, 'Consolas', kSz, 'True', 'Middle')}</LabelObjects></DynamicLayoutManager>
+    <DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${Q}${T('NAME', nameLines, tx, nY, tw, nH, 'Arial Narrow', nSz, 'True', 'Top')}${T('CAS', 'CAS ' + rec.cas, tx, cY, tw, cH, 'Consolas', cSz, 'False', 'Middle')}${T('CODE', rec.code, tx, kY, tw, kH, 'Consolas', kSz, 'True', 'Middle')}</LabelObjects></DynamicLayoutManager>
   </DYMOLabel>
   <LabelApplication>Blank</LabelApplication>
   <DataTable><Columns></Columns><Rows></Rows></DataTable>

@@ -335,7 +335,7 @@ async function printToDymo() {
         <button v-else class="cl-print" :disabled="!records.length" @click="printLabels"><i class="fas fa-print"></i> Print sheet</button>
       </div>
       <div v-if="qrMode === 'auto'" class="cl-shortnote">
-        <i class="fas fa-wand-magic-sparkles"></i> <strong>Auto</strong>: 1.5 mL, Falcon &amp; HERMA go through your short redirect (<strong>{{ shortHost || 'set a host' }}</strong>) — a small QR that opens the compound on scan. The 0.5 mL cap prints the bare <strong>code</strong> (a link can't scan at that size; its printed code &amp; name are the main ID). Clear the host and the bigger tubes fall back to the full link.
+        <i class="fas fa-wand-magic-sparkles"></i> <strong>Auto</strong>: every label goes through your short redirect (<strong>{{ shortHost || 'set a host' }}</strong>) — a small QR that opens the compound on scan, on every size incl. the 0.5 mL cap. Clear the host and it falls back to the full link (bare code on the 0.5 mL cap).
       </div>
       <div v-if="qrMode === 'short'" class="cl-shortnote">
         <i class="fas fa-triangle-exclamation"></i> Short URLs only open the inventory if <strong>{{ shortHost }}</strong> is a redirect host you control (forwarding <code>/{{ '{code}' }}</code> → the inventory page). It isn't set up yet — “Auto” works everywhere today.

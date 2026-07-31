@@ -36,16 +36,14 @@ export const HERMA = {
 
 // The value encoded in the QR. 'full' = the inventory deep link (a phone camera
 // opens the item), 'short' = a redirect host, 'code' = the bare compound code.
-// 'auto' → the smart default. The 0.5 mL cap (qr < 7 mm) always prints the bare code:
-// even the short link is below spec at that size, and its printed code/name is the main
-// ID. Bigger tubes (1.5 mL, Falcon, all HERMA) go through the short redirect if a
-// shortHost is set — a small, working QR that opens the compound — otherwise the full
-// inventory URL. (github.io is too long to make the 0.5 mL a scannable link; only a
-// ≤7-char domain would.)
+// 'auto' → the smart default. With a short redirect configured (shortHost), EVERY label
+// is a small, working QR that opens the compound via shortHost/CODE — including the
+// 0.5 mL cap (confirmed scannable in practice). With no host it falls back to the full
+// inventory URL where the box is big enough (≥7 mm), and the bare code on the 0.5 mL cap.
 export function resolveQrMode(mode, sp, shortHost) {
   if (mode !== 'auto') return mode
-  if (sp && sp.qr < 7) return 'code'
-  return (shortHost && shortHost.trim()) ? 'short' : 'full'
+  if (shortHost && shortHost.trim()) return 'short'
+  return (sp && sp.qr < 7) ? 'code' : 'full'
 }
 export function labelPayload(code, mode = 'full', shortHost = 'boek.li') {
   const c = String(code || '')
@@ -83,8 +81,8 @@ export function moduleMM(qrMM, url, ecc) {
 }
 export function scanVerdict(mm) {
   if (mm == null) return { t: '—', c: '#888' }
-  if (mm >= 0.33) return { t: 'Scannable', c: '#1c7d54' }
-  if (mm >= 0.25) return { t: 'Borderline', c: '#9a6b00' }
+  if (mm >= 0.22) return { t: 'Scannable', c: '#1c7d54' }   // field-confirmed: the short-URL v2 QR scans on the 0.5 mL cap (~0.22 mm)
+  if (mm >= 0.17) return { t: 'Borderline', c: '#9a6b00' }
   return { t: 'Below spec', c: '#a2361f' }
 }
 

@@ -66,6 +66,12 @@ create policy "inventory_archive read" on public.inventory_archive
 drop policy if exists "inventory_archive insert" on public.inventory_archive;
 create policy "inventory_archive insert" on public.inventory_archive
   for insert with check (auth.role() = 'authenticated');
+-- The app archives with an UPSERT, so re-archiving an item that was archived and
+-- later restored resolves to an UPDATE — without this policy that delete would be
+-- refused (the app now blocks deletion when archiving fails).
+drop policy if exists "inventory_archive update" on public.inventory_archive;
+create policy "inventory_archive update" on public.inventory_archive
+  for update using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 -- Delete = "restore" (the app re-inserts the item into `inventory`, then removes it here).
 drop policy if exists "inventory_archive delete" on public.inventory_archive;
 create policy "inventory_archive delete" on public.inventory_archive

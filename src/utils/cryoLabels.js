@@ -36,6 +36,15 @@ export const HERMA = {
 
 // The value encoded in the QR. 'full' = the inventory deep link (a phone camera
 // opens the item), 'short' = a redirect host, 'code' = the bare compound code.
+// 'auto' → the full inventory URL where the QR box is big enough to scan it, but the
+// bare code on the tiny 0.5 mL cap: a full URL can't fit a scannable QR that small
+// without a short redirect domain, and on a cap that size the printed code/name is the
+// primary ID anyway. Threshold ~7 mm: 0.5 mL cap (6.5) → code; 1.5 mL, Falcon, all
+// HERMA tiles (≥7.6) → full.
+export function resolveQrMode(mode, sp) {
+  if (mode !== 'auto') return mode
+  return (sp && sp.qr < 7) ? 'code' : 'full'
+}
 export function labelPayload(code, mode = 'full', shortHost = 'boek.li') {
   const c = String(code || '')
   if (mode === 'short') return `${shortHost}/${c}`
@@ -137,7 +146,7 @@ export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
   const tw = Math.max(0.3, Math.min(r.x + r.w, dieR) - pad - tx)
   const nH = r.h * 0.46, cH = r.h * 0.20, kH = r.h * 0.26
   const nY = r.y + pad, cY = nY + nH, kY = cY + cH
-  const url = labelPayload(rec.code, mode, shortHost)
+  const url = labelPayload(rec.code, resolveQrMode(mode, sp), shortHost)
   const title = labelTitle(sp, rec)
   // Fit each line to its box so long names/codes don't overflow on import; the
   // per-label fMin (mm → pt) keeps the name legible on the tiny caps.

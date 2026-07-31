@@ -5,7 +5,7 @@
 // scannable QR codes and full/short/code payload modes. Prints black-on-white.
 import { h, ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useLabStore } from '../stores/labStore'
-import { LWCS, HERMA, labelPayload, qrSvg, moduleMM, scanVerdict, dymoXml, labelTitle } from '../utils/cryoLabels'
+import { LWCS, HERMA, labelPayload, resolveQrMode, qrSvg, moduleMM, scanVerdict, dymoXml, labelTitle } from '../utils/cryoLabels'
 
 const store = useLabStore()
 const props = defineProps({ seed: { type: Object, default: null } })
@@ -20,7 +20,7 @@ const MONO = "Consolas,'Courier New',ui-monospace,monospace"
 const media = ref('dymo')            // 'dymo' | 'herma'
 const dymoSize = ref('506')          // '506' | '507' | '503'
 const hermaSize = ref('e05')         // 'e05' | 'e15' | 'f15' | 'f50'
-const qrMode = ref('full')           // 'full' | 'short' | 'code'
+const qrMode = ref('auto')           // 'auto' | 'full' | 'short' | 'code'
 const shortHost = ref(localStorage.getItem('cryo_shortHost') || 'boek.li')
 watch(shortHost, v => { try { localStorage.setItem('cryo_shortHost', (v || '').trim()) } catch { /* private mode */ } })
 const pickerSearch = ref('')
@@ -52,14 +52,14 @@ const pickList = computed(() => {
 const scanInfo = computed(() => {
   const s = sp.value
   const sampleCode = records.value[0]?.code || 'R00000'
-  const url = labelPayload(sampleCode, qrMode.value, shortHost.value)
+  const url = labelPayload(sampleCode, resolveQrMode(qrMode.value, s), shortHost.value)
   const mm = moduleMM(s.qr, url, s.ecc)
   return { mm, ...scanVerdict(mm) }
 })
 
 // ── Faithful label renderers (ported from the handoff's h()-based reference) ──
 function qrImg(code, s, sizeMm = s.qr) {
-  const uri = qrSvg(labelPayload(code, qrMode.value, shortHost.value), s.ecc).uri
+  const uri = qrSvg(labelPayload(code, resolveQrMode(qrMode.value, s), shortHost.value), s.ecc).uri
   return h('img', { src: uri, alt: 'QR', style: { width: sizeMm + 'mm', height: sizeMm + 'mm', display: 'block' } })
 }
 // QR square for the round cap. The quiet zone baked into qrSvg keeps the black
@@ -318,6 +318,7 @@ async function printToDymo() {
           <template v-else><button v-for="[k, lbl] in hermaSizes" :key="k" :class="{ on: hermaSize === k }" @click="hermaSize = k">{{ lbl }}</button></template>
         </div>
         <div class="cl-seg">
+          <button :class="{ on: qrMode === 'auto' }" @click="qrMode = 'auto'" title="Recommended — full inventory link where the QR is big enough to scan it, bare code on the tiny 0.5 mL cap">Auto</button>
           <button :class="{ on: qrMode === 'full' }" @click="qrMode = 'full'">Full URL</button>
           <button :class="{ on: qrMode === 'short' }" @click="qrMode = 'short'">Short URL</button>
           <button :class="{ on: qrMode === 'code' }" @click="qrMode = 'code'">Code only</button>
@@ -330,13 +331,16 @@ async function printToDymo() {
         </template>
         <button v-else class="cl-print" :disabled="!records.length" @click="printLabels"><i class="fas fa-print"></i> Print sheet</button>
       </div>
+      <div v-if="qrMode === 'auto'" class="cl-shortnote">
+        <i class="fas fa-wand-magic-sparkles"></i> <strong>Auto</strong>: prints the full inventory link where the QR is big enough to scan it (1.5 mL, Falcon, all HERMA — a scan opens the compound). On the 0.5 mL cap it prints the bare <strong>code</strong> — a full link can't fit a scannable QR that small — where the printed code &amp; name are the main ID.
+      </div>
       <div v-if="qrMode === 'short'" class="cl-shortnote">
-        <i class="fas fa-triangle-exclamation"></i> Short URLs only open the inventory if <strong>{{ shortHost }}</strong> is a redirect host you control (forwarding <code>/{{ '{code}' }}</code> → the inventory page). It isn't set up yet — “Full URL” works everywhere today.
+        <i class="fas fa-triangle-exclamation"></i> Short URLs only open the inventory if <strong>{{ shortHost }}</strong> is a redirect host you control (forwarding <code>/{{ '{code}' }}</code> → the inventory page). It isn't set up yet — “Auto” works everywhere today.
       </div>
 
       <div class="cl-scan" :style="{ color: scanInfo.c }">
         <i class="fas fa-qrcode"></i> QR module ≈ {{ scanInfo.mm ? scanInfo.mm.toFixed(2) : '—' }} mm — <strong>{{ scanInfo.t }}</strong>
-        <span v-if="scanInfo.t !== 'Scannable'" class="cl-scan-tip">try “Short URL” or “Code only” for the small caps</span>
+        <span v-if="scanInfo.t !== 'Scannable'" class="cl-scan-tip">use “Auto” — it prints a scannable code on caps too small for a link</span>
       </div>
 
       <div class="cl-body">

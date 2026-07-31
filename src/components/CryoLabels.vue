@@ -214,7 +214,7 @@ function printLabels() {
       html,body{margin:0;padding:0;background:#fff;}
       ${pageCss}
       .dymo{ page-break-after:always; break-after:page; }
-      .sheet{ width:210mm; height:297mm; padding:4.5mm 0; box-sizing:border-box; display:grid; grid-template-columns:repeat(2,105mm); grid-auto-rows:48mm; align-content:start; overflow:hidden; break-after:page; page-break-after:always; }
+      .sheet{ width:210mm; height:297mm; padding:2mm 0 0; box-sizing:border-box; display:grid; grid-template-columns:repeat(2,105mm); grid-auto-rows:48mm; align-content:start; overflow:hidden; break-after:page; page-break-after:always; }
       .sheet:last-child{ break-after:auto; page-break-after:auto; }
       .cell{ overflow:hidden; }
       img{ image-rendering:pixelated; }

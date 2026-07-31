@@ -5,6 +5,14 @@ import { concentrationRatio, compatibleUnits, dimsCompatible, defaultUnitForDim,
 import { esc } from '../utils/htmlSafe'
 import ExpStatusPicker from './ExpStatusPicker.vue'
 
+// Set + persist an experiment status; reverts if the save was rejected.
+const setPlanStatus = async (reaction, v) => {
+    const prev = reaction.status || 'in_progress'
+    reaction.status = v
+    if (await store.saveToCloud('reactions', reaction)) store.toast('Status updated')
+    else reaction.status = prev
+}
+
 const store = useLabStore()
 const activeDropdown = ref(null)
 const showCloudLibrary = ref(false)
@@ -254,7 +262,7 @@ const saveReactionToWell = (reaction) => {
                 <span class="scope-badge" :class="reaction.scope === 'Global' ? 'lab' : 'private'" style="margin-right: 6px;">
                     {{ reaction.scope === 'Global' ? 'Lab' : 'Private' }}
                 </span>
-                <ExpStatusPicker :modelValue="reaction.status || 'in_progress'" @update:modelValue="v => { reaction.status = v; store.saveToCloud('reactions', reaction); store.toast('Status updated') }" />
+                <ExpStatusPicker :modelValue="reaction.status || 'in_progress'" @update:modelValue="v => setPlanStatus(reaction, v)" />
 
                 <button class="success small" @click="store.saveToCloud('reactions', reaction); store.toast('Saved')" title="Save to cloud">
                     <i class="fas fa-cloud-arrow-up"></i> Save

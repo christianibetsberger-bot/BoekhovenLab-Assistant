@@ -232,19 +232,22 @@ const saveViewingItem = () => {
     store.saveItemToCloud(viewingItem.value)
     viewingItem.value = null
 }
-const removeInventoryItem = (id) => {
+// Removes an item only if it was safely archived first; on failure the item is
+// put back in the list so the UI never shows a deletion that didn't happen.
+const removeInventoryItem = async (id) => {
     const idx = store.inventory.findIndex(i => i.id === id);
     const item = idx !== -1 ? store.inventory[idx] : null;
     if (idx !== -1) store.inventory.splice(idx, 1);
-    store.deleteItemFromCloud(id, item);   // moves it to the archive, keeps its history
+    const ok = await store.deleteItemFromCloud(id, item);
+    if (!ok && item) store.inventory.splice(Math.min(idx, store.inventory.length), 0, item);
+    return ok;
 }
-const deleteViewingItem = () => {
+const deleteViewingItem = async () => {
     const it = viewingItem.value;
     if (!it) return;
     if (!confirm(`Move "${it.name || it.code || 'this item'}" to the inventory archive?\n\nIt leaves the active inventory but is NOT lost — the item and its usage history stay available under Archive, and you can restore it.`)) return;
-    removeInventoryItem(it.id);
-    viewingItem.value = null;
-    store.toast('Moved to archive');
+    const ok = await removeInventoryItem(it.id);
+    if (ok) { viewingItem.value = null; store.toast('Moved to archive'); }
 }
 
 // ── Archive browser (deleted items are retained, with their usage history) ────
@@ -1427,7 +1430,7 @@ const generateLabelsPDF = () => {
                                 <button class="small" @click="restoreArchived(row)"><i class="fas fa-rotate-left"></i> Restore</button>
                             </span>
                         </div>
-                        <UsageHistory v-if="archiveViewing?.item_id === row.item_id" :itemId="row.item_id" />
+                        <UsageHistory v-if="archiveViewing?.item_id === row.item_id" :itemId="row.item_id" :default-open="true" />
                     </div>
                 </template>
             </div>

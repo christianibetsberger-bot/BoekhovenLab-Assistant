@@ -66,15 +66,19 @@ export async function persistJournalEntry(e, userEmail) {
 
 async function reconcileJournalUsage(e, userEmail) {
   try {
-    const items = await extractInvRefsFromHtml(e.content)
+    const { items, unresolved } = await extractInvRefsFromHtml(e.content)
+    // Entry dates are 'YYYY-MM-DD'; anchor at midday so a timezone shift can't
+    // move a use into the neighbouring day (and therefore the wrong year group).
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(e.date || '') ? new Date(e.date + 'T12:00:00') : null
     await reconcileUsage({
       sourceType: 'journal',
       sourceId: e.id,
       sourceLabel: e.expId || 'Journal entry',
       status: e.status || 'in_progress',
       userEmail: e.owner_email || userEmail || '',
-      usedAt: e.date ? new Date(e.date + 'T12:00:00').toISOString() : null,
+      usedAt: d && !isNaN(d) ? d.toISOString() : null,
       items,
+      unresolved,
     })
   } catch (err) { console.warn('usage reconcile skipped:', err?.message || err) }
 }

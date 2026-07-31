@@ -11,8 +11,11 @@ const store = useLabStore()
 const props = defineProps({ seed: { type: Object, default: null } })
 const emit = defineEmits(['close'])
 
-const COND = "'IBM Plex Sans Condensed','Arial Narrow',sans-serif"
-const MONO = "'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace"
+// Match the .dymo fonts so the preview mirrors the DYMO Connect import:
+// Arial Narrow for the name (on every Mac, rendered by DYMO), Consolas for the
+// mono fields (the .dymo's CAS/CODE font, with cross-platform fallbacks).
+const COND = "'Arial Narrow',Arial,sans-serif"
+const MONO = "Consolas,'Courier New',ui-monospace,monospace"
 
 const media = ref('dymo')            // 'dymo' | 'herma'
 const dymoSize = ref('506')          // '506' | '507' | '503'

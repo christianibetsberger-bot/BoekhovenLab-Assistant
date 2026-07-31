@@ -132,7 +132,7 @@ export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
     <Show_Border>False</Show_Border>
     <HasFixedLength>False</HasFixedLength>
     <FixedLengthValue>0</FixedLengthValue>
-    <DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${Q}${T('NAME', rec.name, tx, nY, tw, nH, 'Arial', nSz, 'True', 'Top')}${T('CAS', 'CAS ' + rec.cas, tx, cY, tw, cH, 'Consolas', cSz, 'False', 'Middle')}${T('CODE', rec.code, tx, kY, tw, kH, 'Consolas', kSz, 'True', 'Middle')}</LabelObjects></DynamicLayoutManager>
+    <DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${Q}${T('NAME', rec.name, tx, nY, tw, nH, 'Arial Narrow', nSz, 'True', 'Top')}${T('CAS', 'CAS ' + rec.cas, tx, cY, tw, cH, 'Consolas', cSz, 'False', 'Middle')}${T('CODE', rec.code, tx, kY, tw, kH, 'Consolas', kSz, 'True', 'Middle')}</LabelObjects></DynamicLayoutManager>
   </DYMOLabel>
   <LabelApplication>Blank</LabelApplication>
   <DataTable><Columns></Columns><Rows></Rows></DataTable>

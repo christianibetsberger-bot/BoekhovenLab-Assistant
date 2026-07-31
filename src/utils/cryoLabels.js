@@ -131,6 +131,13 @@ function fitWrap(text, wIn, hIn, maxPt, glyph = 0.56, minPt = 4, maxLines = 3, l
 // The chemical name printed on a label: LWCS506 prints the short name (full IUPAC
 // won't hold at 300 DPI on the tiny cap); others print the full name.
 export function labelTitle(sp, rec) { return sp.useShort ? (rec.short || rec.name || '') : (rec.name || '') }
+// The label's middle line: DNA/RNA compounds (rec.oligo) show their sequence in place of
+// the CAS number; everything else shows the CAS.
+export function labelMeta(rec) {
+  const seq = String((rec && rec.seq) || '').trim()
+  if (rec && rec.oligo && seq) return { seq: true, tag: '', value: seq }
+  return { seq: false, tag: 'CAS ', value: (rec && rec.cas) || '' }
+}
 export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
   const sp = LWCS[key], r = sp.rect, esc = escXml, f = (n) => (+n).toFixed(4)
   const pad = 0.03
@@ -144,15 +151,24 @@ export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
   // Cap the text right edge at the die edge — the 507 print band runs ~2 mm past it.
   const dieR = sp.W / 25.4
   const tw = Math.max(0.3, Math.min(r.x + r.w, dieR) - pad - tx)
-  const nH = r.h * 0.46, cH = r.h * 0.20, kH = r.h * 0.26
+  const meta = labelMeta(rec)
+  // DNA/RNA: the sequence replaces the CAS and takes extra height (it wraps to lines).
+  const nH = r.h * (meta.seq ? 0.34 : 0.46), cH = r.h * (meta.seq ? 0.42 : 0.20), kH = r.h * (meta.seq ? 0.18 : 0.26)
   const nY = r.y + pad, cY = nY + nH, kY = cY + cH
   const url = labelPayload(rec.code, resolveQrMode(mode, sp, shortHost), shortHost)
   const title = labelTitle(sp, rec)
   // Fit each line to its box so long names/codes don't overflow on import; the
   // per-label fMin (mm → pt) keeps the name legible on the tiny caps.
   const minPt = (sp.fMin || 1.4) * 2.835   // mm → pt
-  const { pt: nSz, lines: nameLines } = fitWrap(title, tw, nH, (sp.fName || 3) * 2.835, 0.56, minPt, 3)
-  const cSz = fitPt('CAS ' + rec.cas, tw, cH, (sp.fCas || 1.8) * 2.835, 0.52)
+  const { pt: nSz, lines: nameLines } = fitWrap(title, tw, nH, (sp.fName || 3) * 2.835, 0.56, minPt, meta.seq ? 2 : 3)
+  let casPayload, cSz
+  if (meta.seq) {   // wrap the sequence across the taller box instead of shrinking to one line
+    const fw = fitWrap(meta.value, tw, cH, (sp.fCas || 1.8) * 2.835, 0.5, minPt, 4)
+    cSz = fw.pt; casPayload = fw.lines
+  } else {
+    cSz = fitPt('CAS ' + rec.cas, tw, cH, (sp.fCas || 1.8) * 2.835, 0.52)
+    casPayload = 'CAS ' + rec.cas
+  }
   const kSz = fitPt(rec.code, tw, kH, (sp.fCode || 3) * 2.835, 0.6)
   const brT = `<Brushes><BackgroundBrush><SolidColorBrush><Color A="0" R="1" G="1" B="1"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes>`
   const brQ = `<Brushes><BackgroundBrush><SolidColorBrush><Color A="1" R="1" G="1" B="1"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes>`
@@ -177,7 +193,7 @@ export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
     <Show_Border>False</Show_Border>
     <HasFixedLength>False</HasFixedLength>
     <FixedLengthValue>0</FixedLengthValue>
-    <DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${Q}${T('NAME', nameLines, tx, nY, tw, nH, 'Arial Narrow', nSz, 'True', 'Top')}${T('CAS', 'CAS ' + rec.cas, tx, cY, tw, cH, 'Consolas', cSz, 'False', 'Middle')}${T('CODE', rec.code, tx, kY, tw, kH, 'Consolas', kSz, 'True', 'Middle')}</LabelObjects></DynamicLayoutManager>
+    <DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${Q}${T('NAME', nameLines, tx, nY, tw, nH, 'Arial Narrow', nSz, 'True', 'Top')}${T('CAS', casPayload, tx, cY, tw, cH, 'Consolas', cSz, 'False', meta.seq ? 'Top' : 'Middle')}${T('CODE', rec.code, tx, kY, tw, kH, 'Consolas', kSz, 'True', 'Middle')}</LabelObjects></DynamicLayoutManager>
   </DYMOLabel>
   <LabelApplication>Blank</LabelApplication>
   <DataTable><Columns></Columns><Rows></Rows></DataTable>

@@ -5,7 +5,7 @@
 // scannable QR codes and full/short/code payload modes. Prints black-on-white.
 import { h, ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useLabStore } from '../stores/labStore'
-import { LWCS, HERMA, labelPayload, resolveQrMode, qrSvg, moduleMM, scanVerdict, dymoXml, labelTitle } from '../utils/cryoLabels'
+import { LWCS, HERMA, labelPayload, resolveQrMode, qrSvg, moduleMM, scanVerdict, dymoXml, labelTitle, labelMeta } from '../utils/cryoLabels'
 
 const store = useLabStore()
 const props = defineProps({ seed: { type: Object, default: null } })
@@ -35,7 +35,7 @@ function addRecord(item) {
   if (!item) return
   const found = records.value.find(r => r.code === (item.code || '') && r.name === (item.name || ''))
   if (found) { found.copies++; return }
-  records.value.push({ code: item.code || '', name: item.name || '', short: item.short || '', cas: item.cas || '', copies: 1 })
+  records.value.push({ code: item.code || '', name: item.name || '', short: item.short || '', cas: item.cas || '', seq: item.sequence || '', oligo: item.itemClass === 'DNA' || item.itemClass === 'RNA', copies: 1 })
 }
 function setCopies(rec, n) { rec.copies = Math.max(1, Math.min(999, (n | 0) || 1)) }
 onMounted(() => { addRecord(props.seed) })
@@ -75,8 +75,11 @@ function capQrMm(s) {
 function nameEl(name, s, min = '1.1') {
   return h('div', { 'data-fit': '1', 'data-max': String(s.fName), 'data-min': min, style: { fontFamily: COND, fontWeight: 700, lineHeight: 1.02, letterSpacing: '-0.01em', color: '#000', flex: '1 1 auto', minHeight: 0, overflow: 'hidden', wordBreak: 'break-word', fontSize: s.fName + 'mm' } }, name)
 }
-function casEl(cas, s, mono = MONO) {
-  return h('div', { style: { fontFamily: mono, fontWeight: 500, fontSize: s.fCas + 'mm', lineHeight: 1, color: '#000', whiteSpace: 'nowrap', overflow: 'hidden', flex: '0 0 auto' } }, [h('span', { style: { opacity: 0.55 } }, 'CAS '), cas])
+// The middle line: CAS number for chemicals, or the sequence for DNA/RNA compounds.
+function metaEl(rec, s, mono = MONO, mt = '0') {
+  const m = labelMeta(rec)
+  if (m.seq) return h('div', { style: { fontFamily: mono, fontWeight: 500, fontSize: (s.fCas * 0.92) + 'mm', lineHeight: 1.08, letterSpacing: '0.02em', color: '#000', wordBreak: 'break-all', overflow: 'hidden', flex: '0 1 auto', minHeight: 0, marginTop: mt } }, m.value)
+  return h('div', { style: { fontFamily: mono, fontWeight: 500, fontSize: s.fCas + 'mm', lineHeight: 1.1, color: '#000', whiteSpace: 'nowrap', overflow: 'hidden', flex: '0 0 auto', marginTop: mt } }, [h('span', { style: { opacity: 0.55 } }, m.tag), m.value])
 }
 function codeEl(code, s, mt = '0.3mm') {
   return h('div', { style: { fontFamily: MONO, fontWeight: 600, fontSize: s.fCode + 'mm', lineHeight: 1.05, marginTop: mt, color: '#000', flex: '0 0 auto' } }, code)
@@ -88,7 +91,7 @@ function ruleEl(o = 0.4, m = '0.35mm 0 0.3mm') {
 function eppiInner(rec, s) {
   const els = [nameEl(labelTitle(s, rec), s, String(s.fMin || 1.1))]
   if (s.rule !== false) els.push(ruleEl())   // LWCS506 drops the rule to buy height
-  els.push(casEl(rec.cas, s), codeEl(rec.code, s))
+  els.push(metaEl(rec, s), codeEl(rec.code, s))
   return els
 }
 // DYMO landscape strip: name/CAS/code column on the left, QR at the right end —
@@ -111,7 +114,7 @@ function hermaTile(rec, s) {
   const left = h('div', { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column' } }, [
     nameEl(rec.name, s, '1.0'),
     ruleEl(0.35, '0.3mm 0 0.25mm'),
-    casEl(rec.cas, s),
+    metaEl(rec, s),
     codeEl(rec.code, s, '0.2mm'),
   ])
   const right = h('div', { style: { flex: '0 0 auto', display: 'flex', alignItems: 'center' } }, qrImg(rec.code, s))
@@ -130,7 +133,7 @@ function hermaWrap(rec, s) {
   for (let i = 0; i < s.repeat; i++) {
     const left = h('div', { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' } }, [
       h('div', { 'data-fit': '1', 'data-max': String(s.fName), 'data-min': '1.8', style: { fontFamily: COND, fontWeight: 700, lineHeight: 1.03, letterSpacing: '-0.01em', color: '#000', overflow: 'hidden', wordBreak: 'break-word', fontSize: s.fName + 'mm', maxHeight: '24mm' } }, rec.name),
-      h('div', { style: { fontFamily: MONO, fontWeight: 500, fontSize: s.fCas + 'mm', lineHeight: 1.1, color: '#000', marginTop: '1.4mm' } }, [h('span', { style: { opacity: 0.55 } }, 'CAS '), rec.cas]),
+      metaEl(rec, s, MONO, '1.4mm'),
       h('div', { style: { fontFamily: MONO, fontWeight: 600, fontSize: s.fCode + 'mm', lineHeight: 1.05, color: '#000', marginTop: '1mm' } }, rec.code),
     ])
     const right = h('div', { style: { flex: '0 0 auto', display: 'flex', alignItems: 'center' } }, qrImg(rec.code, s))

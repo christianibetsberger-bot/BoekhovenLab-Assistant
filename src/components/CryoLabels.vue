@@ -21,7 +21,10 @@ const media = ref('dymo')            // 'dymo' | 'herma'
 const dymoSize = ref('506')          // '506' | '507' | '503'
 const hermaSize = ref('e05')         // 'e05' | 'e15' | 'f15' | 'f50'
 const qrMode = ref('auto')           // 'auto' | 'full' | 'short' | 'code'
-const shortHost = ref(localStorage.getItem('cryo_shortHost') || 'boek.li')
+// Default to the lab's free GitHub-Pages redirect (cilab1.github.io/C/CODE → inventory).
+// Treat the old 'boek.li' placeholder as unset so it upgrades to the real host.
+const _storedHost = localStorage.getItem('cryo_shortHost')
+const shortHost = ref(_storedHost && _storedHost !== 'boek.li' ? _storedHost : 'cilab1.github.io/C')
 watch(shortHost, v => { try { localStorage.setItem('cryo_shortHost', (v || '').trim()) } catch { /* private mode */ } })
 const pickerSearch = ref('')
 const sheetRef = ref(null)
@@ -52,14 +55,14 @@ const pickList = computed(() => {
 const scanInfo = computed(() => {
   const s = sp.value
   const sampleCode = records.value[0]?.code || 'R00000'
-  const url = labelPayload(sampleCode, resolveQrMode(qrMode.value, s), shortHost.value)
+  const url = labelPayload(sampleCode, resolveQrMode(qrMode.value, s, shortHost.value), shortHost.value)
   const mm = moduleMM(s.qr, url, s.ecc)
   return { mm, ...scanVerdict(mm) }
 })
 
 // ── Faithful label renderers (ported from the handoff's h()-based reference) ──
 function qrImg(code, s, sizeMm = s.qr) {
-  const uri = qrSvg(labelPayload(code, resolveQrMode(qrMode.value, s), shortHost.value), s.ecc).uri
+  const uri = qrSvg(labelPayload(code, resolveQrMode(qrMode.value, s, shortHost.value), shortHost.value), s.ecc).uri
   return h('img', { src: uri, alt: 'QR', style: { width: sizeMm + 'mm', height: sizeMm + 'mm', display: 'block' } })
 }
 // QR square for the round cap. The quiet zone baked into qrSvg keeps the black
@@ -323,7 +326,7 @@ async function printToDymo() {
           <button :class="{ on: qrMode === 'short' }" @click="qrMode = 'short'">Short URL</button>
           <button :class="{ on: qrMode === 'code' }" @click="qrMode = 'code'">Code only</button>
         </div>
-        <input v-if="qrMode === 'short'" v-model="shortHost" class="cl-host" placeholder="boek.li">
+        <input v-if="qrMode === 'short'" v-model="shortHost" class="cl-host" placeholder="cilab1.github.io/C">
         <template v-if="media === 'dymo'">
           <button class="cl-print" :disabled="!records.length || dymoBusy" @click="printToDymo" title="Print all selected labels straight to a connected LabelWriter 550 (needs DYMO Connect running on this computer)"><i class="fas" :class="dymoBusy ? 'fa-spinner fa-spin' : 'fa-print'"></i> {{ dymoBusy ? 'Printing…' : `Print all to DYMO 550${totalLabels > 1 ? ` (${totalLabels})` : ''}` }}</button>
           <button class="cl-print ghost" :disabled="!records.length" @click="downloadDymoAll" title="Download a .dymo file per item to open in DYMO Connect"><i class="fas fa-download"></i> .dymo</button>
@@ -332,7 +335,7 @@ async function printToDymo() {
         <button v-else class="cl-print" :disabled="!records.length" @click="printLabels"><i class="fas fa-print"></i> Print sheet</button>
       </div>
       <div v-if="qrMode === 'auto'" class="cl-shortnote">
-        <i class="fas fa-wand-magic-sparkles"></i> <strong>Auto</strong>: prints the full inventory link where the QR is big enough to scan it (1.5 mL, Falcon, all HERMA — a scan opens the compound). On the 0.5 mL cap it prints the bare <strong>code</strong> — a full link can't fit a scannable QR that small — where the printed code &amp; name are the main ID.
+        <i class="fas fa-wand-magic-sparkles"></i> <strong>Auto</strong>: 1.5 mL, Falcon &amp; HERMA go through your short redirect (<strong>{{ shortHost || 'set a host' }}</strong>) — a small QR that opens the compound on scan. The 0.5 mL cap prints the bare <strong>code</strong> (a link can't scan at that size; its printed code &amp; name are the main ID). Clear the host and the bigger tubes fall back to the full link.
       </div>
       <div v-if="qrMode === 'short'" class="cl-shortnote">
         <i class="fas fa-triangle-exclamation"></i> Short URLs only open the inventory if <strong>{{ shortHost }}</strong> is a redirect host you control (forwarding <code>/{{ '{code}' }}</code> → the inventory page). It isn't set up yet — “Auto” works everywhere today.

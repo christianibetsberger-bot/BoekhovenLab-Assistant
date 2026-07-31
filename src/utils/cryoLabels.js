@@ -36,14 +36,16 @@ export const HERMA = {
 
 // The value encoded in the QR. 'full' = the inventory deep link (a phone camera
 // opens the item), 'short' = a redirect host, 'code' = the bare compound code.
-// 'auto' → the full inventory URL where the QR box is big enough to scan it, but the
-// bare code on the tiny 0.5 mL cap: a full URL can't fit a scannable QR that small
-// without a short redirect domain, and on a cap that size the printed code/name is the
-// primary ID anyway. Threshold ~7 mm: 0.5 mL cap (6.5) → code; 1.5 mL, Falcon, all
-// HERMA tiles (≥7.6) → full.
-export function resolveQrMode(mode, sp) {
+// 'auto' → the smart default. The 0.5 mL cap (qr < 7 mm) always prints the bare code:
+// even the short link is below spec at that size, and its printed code/name is the main
+// ID. Bigger tubes (1.5 mL, Falcon, all HERMA) go through the short redirect if a
+// shortHost is set — a small, working QR that opens the compound — otherwise the full
+// inventory URL. (github.io is too long to make the 0.5 mL a scannable link; only a
+// ≤7-char domain would.)
+export function resolveQrMode(mode, sp, shortHost) {
   if (mode !== 'auto') return mode
-  return (sp && sp.qr < 7) ? 'code' : 'full'
+  if (sp && sp.qr < 7) return 'code'
+  return (shortHost && shortHost.trim()) ? 'short' : 'full'
 }
 export function labelPayload(code, mode = 'full', shortHost = 'boek.li') {
   const c = String(code || '')
@@ -146,7 +148,7 @@ export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
   const tw = Math.max(0.3, Math.min(r.x + r.w, dieR) - pad - tx)
   const nH = r.h * 0.46, cH = r.h * 0.20, kH = r.h * 0.26
   const nY = r.y + pad, cY = nY + nH, kY = cY + cH
-  const url = labelPayload(rec.code, resolveQrMode(mode, sp), shortHost)
+  const url = labelPayload(rec.code, resolveQrMode(mode, sp, shortHost), shortHost)
   const title = labelTitle(sp, rec)
   // Fit each line to its box so long names/codes don't overflow on import; the
   // per-label fMin (mm → pt) keeps the name legible on the tiny caps.

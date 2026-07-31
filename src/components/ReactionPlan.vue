@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { concentrationRatio, compatibleUnits, dimsCompatible, defaultUnitForDim, CONC_UNITS } from '../utils/units.js'
 import { esc } from '../utils/htmlSafe'
+import ExpStatusPicker from './ExpStatusPicker.vue'
 
 const store = useLabStore()
 const activeDropdown = ref(null)
@@ -136,7 +137,7 @@ const saveReactionToJournal = (reaction) => {
     let total1x = 0;
     reaction.items.forEach(item => {
         const invItem = store.inventory.find(i => i.id === item.invId);
-        const nameTag = invItem ? `&nbsp;<span class="inv-ref" contenteditable="false"><i class="fas fa-tag"></i>&nbsp;[${esc(invItem.code)}] ${esc(invItem.name)} (${esc(store.formatNum(invItem.stock))} ${esc(invItem.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp;` : 'Unknown';
+        const nameTag = invItem ? `&nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(invItem.id)}"><i class="fas fa-tag"></i>&nbsp;[${esc(invItem.code)}] ${esc(invItem.name)} (${esc(store.formatNum(invItem.stock))} ${esc(invItem.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp;` : 'Unknown';
         const target = item.isFixed ? 'Fixed' : `${esc(item.target)} ${esc(item.targetUnit || 'µM')}`;
         const vol1x = calc1xVol(reaction, item);
         const volMM = calcMMVol(reaction, item);
@@ -169,7 +170,7 @@ const saveReactionToWell = (reaction) => {
         if (invItem) {
             const vol1x = calc1xVol(reaction, item);
             const targetText = item.isFixed ? '(Fixed)' : `(${esc(item.target)} ${esc(item.targetUnit || 'µM')})`;
-            html += `&nbsp;<span class="inv-ref" contenteditable="false" data-labware="${esc(item.labware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(invItem.code)}] ${esc(invItem.name)} (${esc(store.formatNum(invItem.stock))} ${esc(invItem.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(vol1x))} ${esc(unit)} ${targetText}<br>`;
+            html += `&nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(invItem.id)}" data-labware="${esc(item.labware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(invItem.code)}] ${esc(invItem.name)} (${esc(store.formatNum(invItem.stock))} ${esc(invItem.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(vol1x))} ${esc(unit)} ${targetText}<br>`;
         }
     });
     const h2o1x = Math.max(0, reaction.targetVolume - reactionTotalVol(reaction));
@@ -253,6 +254,7 @@ const saveReactionToWell = (reaction) => {
                 <span class="scope-badge" :class="reaction.scope === 'Global' ? 'lab' : 'private'" style="margin-right: 6px;">
                     {{ reaction.scope === 'Global' ? 'Lab' : 'Private' }}
                 </span>
+                <ExpStatusPicker :modelValue="reaction.status || 'in_progress'" @update:modelValue="v => { reaction.status = v; store.saveToCloud('reactions', reaction); store.toast('Status updated') }" />
 
                 <button class="success small" @click="store.saveToCloud('reactions', reaction); store.toast('Saved')" title="Save to cloud">
                     <i class="fas fa-cloud-arrow-up"></i> Save

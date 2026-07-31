@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { concentrationRatio, dimsCompatible, CONC_UNITS } from '../utils/units.js'
 import { esc } from '../utils/htmlSafe'
+import ExpStatusPicker from './ExpStatusPicker.vue'
 
 const store = useLabStore()
 const activeDropdown = ref(null)
@@ -129,7 +130,7 @@ const calculateMatrixCell = (matrix, rowBlockId, colBlockId) => {
         }
         const v = ratio * tv;
         totalVol += v;
-        htmlStr += `<strong>${role}:</strong> &nbsp;<span class="inv-ref" contenteditable="false" data-labware="${esc(blockLabware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(v))} ${esc(unit)} (${esc(targetConc)} ${esc(targetConcUnit || 'µM')})<br>`;
+        htmlStr += `<strong>${role}:</strong> &nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(item.id)}" data-labware="${esc(blockLabware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(v))} ${esc(unit)} (${esc(targetConc)} ${esc(targetConcUnit || 'µM')})<br>`;
     };
 
     // Row contributions first (so a shared block is dosed at the row target), then any
@@ -292,6 +293,7 @@ const saveMatrixToPlate = (matrix) => {
 
             <div style="display: flex; gap: 5px; align-items: center;">
                 <span class="scope-badge" :class="matrix.scope === 'Global' ? 'lab' : 'private'" style="margin-right: 8px;">{{ matrix.scope === 'Global' ? 'Lab' : 'Private' }}</span>
+                <ExpStatusPicker :modelValue="matrix.status || 'in_progress'" @update:modelValue="v => { matrix.status = v; store.saveToCloud('matrices', matrix); store.toast('Status updated') }" />
 
                 <button class="success small" @click="store.saveToCloud('matrices', matrix); store.toast('Saved')" title="Save to cloud">
                     <i class="fas fa-cloud-arrow-up"></i> Save

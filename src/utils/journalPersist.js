@@ -7,6 +7,7 @@
 // duplicated (and drifting) between the component and the store.
 
 import { db } from '../services/supabase'
+import { extractInvRefsFromHtml, reconcileUsage } from './usageTracker'
 
 // Build the `journals` row payload from an in-memory entry.
 export function journalEntryPayload(e, userEmail) {
@@ -53,5 +54,27 @@ export async function persistJournalEntry(e, userEmail) {
   if (error && /shared_with|scope|column|schema/i.test(error.message)) {
     ({ error } = await db.from('journals').update({ data: payload.data }).eq('id', e.id))
   }
-  if (error) console.error('journal save failed:', error)
+  if (error) { console.error('journal save failed:', error); return }
+  // Usage traceability: reconcile this entry's compound chips into the usage log.
+  // Only finished experiments count (status !== 'in_progress'); reconcileUsage
+  // removes rows again when the entry reverts or a chip is removed. Fire-and-
+  // forget so autosave latency is untouched; every save path funnels through
+  // here (editor autosave, status changes, AND appendToActiveJournal from the
+  // planners — so "Log to journal" content is picked up automatically).
+  reconcileJournalUsage(e, userEmail)
+}
+
+async function reconcileJournalUsage(e, userEmail) {
+  try {
+    const items = await extractInvRefsFromHtml(e.content)
+    await reconcileUsage({
+      sourceType: 'journal',
+      sourceId: e.id,
+      sourceLabel: e.expId || 'Journal entry',
+      status: e.status || 'in_progress',
+      userEmail: e.owner_email || userEmail || '',
+      usedAt: e.date ? new Date(e.date + 'T12:00:00').toISOString() : null,
+      items,
+    })
+  } catch (err) { console.warn('usage reconcile skipped:', err?.message || err) }
 }

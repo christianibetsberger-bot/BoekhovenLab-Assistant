@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { db } from '../services/supabase'
 import { persistJournalEntry } from '../utils/journalPersist'
+import { reconcileUsage, deleteUsageForSource, extractPlanRefs, PLAN_SOURCE_TYPES } from '../utils/usageTracker'
 
 // Debounce timer for layout cloud saves (layout changes on every drag event)
 let _layoutSaveTimer = null
@@ -196,9 +197,38 @@ export const useLabStore = defineStore('lab', {
       if (error) alert("Error saving inventory: " + error.message);
     },
 
-    async deleteItemFromCloud(itemId) {
+    // Deleting never destroys: the item is moved to `inventory_archive` (full data
+    // + who/when), so its usage history stays readable years later. `item` is the
+    // full object when available; falls back to a DB fetch by id.
+    async deleteItemFromCloud(itemId, item = null) {
       if (!this.user) return;
-      await db.from('inventory').delete().eq('item_id', String(itemId));
+      const id = String(itemId);
+      let plain = item ? JSON.parse(JSON.stringify(item)) : null;
+      if (!plain) {
+        const { data } = await db.from('inventory').select('item_data, owner_id, scope').eq('item_id', id).maybeSingle();
+        plain = data?.item_data || null;
+      }
+      if (plain) {
+        const { error: archErr } = await db.from('inventory_archive').upsert({
+          item_id: id, item_data: plain,
+          owner_id: this.user.id, owner_email: this.user.email || '',
+          scope: plain.scope || 'Global', deleted_by: this.user.email || '',
+          deleted_at: new Date().toISOString(),
+        }, { onConflict: 'item_id' });
+        if (archErr) this.toast('Archive table missing — run inventory_usage.sql (item deleted without archive)');
+      }
+      await db.from('inventory').delete().eq('item_id', id);
+    },
+
+    // Bring an archived item back into the live inventory.
+    async restoreArchivedItem(archRow) {
+      if (!this.user || !archRow?.item_data) return false;
+      const item = archRow.item_data;
+      await this.saveItemToCloud(item);
+      await db.from('inventory_archive').delete().eq('item_id', String(archRow.item_id));
+      this.inventory.unshift(item);
+      this.toast(`Restored "${item.name || item.code}"`);
+      return true;
     },
 
     // --- STORAGE LOCATIONS ---
@@ -278,6 +308,29 @@ export const useLabStore = defineStore('lab', {
 
         // Ensure registry is updated after a save (especially for new items)
         this.saveWorkspaceState();
+
+        // Usage traceability: a plan saved with a status other than 'in_progress'
+        // logs its referenced compounds; reverting or removing them un-logs.
+        // Fire-and-forget so saves stay snappy.
+        this.reconcilePlanUsage(tableName, payloadData);
+    },
+
+    async reconcilePlanUsage(tableName, plan) {
+      const sourceType = PLAN_SOURCE_TYPES[tableName];
+      if (!sourceType || !plan?.id) return;
+      try {
+        const plain = JSON.parse(JSON.stringify(plan));
+        const items = await extractPlanRefs(tableName, plain, this.inventory);
+        await reconcileUsage({
+          sourceType,
+          sourceId: plain.id,
+          sourceLabel: plain.name || sourceType,
+          status: plain.status || 'in_progress',
+          userEmail: this.user?.email || '',
+          usedAt: null,
+          items,
+        });
+      } catch (e) { console.warn('plan usage reconcile skipped:', e?.message || e); }
     },
 
     async deleteFromCloud(tableName, itemId) {
@@ -288,6 +341,8 @@ export const useLabStore = defineStore('lab', {
             alert("Permission Denied: You can only permanently delete your own protocols.");
             return;
         }
+        // The plan is gone — clear the usage rows it contributed.
+        if (PLAN_SOURCE_TYPES[tableName]) deleteUsageForSource(PLAN_SOURCE_TYPES[tableName], itemId);
 
         const { data } = await db.from(tableName).select('*');
         if (data) {

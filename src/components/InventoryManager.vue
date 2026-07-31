@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase'
 import CryoLabels from './CryoLabels.vue'
+import UsageHistory from './UsageHistory.vue'
 import * as XLSX from 'xlsx'
 import { jsPDF } from 'jspdf'
 import { calcSeqExtinction, calcSeqMw, calcSeqTm, calcSeqGc } from '../utils/seqUtils'
@@ -233,16 +234,45 @@ const saveViewingItem = () => {
 }
 const removeInventoryItem = (id) => {
     const idx = store.inventory.findIndex(i => i.id === id);
+    const item = idx !== -1 ? store.inventory[idx] : null;
     if (idx !== -1) store.inventory.splice(idx, 1);
-    store.deleteItemFromCloud(id);
+    store.deleteItemFromCloud(id, item);   // moves it to the archive, keeps its history
 }
 const deleteViewingItem = () => {
     const it = viewingItem.value;
     if (!it) return;
-    if (!confirm(`Delete "${it.name || it.code || 'this item'}" from inventory? This cannot be undone.`)) return;
+    if (!confirm(`Move "${it.name || it.code || 'this item'}" to the inventory archive?\n\nIt leaves the active inventory but is NOT lost — the item and its usage history stay available under Archive, and you can restore it.`)) return;
     removeInventoryItem(it.id);
     viewingItem.value = null;
+    store.toast('Moved to archive');
 }
+
+// ── Archive browser (deleted items are retained, with their usage history) ────
+const showArchive = ref(false)
+const archiveRows = ref([])
+const archiveLoading = ref(false)
+const archiveMissing = ref(false)
+const archiveSearch = ref('')
+const openArchive = async () => {
+    showArchive.value = true; archiveLoading.value = true; archiveMissing.value = false;
+    const { data, error } = await db.from('inventory_archive').select('*').order('deleted_at', { ascending: false });
+    if (error) archiveMissing.value = true; else archiveRows.value = data || [];
+    archiveLoading.value = false;
+}
+const filteredArchive = computed(() => {
+    const q = archiveSearch.value.trim().toLowerCase();
+    if (!q) return archiveRows.value;
+    return archiveRows.value.filter(r => {
+        const d = r.item_data || {};
+        return (d.name || '').toLowerCase().includes(q) || (d.code || '').toLowerCase().includes(q) || (d.cas || '').toLowerCase().includes(q);
+    });
+})
+const restoreArchived = async (row) => {
+    if (!confirm(`Restore "${row.item_data?.name || row.item_id}" to the active inventory?`)) return;
+    const ok = await store.restoreArchivedItem(row);
+    if (ok) archiveRows.value = archiveRows.value.filter(r => r.item_id !== row.item_id);
+}
+const archiveViewing = ref(null)   // archived row whose history is open
 const createAliquot = (parentItem) => {
     let newItem = JSON.parse(JSON.stringify(parentItem));
     newItem.id = 'inv_aliq_' + crypto.randomUUID();
@@ -1010,8 +1040,9 @@ const generateLabelsPDF = () => {
                 <label>Notes / Prep Info</label>
                 <textarea v-model="viewingItem.notes" rows="5" placeholder="Preparation details — total volume, buffer, fill-up water, pH, salt load, …" style="width: 100%; font-size: 0.8rem;"></textarea>
             </div>
+            <UsageHistory :itemId="viewingItem.id" />
             <div style="margin-top: 20px; display: flex; gap: 10px;">
-                <button class="danger" @click="deleteViewingItem" title="Delete this item from inventory"><i class="fas fa-trash"></i> Delete</button>
+                <button class="danger" @click="deleteViewingItem" title="Move to the inventory archive (keeps the item and its usage history)"><i class="fas fa-box-archive"></i> Delete</button>
                 <button @click="saveViewingItem" style="flex: 1;">Save & Close</button>
             </div>
         </div>
@@ -1366,9 +1397,42 @@ const generateLabelsPDF = () => {
             <button @click="showLocationManager = true" style="flex-grow: 1; height: 40px;">
                 <i class="fas fa-map-marker-alt"></i> Locations
             </button>
+            <button @click="openArchive" style="flex-grow: 1; height: 40px;" title="Deleted items — retained with their full usage history">
+                <i class="fas fa-box-archive"></i> Archive
+            </button>
             <input type="file" ref="excelUpload" @change="importInventory" accept=".xlsx, .xls, .csv, .txt" style="display: none;">
         </div>
     </div>
+
+    <!-- ── Inventory archive — deleted items, retained with their usage history ── -->
+    <Teleport to="body">
+        <div v-if="showArchive" @click.self="showArchive = false" style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1200; padding: 20px;">
+            <div style="position: relative; background: var(--modal); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); padding: 22px; border-radius: var(--r); border: 1px solid var(--cdl); box-shadow: var(--sh); max-width: 720px; width: 95%; max-height: 88vh; overflow-y: auto;">
+                <button @click="showArchive = false" title="Close" style="position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border-radius: 50%; background: var(--fl); color: var(--tx2); border: none; box-shadow: none; cursor: pointer; z-index: 2;">✕</button>
+                <h3 style="margin-top: 0; color: var(--primary); border-bottom: 1px solid var(--ln); padding-bottom: 10px;"><i class="fas fa-box-archive"></i> Inventory archive</h3>
+                <p style="font-size: 0.76rem; color: var(--tx2); margin: 10px 0;">Deleted items are kept here with their full data and usage history, so past experiments stay traceable. Restore one to put it back in the active inventory.</p>
+
+                <div v-if="archiveMissing" style="font-size: 0.8rem; color: var(--tx2);">Run <code>supabase/inventory_usage.sql</code> to enable the archive.</div>
+                <div v-else-if="archiveLoading" style="font-size: 0.8rem; color: var(--tx2);"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+                <template v-else>
+                    <input v-model="archiveSearch" placeholder="Search archived items…" style="width: 100%; margin-bottom: 10px;">
+                    <div v-if="!filteredArchive.length" style="font-size: 0.8rem; color: var(--tx2);">No archived items.</div>
+                    <div v-for="row in filteredArchive" :key="row.item_id" style="border: 1px solid var(--ln); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;">
+                        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                            <strong style="font-size: 0.85rem;">{{ row.item_data?.name || '(unnamed)' }}</strong>
+                            <span style="font: 600 0.72rem/1 ui-monospace, monospace; color: var(--primary);">{{ row.item_data?.code }}</span>
+                            <span style="font-size: 0.7rem; color: var(--tx2);">deleted {{ new Date(row.deleted_at).toLocaleDateString() }}<template v-if="row.deleted_by"> · {{ row.deleted_by }}</template></span>
+                            <span style="margin-left: auto; display: flex; gap: 6px;">
+                                <button class="secondary small" @click="archiveViewing = archiveViewing?.item_id === row.item_id ? null : row"><i class="fas fa-clock-rotate-left"></i> History</button>
+                                <button class="small" @click="restoreArchived(row)"><i class="fas fa-rotate-left"></i> Restore</button>
+                            </span>
+                        </div>
+                        <UsageHistory v-if="archiveViewing?.item_id === row.item_id" :itemId="row.item_id" />
+                    </div>
+                </template>
+            </div>
+        </div>
+    </Teleport>
 
     <!-- ── Add-from-incoming window (teleported so it centres on the viewport) ── -->
     <Teleport to="body">

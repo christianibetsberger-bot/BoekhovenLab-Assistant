@@ -4,6 +4,7 @@ import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase' // Using your Supabase client
 import { esc, sanitize } from '../utils/htmlSafe'
 import { persistJournalEntry, isBlankJournalContent } from '../utils/journalPersist'
+import { deleteUsageForSource } from '../utils/usageTracker'
 import { createVersion, listVersions, signCurrent, JournalVersionsTableMissing } from '../utils/journalVersions'
 import { diffLines } from '../utils/textDiff'
 import * as XLSX from 'xlsx'
@@ -592,6 +593,7 @@ const deleteJournalEntry = async (id) => {
                 alert("Database blocked the deletion! You need to add the DELETE policy in the Supabase SQL Editor.");
                 return;
             }
+            deleteUsageForSource('journal', id);   // the source is gone — clear its usage rows
         }
         
         // Unconditionally remove from local state so the UI updates instantly
@@ -621,7 +623,7 @@ const insertInventoryRef = () => {
     const item = store.inventory.find(i => i.id === store.selectedInvRef);
     if (item) {
         if (journalEditor.value) journalEditor.value.focus();
-        const html = `&nbsp;<span class="inv-ref" contenteditable="false"><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp;`;
+        const html = `&nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(item.id)}"><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp;`;
         document.execCommand('insertHTML', false, html);
         updateRtfContent();
     }

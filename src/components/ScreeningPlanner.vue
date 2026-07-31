@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { concentrationRatio, compatibleUnits, dimsCompatible, defaultUnitForDim, CONC_UNITS } from '../utils/units.js'
 import { esc } from '../utils/htmlSafe'
+import ExpStatusPicker from './ExpStatusPicker.vue'
 
 const store = useLabStore()
 const activeDropdown = ref(null)
@@ -195,7 +196,7 @@ const calcRMCellHTML = (rm, rIndex, cIndex) => {
                     displayTarget = `${esc(targetVal)} ${esc(comp.targetUnit)}`;
                 }
                 totalVol += v;
-                htmlStr += `&nbsp;<span class="inv-ref" contenteditable="false" data-labware="${esc(comp.labware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(invItem.code)}] ${esc(invItem.name)} (${esc(store.formatNum(invItem.stock))} ${esc(invItem.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(v))} ${esc(unit)} (${displayTarget})<br>`;
+                htmlStr += `&nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(invItem.id)}" data-labware="${esc(comp.labware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(invItem.code)}] ${esc(invItem.name)} (${esc(store.formatNum(invItem.stock))} ${esc(invItem.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(v))} ${esc(unit)} (${displayTarget})<br>`;
             }
         }
     });
@@ -353,6 +354,7 @@ const saveReverseMatrixToPlate = (rm) => {
 
             <div style="display: flex; gap: 5px; align-items: center;">
                 <span class="scope-badge" :class="rm.scope === 'Global' ? 'lab' : 'private'" style="margin-right: 5px;">{{ rm.scope === 'Global' ? 'Lab' : 'Private' }}</span>
+                <ExpStatusPicker :modelValue="rm.status || 'in_progress'" @update:modelValue="v => { rm.status = v; store.saveToCloud('screenings', rm); store.toast('Status updated') }" />
 
                 <button class="success small" @click="store.saveToCloud('screenings', rm); store.toast('Saved')" title="Save to cloud"><i class="fas fa-cloud-arrow-up"></i> Save</button>
 

@@ -2,6 +2,7 @@
 import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { esc, sanitize } from '../utils/htmlSafe'
+import ExpStatusPicker from './ExpStatusPicker.vue'
 import { BOEKHOVEN_PALETTE, assignColors } from '../utils/palette'
 
 const store = useLabStore()
@@ -145,7 +146,7 @@ const insertInventoryRefToWell = (plate) => {
     const editor = document.getElementById('wellEditor_' + plate.id);
     if (item && editor) {
         editor.focus();
-        const html = `&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp;`;
+        const html = `&nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(item.id)}" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp;`;
         document.execCommand('insertHTML', false, html);
         plate.wells[plate.selectedWell] = sanitize(editor.innerHTML);
     }
@@ -892,6 +893,7 @@ const exportAndrewPlusMulti = () => {
 
             <div style="display: flex; gap: 5px; align-items: center;">
                 <span class="scope-badge" :class="plate.scope === 'Global' ? 'lab' : 'private'" style="margin-right: 5px;">{{ plate.scope === 'Global' ? 'Lab' : 'Private' }}</span>
+                <ExpStatusPicker :modelValue="plate.status || 'in_progress'" @update:modelValue="v => { plate.status = v; store.saveToCloud('plates', plate); store.toast('Status updated') }" />
 
                 <button class="success small" @click="store.saveToCloud('plates', plate); store.toast('Saved')" title="Save to cloud"><i class="fas fa-cloud-arrow-up"></i> Save</button>
 

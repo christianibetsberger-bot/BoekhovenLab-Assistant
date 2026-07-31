@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Redirecting…</title>
+  <script>
+    // GitHub Pages serves this file for ANY path that doesn't exist, so one file
+    // redirects every code with no per-code setup:  <host>/R00012  ->  the inventory
+    // deep link  .../BoekhovenLab-Assistant/?qr=R00012  . The main app is untouched.
+    (function () {
+      var INVENTORY = 'https://christianibetsberger-bot.github.io/BoekhovenLab-Assistant/';
+      var code = decodeURIComponent(location.pathname).replace(/^\/+|\/+$/g, '').trim();
+      location.replace(code ? INVENTORY + '?qr=' + encodeURIComponent(code) : INVENTORY);
+    })();
+  </script>
+</head>
+<body>Redirecting to the lab inventory…</body>
+</html>

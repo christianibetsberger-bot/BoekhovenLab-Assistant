@@ -1140,7 +1140,7 @@ const exportAdditiveToPlate = () => {
   const addInvTag = (vol) => {
     const inv = additiveConfig.inv
     if (!inv) return `<strong>${esc(additiveConfig.name || 'Additive')}:</strong> ${esc(fmt(vol))} µL<br>`
-    return `&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(inv.code)}] ${esc(inv.name)} (${esc(store.formatNum(inv.stock))} ${esc(inv.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(fmt(vol))} µL<br>`
+    return `&nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(inv.id)}" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(inv.code)}] ${esc(inv.name)} (${esc(store.formatNum(inv.stock))} ${esc(inv.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(fmt(vol))} µL<br>`
   }
 
   additivePreviewRows.value.forEach((row, i) => {
@@ -1442,7 +1442,7 @@ const exportSuggestionsToPlate = () => {
 
     const getInventoryTag = (inv, vol, targetConc) => {
         if (!inv) return `<strong>Unknown Component:</strong> ${esc(vol)} µL (${esc(targetConc)} mM)<br>`;
-        return `&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(inv.code)}] ${esc(inv.name)} (${esc(store.formatNum(inv.stock))} ${esc(inv.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(vol)} µL (${esc(targetConc)} mM)<br>`;
+        return `&nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(inv.id)}" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(inv.code)}] ${esc(inv.name)} (${esc(store.formatNum(inv.stock))} ${esc(inv.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(vol)} µL (${esc(targetConc)} mM)<br>`;
     };
     
     const fmt = n => Number(n).toFixed(2)
@@ -1472,7 +1472,7 @@ const exportSuggestionsToPlate = () => {
             const fillupInv = config.value.fillupMedium.inv
             let fillupHtml
             if (fillupInv) {
-              fillupHtml = `&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(fillupInv.code)}] ${esc(fillupInv.name)} (${esc(store.formatNum(fillupInv.stock))} ${esc(fillupInv.stockUnit || 'mM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${fmt(vFill)} µL<br>`
+              fillupHtml = `&nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(fillupInv.id)}" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(fillupInv.code)}] ${esc(fillupInv.name)} (${esc(store.formatNum(fillupInv.stock))} ${esc(fillupInv.stockUnit || 'mM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${fmt(vFill)} µL<br>`
             } else {
               const fillupLabel = config.value.fillupMedium.type === 'buffer'
                 ? (config.value.fillupMedium.bufName || 'Buffer')

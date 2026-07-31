@@ -16,6 +16,7 @@
         <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
           <label class="checkbox-label"><input type="radio" v-model="dataset.scope" value="Personal" /> Personal</label>
           <label class="checkbox-label"><input type="radio" v-model="dataset.scope" value="Global" /> Global</label>
+          <ExpStatusPicker :modelValue="dataset.status || 'in_progress'" @update:modelValue="v => dataset.status = v" />
           <button class="small success-btn" @click="saveToCloud" :disabled="!store.user">
             <i class="fas fa-cloud-arrow-up"></i> Save
           </button>
@@ -1100,6 +1101,7 @@
 import { onMounted, onBeforeUnmount, ref, reactive, computed, watch, nextTick } from 'vue'
 import Plotly from 'plotly.js-dist-min'
 import { useLabStore } from '../stores/labStore'
+import ExpStatusPicker from './ExpStatusPicker.vue'
 import { db } from '../services/supabase'
 import { ENDPOINTS } from '../services/kineticsBackend'
 import { fitKineticsLocal } from '../services/kineticsLocalFit'
@@ -1121,6 +1123,7 @@ function emptyDataset() {
     id: null,
     name: '',
     scope: 'Personal',
+    status: 'in_progress',
     units: { ligase: 'µM', atp: 'µM', mg2: 'µM' },
     // Replication-kinetics initial conditions; defaults match the antimony model.
     kinetics: { limit_uM: 1.4, A0: 2.8, B0: 1.4 },
@@ -2906,7 +2909,7 @@ function getInvTag(inv, vol, targetConc, unit, label = '') {
   if (!inv) {
     return `${pre}<strong>Manual:</strong> ${esc(vol)} µL (${esc(targetConc)} ${esc(unit)})<br>`
   }
-  return `${pre}&nbsp;<span class="inv-ref" contenteditable="false" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(inv.code)}] ${esc(inv.name)} (${esc(store.formatNum ? store.formatNum(inv.stock) : inv.stock)} ${esc(inv.stockUnit || unit)})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity:0.7;"></i></span>&nbsp; ${esc(vol)} µL (${esc(targetConc)} ${esc(unit)})<br>`
+  return `${pre}&nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(inv.id)}" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(inv.code)}] ${esc(inv.name)} (${esc(store.formatNum ? store.formatNum(inv.stock) : inv.stock)} ${esc(inv.stockUnit || unit)})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity:0.7;"></i></span>&nbsp; ${esc(vol)} µL (${esc(targetConc)} ${esc(unit)})<br>`
 }
 
 function exportSuggestionsToPlate() {
@@ -3020,6 +3023,7 @@ async function saveToCloud() {
     id: dataset.id,
     name: dataset.name || 'Untitled LIDA Dataset',
     scope: dataset.scope,
+    status: dataset.status || 'in_progress',
     units: dataset.units,
     kinetics: dataset.kinetics,
     experiments: dataset.experiments,

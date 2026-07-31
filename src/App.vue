@@ -753,6 +753,8 @@ async function initSession(user) {
   store.user = user
   await store.loadCloudSettings()
   store.loadCloudInventory()
+  store.syncProfile()      // add/refresh this user in the lab directory
+  store.loadProfiles()     // load the directory for sharing pickers
   loadLayoutMeta()
   loadGridLayout()
   loadSidebarGroups()

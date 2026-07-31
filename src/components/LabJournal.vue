@@ -281,6 +281,20 @@ const shareDialog = ref(null)   // { entry, scope, sharedWith:[], input:'' }
 const knownJournalEmails = computed(() => [...new Set(
     store.journal.entries.flatMap(e => [e.owner_email, ...(e.sharedWith || [])]).filter(Boolean)
 )].sort())
+// All lab members for the share dropdown: the directory (profiles) ∪ anyone already
+// seen on a journal entry, minus yourself. Works before the directory fills in.
+const labMembers = computed(() => {
+    const self = (store.user?.email || '').toLowerCase()
+    return [...new Set([
+        ...(store.profiles || []).map(p => (p.email || '').toLowerCase()),
+        ...knownJournalEmails.value.map(e => e.toLowerCase()),
+    ].filter(e => e && e !== self))].sort()
+})
+function pickShareMember(ev) {
+    const em = (ev.target.value || '').trim().toLowerCase()
+    if (em && em !== store.user?.email && !shareDialog.value.sharedWith.includes(em)) shareDialog.value.sharedWith.push(em)
+    ev.target.value = ''
+}
 function openShare(entry) {
     shareDialog.value = { entry, scope: entry.scope || 'Personal', sharedWith: [...(entry.sharedWith || [])], input: '' }
 }
@@ -1152,15 +1166,19 @@ onMounted(async () => {
             <button class="scope-chip" :class="{ active: shareDialog.scope === 'Lab' }" @click="shareDialog.scope = 'Lab'">Lab-wide</button>
           </div>
           <div v-if="shareDialog.scope !== 'Lab'" class="sh-invite">
-            <label class="sh-label">Share with (emails) — they can view and co-edit</label>
+            <label class="sh-label">Share with lab members — they can view and co-edit</label>
             <div v-if="shareDialog.sharedWith.length" class="sh-chips">
               <span v-for="em in shareDialog.sharedWith" :key="em" class="sh-chip">{{ em }}<button @click="removeShareEmail(em)">×</button></span>
             </div>
+            <select v-if="labMembers.length" @change="pickShareMember" style="width: 100%; margin-bottom: 6px;">
+              <option value="">＋ Add a lab member…</option>
+              <option v-for="em in labMembers" :key="em" :value="em" :disabled="shareDialog.sharedWith.includes(em)">{{ em }}</option>
+            </select>
             <div style="display: flex; gap: 6px;">
-              <input v-model="shareDialog.input" list="jr-share-emails" placeholder="name@example.com" @keydown.enter.prevent="addShareEmail" style="flex: 1;">
+              <input v-model="shareDialog.input" list="jr-share-emails" placeholder="…or type an email" @keydown.enter.prevent="addShareEmail" style="flex: 1;">
               <button class="secondary small" @click="addShareEmail">Add</button>
             </div>
-            <datalist id="jr-share-emails"><option v-for="em in knownJournalEmails" :key="em" :value="em"></option></datalist>
+            <datalist id="jr-share-emails"><option v-for="em in labMembers" :key="em" :value="em"></option></datalist>
           </div>
           <p class="sh-note">{{ shareDialog.scope === 'Lab' ? 'Everyone in the lab can view and edit this entry.' : (shareDialog.sharedWith.length ? 'These users can view and edit this entry in real time.' : 'Only you can see this entry.') }}</p>
         </div>

@@ -37,6 +37,7 @@ export const useLabStore = defineStore('lab', {
     dnaCalc: { a260: null, sequence: '', manualMw: null, saveCode: '', saveName: '', saveClass: 'DNA', type: 'DNA', pathLength: 0.05 },
     
     inventory: [],
+    profiles: [],   // lab user directory {email, display_name} — for sharing pickers
     // Predefined storage locations. Global ones are shared with everyone; Personal ones
     // are only visible to their creator. Each: { id, name, scope, owner_id }.
     locations: [],
@@ -440,6 +441,27 @@ export const useLabStore = defineStore('lab', {
         // Write cloud layout into localStorage so loadModuleLayout() picks it up
         localStorage.setItem(`lab_module_layout_${this.user.id}`, JSON.stringify(data.layout));
       }
+    },
+
+    // ── Lab user directory (populates the sharing pickers) ───────────────────
+    // Each user upserts their own row on login; everyone can read the directory.
+    // Degrades quietly if the `profiles` table hasn't been created yet.
+    async syncProfile() {
+      if (!this.user?.id) return;
+      try {
+        await db.from('profiles').upsert({
+          id: this.user.id,
+          email: (this.user.email || '').toLowerCase(),
+          display_name: this.user.user_metadata?.full_name || this.user.user_metadata?.name || null,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'id' });
+      } catch (e) { /* table missing — ignore */ }
+    },
+    async loadProfiles() {
+      try {
+        const { data } = await db.from('profiles').select('email, display_name');
+        if (Array.isArray(data)) this.profiles = data.filter(p => p.email);
+      } catch (e) { /* table missing — leave empty */ }
     },
 
     // ── Preferences (theme color, dark mode, global calc settings) ───────────

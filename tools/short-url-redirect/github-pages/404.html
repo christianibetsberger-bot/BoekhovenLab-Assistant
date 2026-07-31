@@ -9,9 +9,12 @@
     // GitHub Pages serves this file for ANY path that doesn't exist, so one file
     // redirects every code with no per-code setup:  <host>/R00012  ->  the inventory
     // deep link  .../BoekhovenLab-Assistant/?qr=R00012  . The main app is untouched.
+    // Uses the LAST path segment as the code, so it works on a user page
+    // (cilab1.github.io/R00012) AND a project repo (cilab1.github.io/CILab/R00012).
     (function () {
       var INVENTORY = 'https://christianibetsberger-bot.github.io/BoekhovenLab-Assistant/';
-      var code = decodeURIComponent(location.pathname).replace(/^\/+|\/+$/g, '').trim();
+      var segs = decodeURIComponent(location.pathname).split('/').filter(Boolean);
+      var code = (segs[segs.length - 1] || '').trim();
       location.replace(code ? INVENTORY + '?qr=' + encodeURIComponent(code) : INVENTORY);
     })();
   </script>

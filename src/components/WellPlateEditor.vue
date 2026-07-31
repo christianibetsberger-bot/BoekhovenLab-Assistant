@@ -3,6 +3,14 @@ import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { esc, sanitize } from '../utils/htmlSafe'
 import ExpStatusPicker from './ExpStatusPicker.vue'
+
+// Set + persist an experiment status; reverts if the save was rejected.
+const setPlanStatus = async (plate, v) => {
+    const prev = plate.status || 'in_progress'
+    plate.status = v
+    if (await store.saveToCloud('plates', plate)) store.toast('Status updated')
+    else plate.status = prev
+}
 import { BOEKHOVEN_PALETTE, assignColors } from '../utils/palette'
 
 const store = useLabStore()
@@ -893,7 +901,7 @@ const exportAndrewPlusMulti = () => {
 
             <div style="display: flex; gap: 5px; align-items: center;">
                 <span class="scope-badge" :class="plate.scope === 'Global' ? 'lab' : 'private'" style="margin-right: 5px;">{{ plate.scope === 'Global' ? 'Lab' : 'Private' }}</span>
-                <ExpStatusPicker :modelValue="plate.status || 'in_progress'" @update:modelValue="v => { plate.status = v; store.saveToCloud('plates', plate); store.toast('Status updated') }" />
+                <ExpStatusPicker :modelValue="plate.status || 'in_progress'" @update:modelValue="v => setPlanStatus(plate, v)" />
 
                 <button class="success small" @click="store.saveToCloud('plates', plate); store.toast('Saved')" title="Save to cloud"><i class="fas fa-cloud-arrow-up"></i> Save</button>
 

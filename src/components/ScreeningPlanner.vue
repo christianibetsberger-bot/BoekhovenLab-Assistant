@@ -5,6 +5,14 @@ import { concentrationRatio, compatibleUnits, dimsCompatible, defaultUnitForDim,
 import { esc } from '../utils/htmlSafe'
 import ExpStatusPicker from './ExpStatusPicker.vue'
 
+// Set + persist an experiment status; reverts if the save was rejected.
+const setPlanStatus = async (rm, v) => {
+    const prev = rm.status || 'in_progress'
+    rm.status = v
+    if (await store.saveToCloud('screenings', rm)) store.toast('Status updated')
+    else rm.status = prev
+}
+
 const store = useLabStore()
 const activeDropdown = ref(null)
 const showCloudLibrary = ref(false)
@@ -354,7 +362,7 @@ const saveReverseMatrixToPlate = (rm) => {
 
             <div style="display: flex; gap: 5px; align-items: center;">
                 <span class="scope-badge" :class="rm.scope === 'Global' ? 'lab' : 'private'" style="margin-right: 5px;">{{ rm.scope === 'Global' ? 'Lab' : 'Private' }}</span>
-                <ExpStatusPicker :modelValue="rm.status || 'in_progress'" @update:modelValue="v => { rm.status = v; store.saveToCloud('screenings', rm); store.toast('Status updated') }" />
+                <ExpStatusPicker :modelValue="rm.status || 'in_progress'" @update:modelValue="v => setPlanStatus(rm, v)" />
 
                 <button class="success small" @click="store.saveToCloud('screenings', rm); store.toast('Saved')" title="Save to cloud"><i class="fas fa-cloud-arrow-up"></i> Save</button>
 

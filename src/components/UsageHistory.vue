@@ -3,12 +3,15 @@
 // Groups every recorded use by year → experiment, showing date, source, status
 // and who ran it — so a stock stays fully traceable, including after the item is
 // archived. Only finished experiments are logged (see utils/usageTracker.js).
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { fetchUsageHistory } from '../utils/usageTracker'
 
-const props = defineProps({ itemId: { type: [String, Number], default: null } })
+const props = defineProps({
+  itemId: { type: [String, Number], default: null },
+  defaultOpen: { type: Boolean, default: false },   // archive rows open straight to the history
+})
 
-const open = ref(false)
+const open = ref(props.defaultOpen)
 const loading = ref(false)
 const loaded = ref(false)
 const missing = ref(false)
@@ -47,17 +50,21 @@ async function load() {
   loading.value = true
   const res = await fetchUsageHistory(props.itemId)
   rows.value = res.rows; missing.value = res.missing
-  // newest year expanded by default, the rest collapsed
+  loading.value = false; loaded.value = true
+  // newest year expanded by default, the rest collapsed (tree recomputes off rows)
   openYears.value = {}
   const first = tree.value[0]?.[0]
   if (first) openYears.value[first] = true
-  loading.value = false; loaded.value = true
 }
 function toggle() {
   open.value = !open.value
   if (open.value && !loaded.value) load()
 }
-watch(() => props.itemId, () => { loaded.value = false; rows.value = []; open.value = false })
+onMounted(() => { if (open.value) load() })
+watch(() => props.itemId, () => {
+  loaded.value = false; rows.value = []; open.value = props.defaultOpen
+  if (open.value) load()
+})
 </script>
 
 <template>

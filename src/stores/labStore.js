@@ -194,39 +194,59 @@ export const useLabStore = defineStore('lab', {
       const plain = JSON.parse(JSON.stringify(item));
       const payload = { item_id: String(plain.id), owner_id: this.user.id, scope: plain.scope || 'Global', item_data: plain };
       const { error } = await db.from('inventory').upsert(payload, { onConflict: 'item_id' });
-      if (error) alert("Error saving inventory: " + error.message);
+      if (error) { alert("Error saving inventory: " + error.message); return false; }
+      return true;
     },
 
     // Deleting never destroys: the item is moved to `inventory_archive` (full data
     // + who/when), so its usage history stays readable years later. `item` is the
     // full object when available; falls back to a DB fetch by id.
+    // Archiving is a PRECONDITION for deletion: if the item cannot be safely
+    // copied into inventory_archive we refuse to delete it, so "deleted" can
+    // never mean "destroyed". Returns true only when the item is archived AND
+    // removed from the active inventory.
     async deleteItemFromCloud(itemId, item = null) {
-      if (!this.user) return;
+      if (!this.user) return false;
       const id = String(itemId);
       let plain = item ? JSON.parse(JSON.stringify(item)) : null;
       if (!plain) {
-        const { data } = await db.from('inventory').select('item_data, owner_id, scope').eq('item_id', id).maybeSingle();
+        const { data, error } = await db.from('inventory').select('item_data').eq('item_id', id).maybeSingle();
+        if (error) { this.toast('Could not read the item — nothing deleted'); return false; }
         plain = data?.item_data || null;
       }
-      if (plain) {
-        const { error: archErr } = await db.from('inventory_archive').upsert({
-          item_id: id, item_data: plain,
-          owner_id: this.user.id, owner_email: this.user.email || '',
-          scope: plain.scope || 'Global', deleted_by: this.user.email || '',
-          deleted_at: new Date().toISOString(),
-        }, { onConflict: 'item_id' });
-        if (archErr) this.toast('Archive table missing — run inventory_usage.sql (item deleted without archive)');
+      if (!plain) { this.toast('Could not find the item to archive — nothing deleted'); return false; }
+
+      const { error: archErr } = await db.from('inventory_archive').upsert({
+        item_id: id, item_data: plain,
+        owner_id: this.user.id, owner_email: this.user.email || '',
+        scope: plain.scope || 'Global', deleted_by: this.user.email || '',
+        deleted_at: new Date().toISOString(),
+      }, { onConflict: 'item_id' });
+      if (archErr) {
+        this.toast(/relation|does not exist|schema cache/i.test(archErr.message || '')
+          ? 'Item NOT deleted — run supabase/inventory_usage.sql to enable the archive'
+          : 'Item NOT deleted — could not archive it: ' + archErr.message);
+        return false;
       }
-      await db.from('inventory').delete().eq('item_id', id);
+
+      const { error: delErr } = await db.from('inventory').delete().eq('item_id', id);
+      if (delErr) {
+        // Archived but still live — roll the archive copy back so the two stores agree.
+        await db.from('inventory_archive').delete().eq('item_id', id);
+        this.toast('Delete failed: ' + delErr.message);
+        return false;
+      }
+      return true;
     },
 
     // Bring an archived item back into the live inventory.
     async restoreArchivedItem(archRow) {
       if (!this.user || !archRow?.item_data) return false;
       const item = archRow.item_data;
-      await this.saveItemToCloud(item);
+      const ok = await this.saveItemToCloud(item);
+      if (ok === false) { this.toast('Restore failed — the item stays in the archive'); return false; }
       await db.from('inventory_archive').delete().eq('item_id', String(archRow.item_id));
-      this.inventory.unshift(item);
+      if (!this.inventory.some(i => String(i.id) === String(item.id))) this.inventory.unshift(item);
       this.toast(`Restored "${item.name || item.code}"`);
       return true;
     },
@@ -293,9 +313,9 @@ export const useLabStore = defineStore('lab', {
         
         if (error) {
             alert(`Permission Denied: Only the creator can modify this protocol.`);
-            return;
+            return false;
         }
-        
+
         const { data } = await db.from(tableName).select('*');
         if (data) {
             const mapped = data.map(row => { const obj = row.data; obj.owner_id = row.owner_id; return obj; });
@@ -313,6 +333,7 @@ export const useLabStore = defineStore('lab', {
         // logs its referenced compounds; reverting or removing them un-logs.
         // Fire-and-forget so saves stay snappy.
         this.reconcilePlanUsage(tableName, payloadData);
+        return true;
     },
 
     async reconcilePlanUsage(tableName, plan) {
@@ -320,7 +341,7 @@ export const useLabStore = defineStore('lab', {
       if (!sourceType || !plan?.id) return;
       try {
         const plain = JSON.parse(JSON.stringify(plan));
-        const items = await extractPlanRefs(tableName, plain, this.inventory);
+        const { items, unresolved } = await extractPlanRefs(tableName, plain, this.inventory);
         await reconcileUsage({
           sourceType,
           sourceId: plain.id,
@@ -329,6 +350,7 @@ export const useLabStore = defineStore('lab', {
           userEmail: this.user?.email || '',
           usedAt: null,
           items,
+          unresolved,
         });
       } catch (e) { console.warn('plan usage reconcile skipped:', e?.message || e); }
     },

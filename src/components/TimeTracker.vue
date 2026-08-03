@@ -589,6 +589,7 @@ import { db } from '../services/supabase'
 import { useLabStore } from '../stores/labStore'
 import { ttBumpCounter, bumpTT, signalModuleActive, ttProjectList } from '../composables/timeTrackerBus'
 import { isBavarianHoliday } from '../utils/holidays'
+import { formatDuration, formatHours, formatDate, formatTime, toDatetimeLocal, getMonday, entryMinutes, isNachbuchung } from '../utils/timeFormat'
 
 const store = useLabStore()
 
@@ -776,31 +777,6 @@ function hexToRgba(hex, a) {
 const todayStr = computed(() => new Date().toISOString().split('T')[0])
 const currentYear = computed(() => new Date().getFullYear())
 
-function getMonday(d) {
-  const dt = new Date(d)
-  const day = dt.getDay()
-  dt.setDate(dt.getDate() + (day === 0 ? -6 : 1 - day))
-  dt.setHours(0, 0, 0, 0)
-  return dt
-}
-
-function entryMinutes(e) {
-  if (!e.checked_out) return 0
-  return (new Date(e.checked_out) - new Date(e.checked_in)) / 60000
-}
-
-function isNachbuchung(entry) {
-  if (!entry.created_at || !entry.checked_in) return false
-  return (new Date(entry.created_at) - new Date(entry.checked_in)) > 3600000
-}
-
-function toDatetimeLocal(ts) {
-  if (!ts) return ''
-  const d = new Date(ts)
-  const p = n => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
-}
-
 // ── Computed ──────────────────────────────────────────────────────────────────
 
 const activeEntry = computed(() =>
@@ -977,29 +953,6 @@ const totalVacationThisYear = computed(() =>
 const vacationRemaining = computed(() =>
   totalVacationThisYear.value - vacationUsedThisYear.value
 )
-
-// ── Formatters ────────────────────────────────────────────────────────────────
-
-function formatDuration(ms) {
-  if (!ms || ms <= 0) return '0m'
-  const h = Math.floor(ms / 3600000)
-  const m = Math.floor((ms % 3600000) / 60000)
-  return h > 0 ? `${h}h ${m}m` : `${m}m`
-}
-
-function formatHours(h) {
-  const abs = Math.abs(h), sign = h < 0 ? '-' : ''
-  const hh = Math.floor(abs), mm = Math.round((abs - hh) * 60)
-  return mm > 0 ? `${sign}${hh}h ${mm}m` : `${sign}${hh}h`
-}
-
-function formatDate(ts) {
-  return new Date(ts).toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'2-digit' })
-}
-
-function formatTime(ts) {
-  return new Date(ts).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' })
-}
 
 // ── Supabase ──────────────────────────────────────────────────────────────────
 

@@ -23,8 +23,8 @@ const jobs = [
   ['icon-dark-512.png',  darkSVG,  512],
   ['apple-touch-light.png', lightSVG, 180],
   ['apple-touch-dark.png',  darkSVG,  180],
-  ['icon-192.png', darkSVG, 192],
-  ['icon-512.png', darkSVG, 512],
+  // Note: the theme-neutral icon-192/512 pair was dropped — the manifest uses the
+  // light variants and useDynamicIcon swaps in the dark ones, so nothing read them.
 ]
 for (const [name, svg, size] of jobs) {
   writeFileSync(path(name), await png(svg, size))

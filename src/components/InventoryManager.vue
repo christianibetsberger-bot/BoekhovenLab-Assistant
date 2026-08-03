@@ -209,7 +209,23 @@ const updateManualSequence = (item) => {
     store.saveItemToCloud(item)
 }
 
-const viewProperties = (item) => { viewingItem.value = item; }
+const viewProperties = (item) => { viewingArchivedRow.value = null; viewingItem.value = item; }
+// Archived compounds open the SAME info window, read-only: every field the stock had
+// when it was deleted is retained in item_data, so nothing is lost. Editing/saving is
+// disabled (that would resurrect it) — Restore first to make changes.
+const viewingArchivedRow = ref(null)
+const isViewingArchived = computed(() => !!viewingArchivedRow.value)
+const viewArchivedProperties = (row) => {
+    viewingArchivedRow.value = row;
+    viewingItem.value = JSON.parse(JSON.stringify(row.item_data || {}));   // copy — never written back
+}
+const closeProperties = () => { viewingItem.value = null; viewingArchivedRow.value = null; }
+const restoreFromProperties = async () => {
+    const row = viewingArchivedRow.value;
+    if (!row) return;
+    closeProperties();
+    await restoreArchived(row);
+}
 const toggleScope = (item) => {
     item.scope = (item.scope || 'Global') === 'Personal' ? 'Global' : 'Personal';
     // Promoting a stock to Global promotes its Personal location to Global too.
@@ -932,9 +948,15 @@ const generateLabelsPDF = () => {
   <div>
 
     <!-- ── Properties modal ───────────────────────────────────────────────── -->
-    <div v-if="viewingItem" @click.self="viewingItem = null" style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px;">
+    <div v-if="viewingItem" @click.self="closeProperties" style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px;">
         <div style="position: relative; background: var(--modal); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); padding: 22px; border-radius: var(--r); border: 1px solid var(--cdl); box-shadow: var(--sh); max-width: 500px; width: 90%; max-height: 88vh; overflow-y: auto;">
-            <button @click="viewingItem = null" title="Close" style="position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border-radius: 50%; background: var(--fl); color: var(--tx2); border: none; box-shadow: none; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; z-index: 2;">✕</button>
+            <button @click="closeProperties" title="Close" style="position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border-radius: 50%; background: var(--fl); color: var(--tx2); border: none; box-shadow: none; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; z-index: 2;">✕</button>
+            <div v-if="isViewingArchived" style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.7rem; font-weight: 700; color: var(--tx2); background: var(--fl); border-radius: 999px; padding: 3px 10px; margin-bottom: 10px;">
+                <i class="fas fa-box-archive"></i> ARCHIVED
+                <span style="font-weight: 500; opacity: .8;">· deleted {{ new Date(viewingArchivedRow.deleted_at).toLocaleDateString() }}<template v-if="viewingArchivedRow.deleted_by"> by {{ viewingArchivedRow.deleted_by }}</template></span>
+            </div>
+            <!-- Archived stock is shown exactly as it was, but read-only (fieldset disables every field). -->
+            <fieldset :disabled="isViewingArchived" style="border: none; padding: 0; margin: 0; min-width: 0;">
             <template v-if="viewingItem.itemClass === 'DNA' || viewingItem.itemClass === 'RNA'">
                 <h3 style="margin-top: 0; color: var(--primary); border-bottom: 1px solid var(--ln); padding-bottom: 10px;"><i class="fas fa-dna"></i> Sequence Properties</h3>
                 <div class="grid-2" style="margin-top: 15px;">
@@ -1046,8 +1068,13 @@ const generateLabelsPDF = () => {
                 <label>Notes / Prep Info</label>
                 <textarea v-model="viewingItem.notes" rows="5" placeholder="Preparation details — total volume, buffer, fill-up water, pH, salt load, …" style="width: 100%; font-size: 0.8rem;"></textarea>
             </div>
+            </fieldset>
             <UsageHistory :itemId="viewingItem.id" />
-            <div style="margin-top: 20px; display: flex; gap: 10px;">
+            <div v-if="isViewingArchived" style="margin-top: 20px; display: flex; gap: 10px;">
+                <button class="secondary" @click="closeProperties">Close</button>
+                <button @click="restoreFromProperties" style="flex: 1;" title="Put this compound back into the active inventory"><i class="fas fa-rotate-left"></i> Restore to inventory</button>
+            </div>
+            <div v-else style="margin-top: 20px; display: flex; gap: 10px;">
                 <button class="danger" @click="deleteViewingItem" title="Move to the inventory archive (keeps the item and its usage history)"><i class="fas fa-box-archive"></i> Delete</button>
                 <button @click="saveViewingItem" style="flex: 1;">Save & Close</button>
             </div>
@@ -1366,6 +1393,7 @@ const generateLabelsPDF = () => {
                                 </td>
                                 <td style="white-space: nowrap;">
                                     <button class="secondary small" @click="archiveViewing = archiveViewing?.item_id === row.item_id ? null : row" title="Usage history" style="margin-right: 5px;"><i class="fas fa-clock-rotate-left"></i></button>
+                                    <button class="secondary small" @click="viewArchivedProperties(row)" title="View Properties (read-only)" style="margin-right: 5px;"><i class="fas fa-info-circle"></i></button>
                                     <button class="small" @click="restoreArchived(row)" title="Restore to the active inventory"><i class="fas fa-rotate-left"></i></button>
                                 </td>
                             </tr>

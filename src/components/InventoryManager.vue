@@ -11,7 +11,8 @@ import qrcode from '../utils/qrcode.mjs'
 
 const store = useLabStore()
 
-// Local state
+// Local state. inventoryMode is also the tab: 'Global' | 'Personal' | 'Archived'
+// ('Archived' is a VIEW, never a scope items are created into — see writeScope).
 const inventoryMode = ref('Global')
 const importTargetMode = ref('Global')
 const inventorySearch = ref('')
@@ -37,7 +38,7 @@ const resolvePendingQr = () => {
         inventoryMode.value = (found.scope || 'Global') === 'Personal' ? 'Personal' : 'Global'
         viewingItem.value = found
     } else if (confirm(`No inventory item with code "${code}".\n\nAdd it as a new compound?`)) {
-        const newItem = { id: 'inv_' + crypto.randomUUID(), code, cas: '', itemClass: 'Other', name: 'Scanned compound', stock: 100, stockUnit: 'µM', location: '', sequence: '', oligoType: 'DNA', manualMw: null, tm: 0, scope: inventoryMode.value }
+        const newItem = { id: 'inv_' + crypto.randomUUID(), code, cas: '', itemClass: 'Other', name: 'Scanned compound', stock: 100, stockUnit: 'µM', location: '', sequence: '', oligoType: 'DNA', manualMw: null, tm: 0, scope: writeScope.value }
         store.inventory.unshift(newItem)
         store.saveItemToCloud(newItem)
         viewingItem.value = newItem
@@ -122,7 +123,7 @@ function openAddFromIncoming(row) {
         id: 'inv_' + crypto.randomUUID(),
         code: '', cas: row.cas || '', itemClass: 'Other', name: row.name || '',
         stock: null, stockUnit: 'mg/mL', location: '', sequence: '', oligoType: 'DNA',
-        manualMw: null, tm: 0, scope: inventoryMode.value,
+        manualMw: null, tm: 0, scope: writeScope.value,
         vendor: row.vendor || '', catalogue: row.catalogue || '', bottleSize: row.quantity || '',
         weblink: row.weblink || '',
     }
@@ -135,7 +136,7 @@ function openAddNew() {
     const item = {
         id: 'inv_' + crypto.randomUUID(), code: '', cas: '', itemClass: 'Other', name: '',
         stock: null, stockUnit: 'µM', location: '', sequence: '', oligoType: 'DNA',
-        manualMw: null, tm: 0, scope: inventoryMode.value,
+        manualMw: null, tm: 0, scope: writeScope.value,
         vendor: '', catalogue: '', bottleSize: '', weblink: '',
     }
     addDialog.value = { row: null, item, lookup: { loading: false, error: '', img: '', formula: '', mw: '', cid: null } }
@@ -182,6 +183,8 @@ async function dismissIncoming(row) {
 }
 
 // --- Local Computed ---
+// Scope new/imported items land in — the Archive is a view, not a real scope.
+const writeScope = computed(() => inventoryMode.value === 'Archived' ? 'Global' : inventoryMode.value)
 const filteredInventory = computed(() => {
     const term = inventorySearch.value.toLowerCase();
     return store.inventory.filter(item =>
@@ -251,19 +254,19 @@ const deleteViewingItem = async () => {
 }
 
 // ── Archive browser (deleted items are retained, with their usage history) ────
-const showArchive = ref(false)
+// The archive is a third tab of the inventory table (inventoryMode === 'Archived'),
+// not a separate window — same page, same layout, just the deleted compounds.
 const archiveRows = ref([])
 const archiveLoading = ref(false)
 const archiveMissing = ref(false)
-const archiveSearch = ref('')
 const openArchive = async () => {
-    showArchive.value = true; archiveLoading.value = true; archiveMissing.value = false;
+    inventoryMode.value = 'Archived'; archiveLoading.value = true; archiveMissing.value = false;
     const { data, error } = await db.from('inventory_archive').select('*').order('deleted_at', { ascending: false });
     if (error) archiveMissing.value = true; else archiveRows.value = data || [];
     archiveLoading.value = false;
 }
 const filteredArchive = computed(() => {
-    const q = archiveSearch.value.trim().toLowerCase();
+    const q = inventorySearch.value.trim().toLowerCase();   // shares the page's search box
     if (!q) return archiveRows.value;
     return archiveRows.value.filter(r => {
         const d = r.item_data || {};
@@ -525,7 +528,7 @@ const importBulk = () => {
             extinction: calcSeqExtinction(seq, oligoType), manualMw: null,
         }
     })
-    importTargetMode.value = inventoryMode.value
+    importTargetMode.value = writeScope.value
     processImports(items, `Bulk TSV (${bulkCodePrefix.value})`)
     showBulkModal.value = false
     bulkPasteText.value = ''
@@ -1327,13 +1330,58 @@ const generateLabelsPDF = () => {
         <div class="scope-chips" style="margin-bottom: 14px;">
             <button class="scope-chip" :class="{ active: inventoryMode === 'Global' }" @click="inventoryMode = 'Global'">Lab</button>
             <button class="scope-chip" :class="{ active: inventoryMode === 'Personal' }" @click="inventoryMode = 'Personal'">Private</button>
+            <button class="scope-chip" :class="{ active: inventoryMode === 'Archived' }" @click="openArchive" title="Deleted compounds — kept with their full usage history">Archive</button>
         </div>
 
         <div class="search-box">
             <i class="fas fa-search"></i>
             <input type="text" v-model="inventorySearch" placeholder="Search by name, CAS, or code...">
         </div>
-        <div class="table-responsive" style="max-height: 500px; border: 1px solid var(--ln2); border-radius: var(--rc); background: var(--surface-solid);">
+
+        <!-- ── Archive: the same table, showing deleted compounds ─────────────── -->
+        <template v-if="inventoryMode === 'Archived'">
+            <p style="font-size: 0.76rem; color: var(--tx2); margin: 0 0 10px;">Deleted compounds are kept here with their full data and usage history, so past experiments stay traceable. Restore one to put it back in the active inventory.</p>
+            <div v-if="archiveMissing" style="font-size: 0.8rem; color: var(--tx2); padding: 14px 0;">Run <code>supabase/inventory_usage.sql</code> to enable the archive.</div>
+            <div v-else-if="archiveLoading" style="font-size: 0.8rem; color: var(--tx2); padding: 14px 0;"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+            <div v-else class="table-responsive" style="max-height: 500px; border: 1px solid var(--ln2); border-radius: var(--rc); background: var(--surface-solid);">
+                <table style="margin-bottom: 0;">
+                    <thead style="position: sticky; top: 0; z-index: 1;">
+                        <tr>
+                            <th>Code</th><th>CAS</th><th>Class</th><th>Component Name</th>
+                            <th>Conc / Unit</th><th>Location</th><th>Deleted</th><th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template v-for="row in filteredArchive" :key="row.item_id">
+                            <tr>
+                                <td style="font-family: ui-monospace, Menlo, monospace; font-weight: 600; color: var(--acc);">{{ row.item_data?.code || '—' }}</td>
+                                <td style="font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem;">{{ row.item_data?.cas || '—' }}</td>
+                                <td style="font-size: 0.8rem;">{{ row.item_data?.itemClass || '—' }}</td>
+                                <td>{{ row.item_data?.name || '(unnamed)' }}</td>
+                                <td style="white-space: nowrap;">{{ row.item_data?.stock ?? '—' }} {{ row.item_data?.stockUnit || '' }}</td>
+                                <td>{{ row.item_data?.location || '—' }}</td>
+                                <td style="white-space: nowrap; font-size: 0.75rem; color: var(--tx2);">
+                                    {{ new Date(row.deleted_at).toLocaleDateString() }}
+                                    <div v-if="row.deleted_by" style="font-size: 0.68rem; opacity: 0.75;">{{ row.deleted_by }}</div>
+                                </td>
+                                <td style="white-space: nowrap;">
+                                    <button class="secondary small" @click="archiveViewing = archiveViewing?.item_id === row.item_id ? null : row" title="Usage history" style="margin-right: 5px;"><i class="fas fa-clock-rotate-left"></i></button>
+                                    <button class="small" @click="restoreArchived(row)" title="Restore to the active inventory"><i class="fas fa-rotate-left"></i></button>
+                                </td>
+                            </tr>
+                            <tr v-if="archiveViewing?.item_id === row.item_id">
+                                <td colspan="8" style="padding: 0 10px 10px;"><UsageHistory :itemId="row.item_id" :default-open="true" /></td>
+                            </tr>
+                        </template>
+                        <tr v-if="!filteredArchive.length">
+                            <td colspan="8" style="text-align: center; color: var(--tx2); font-size: 0.8rem; padding: 18px;">No archived compounds.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </template>
+
+        <div v-else class="table-responsive" style="max-height: 500px; border: 1px solid var(--ln2); border-radius: var(--rc); background: var(--surface-solid);">
             <table style="margin-bottom: 0;">
                 <thead style="position: sticky; top: 0; z-index: 1;">
                     <tr>
@@ -1386,7 +1434,7 @@ const generateLabelsPDF = () => {
             </table>
         </div>
 
-        <div style="display: flex; gap: 10px; margin-top: 15px;">
+        <div v-if="inventoryMode !== 'Archived'" style="display: flex; gap: 10px; margin-top: 15px;">
             <button @click="openAddNew" style="flex-grow: 1; height: 40px;"><i class="fas fa-plus"></i> Add to {{ inventoryMode === 'Personal' ? 'Private' : 'Lab' }}</button>
             <button @click="importTargetMode = inventoryMode; excelUpload.click()" style="flex-grow: 1; height: 40px;">
                 <i class="fas fa-file-excel"></i> Import
@@ -1400,77 +1448,9 @@ const generateLabelsPDF = () => {
             <button @click="showLocationManager = true" style="flex-grow: 1; height: 40px;">
                 <i class="fas fa-map-marker-alt"></i> Locations
             </button>
-            <button @click="openArchive" style="flex-grow: 1; height: 40px;" title="Deleted items — retained with their full usage history">
-                <i class="fas fa-box-archive"></i> Archive
-            </button>
             <input type="file" ref="excelUpload" @change="importInventory" accept=".xlsx, .xls, .csv, .txt" style="display: none;">
         </div>
     </div>
-
-    <!-- ── Inventory archive — deleted items, retained with their usage history ── -->
-    <Teleport to="body">
-        <div v-if="showArchive" @click.self="showArchive = false" style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1200; padding: 20px;">
-            <div style="position: relative; background: var(--modal); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); padding: 22px; border-radius: var(--r); border: 1px solid var(--cdl); box-shadow: var(--sh); max-width: 1100px; width: 95%; max-height: 88vh; overflow-y: auto;">
-                <button @click="showArchive = false" title="Close" style="position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border-radius: 50%; background: var(--fl); color: var(--tx2); border: none; box-shadow: none; cursor: pointer; z-index: 2;">✕</button>
-                <h3 style="margin-top: 0; color: var(--primary); border-bottom: 1px solid var(--ln); padding-bottom: 10px;"><i class="fas fa-box-archive"></i> Inventory archive</h3>
-                <p style="font-size: 0.76rem; color: var(--tx2); margin: 10px 0;">Deleted items are kept here with their full data and usage history, so past experiments stay traceable. Restore one to put it back in the active inventory.</p>
-
-                <div v-if="archiveMissing" style="font-size: 0.8rem; color: var(--tx2);">Run <code>supabase/inventory_usage.sql</code> to enable the archive.</div>
-                <div v-else-if="archiveLoading" style="font-size: 0.8rem; color: var(--tx2);"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
-                <template v-else>
-                    <div class="search-box">
-                        <i class="fas fa-search"></i>
-                        <input type="text" v-model="archiveSearch" placeholder="Search by name, CAS, or code...">
-                    </div>
-                    <!-- Same layout as the live inventory, read-only (archived items aren't edited). -->
-                    <div class="table-responsive" style="max-height: 500px; border: 1px solid var(--ln2); border-radius: var(--rc); background: var(--surface-solid);">
-                        <table style="margin-bottom: 0;">
-                            <thead style="position: sticky; top: 0; z-index: 1;">
-                                <tr>
-                                    <th>Code</th>
-                                    <th>CAS</th>
-                                    <th>Class</th>
-                                    <th>Component Name</th>
-                                    <th>Conc / Unit</th>
-                                    <th>Location</th>
-                                    <th>Deleted</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <template v-for="row in filteredArchive" :key="row.item_id">
-                                    <tr>
-                                        <td style="font-family: ui-monospace, Menlo, monospace; font-weight: 600; color: var(--acc);">{{ row.item_data?.code || '—' }}</td>
-                                        <td style="font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem;">{{ row.item_data?.cas || '—' }}</td>
-                                        <td style="font-size: 0.8rem;">{{ row.item_data?.itemClass || '—' }}</td>
-                                        <td>{{ row.item_data?.name || '(unnamed)' }}</td>
-                                        <td style="white-space: nowrap;">{{ row.item_data?.stock ?? '—' }} {{ row.item_data?.stockUnit || '' }}</td>
-                                        <td>{{ row.item_data?.location || '—' }}</td>
-                                        <td style="white-space: nowrap; font-size: 0.75rem; color: var(--tx2);" :title="row.deleted_by ? 'by ' + row.deleted_by : ''">
-                                            {{ new Date(row.deleted_at).toLocaleDateString() }}
-                                            <div v-if="row.deleted_by" style="font-size: 0.68rem; opacity: 0.75;">{{ row.deleted_by }}</div>
-                                        </td>
-                                        <td style="white-space: nowrap;">
-                                            <button class="secondary small" @click="archiveViewing = archiveViewing?.item_id === row.item_id ? null : row" title="Usage history" style="margin-right: 5px;"><i class="fas fa-clock-rotate-left"></i></button>
-                                            <button class="small" @click="restoreArchived(row)" title="Restore to the active inventory"><i class="fas fa-rotate-left"></i></button>
-                                        </td>
-                                    </tr>
-                                    <tr v-if="archiveViewing?.item_id === row.item_id">
-                                        <td colspan="8" style="padding: 0 10px 10px;">
-                                            <UsageHistory :itemId="row.item_id" :default-open="true" />
-                                        </td>
-                                    </tr>
-                                </template>
-                                <tr v-if="!filteredArchive.length">
-                                    <td colspan="8" style="text-align: center; color: var(--tx2); font-size: 0.8rem; padding: 18px;">No archived items.</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </template>
-            </div>
-        </div>
-    </Teleport>
 
     <!-- ── Add-from-incoming window (teleported so it centres on the viewport) ── -->
     <Teleport to="body">

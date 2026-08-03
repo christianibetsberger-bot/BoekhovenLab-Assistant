@@ -962,6 +962,7 @@ import { db } from '../services/supabase'
 import { esc } from '../utils/htmlSafe'
 import { invChip } from '../utils/invChip'
 import { useLabStore } from '../stores/labStore'
+import { filterInventory } from '../utils/inventoryFilter'
 import PhaseBufferSelect from './PhaseBufferSelect.vue'
 import Plotly from 'plotly.js-dist-min'
 
@@ -1286,17 +1287,7 @@ const selectInventory = (type, inv) => {
     renderPlot();
 }
 
-const filterBlockInventory = (query, scope) => {
-    const term = query ? query.toLowerCase() : '';
-    const targetScope = scope || 'Global';
-    return store.inventory.filter(item => 
-        (item.scope === targetScope || (!item.scope && targetScope === 'Global')) &&
-        ((!term) || 
-         (item.name && item.name.toLowerCase().includes(term)) || 
-         (item.code && item.code.toLowerCase().includes(term)) ||
-         (item.cas && item.cas.toLowerCase().includes(term)))
-    );
-}
+const filterBlockInventory = (query, scope) => filterInventory(store.inventory, query, scope)
 
 // Compute per-well volumes for a suggestion, accounting for background salt and pH.
 // Returns { vA, vB, vC, vFill, backgroundNa_mM, mixedPH, exceeds }

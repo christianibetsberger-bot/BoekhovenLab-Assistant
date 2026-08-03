@@ -1,11 +1,13 @@
 <script setup>
 import { ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
+import { filterInventory } from '../utils/inventoryFilter'
 import { concentrationRatio, compatibleUnits, dimsCompatible, defaultUnitForDim, CONC_UNITS } from '../utils/units.js'
 import { esc } from '../utils/htmlSafe'
 import { invChip } from '../utils/invChip'
 import ExpStatusPicker from './ExpStatusPicker.vue'
 import { usePlanWorkspace } from '../composables/usePlanWorkspace'
+import CloudLibraryModal from './CloudLibraryModal.vue'
 
 
 const store = useLabStore()
@@ -47,14 +49,7 @@ const getInvName = (id) => {
     return 'Select...';
 }
 
-const filterBlockInventory = (query, scope) => {
-    const term = query ? query.toLowerCase() : '';
-    const targetScope = scope || 'Global';
-    return store.inventory.filter(item => 
-        (item.scope === targetScope || (!item.scope && targetScope === 'Global')) &&
-        ((!term) || (item.name && item.name.toLowerCase().includes(term)) || (item.code && item.code.toLowerCase().includes(term)) || (item.cas && item.cas.toLowerCase().includes(term)))
-    );
-}
+const filterBlockInventory = (query, scope) => filterInventory(store.inventory, query, scope)
 
 const getPlateRows = (format) => { if (format === 'ibidi') return 3; if (format === 'pcr8') return 1; return format === 384 ? 16 : (format === 48 ? 6 : (format === 24 ? 4 : 8)); }
 const getPlateCols = (format) => { if (format === 'ibidi') return 6; if (format === 'pcr8') return 8; return format === 384 ? 24 : (format === 48 ? 8 : (format === 24 ? 6 : 12)); }
@@ -269,44 +264,9 @@ const saveReverseMatrixToPlate = (rm) => {
 <template>
   <div class="card">
 
-    <div v-if="showCloudLibrary" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000;">
-        <div style="background: var(--surface); padding: 25px; border-radius: var(--radius); border: 1px solid var(--border); max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
-            <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 10px; margin-bottom: 15px;">
-                <h3 style="margin: 0; color: var(--primary);"><i class="fas fa-cloud"></i> Screening Library</h3>
-                <button class="danger small" @click="showCloudLibrary = false"><i class="fas fa-times"></i></button>
-            </div>
-
-            <h4 style="margin-bottom: 10px;"><span class="scope-badge lab" style="margin-right:6px;">Lab</span> Shared screenings</h4>
-            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 25px;">
-                <div v-for="rm in store.cloudReverseMatrices.filter(m => m.scope === 'Global')" :key="'cloud_rmg_'+rm.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
-                    <div>
-                        <strong style="font-size: 1.05rem;">{{ rm.name }}</strong>
-                        <div style="font-size: 0.75rem; opacity: 0.7;">{{ rm.rows }}x{{ rm.cols }} Grid • {{ rm.components.length }} Components</div>
-                    </div>
-                    <div style="display: flex; gap: 5px;">
-                        <button class="small" @click="loadFromCloud(rm)"><i class="fas fa-download"></i> Open</button>
-                        <button v-if="rm.owner_id === store.user.id" class="danger small" @click="store.deleteFromCloud('screenings', rm.id)"><i class="fas fa-trash"></i></button>
-                    </div>
-                </div>
-                <div v-if="store.cloudReverseMatrices.filter(m => m.scope === 'Global').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No screenings published to the lab yet.</div>
-            </div>
-
-            <h4 style="margin-bottom: 10px;"><span class="scope-badge private" style="margin-right:6px;">Private</span> My drafts</h4>
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-                <div v-for="rm in store.cloudReverseMatrices.filter(m => m.scope === 'Personal')" :key="'cloud_rmp_'+rm.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
-                    <div>
-                        <strong style="font-size: 1.05rem;">{{ rm.name }}</strong>
-                        <div style="font-size: 0.75rem; opacity: 0.7;">{{ rm.rows }}x{{ rm.cols }} Grid • {{ rm.components.length }} Components</div>
-                    </div>
-                    <div style="display: flex; gap: 5px;">
-                        <button class="small secondary" @click="loadFromCloud(rm)"><i class="fas fa-folder-open"></i> Open</button>
-                        <button class="danger small" @click="store.deleteFromCloud('screenings', rm.id)"><i class="fas fa-trash"></i></button>
-                    </div>
-                </div>
-                <div v-if="store.cloudReverseMatrices.filter(m => m.scope === 'Personal').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No personal drafts saved.</div>
-            </div>
-        </div>
-    </div>
+    <CloudLibraryModal :show="showCloudLibrary" title="Screening Library" noun="screenings"
+                       :items="store.cloudReverseMatrices" table="screenings"
+                       @close="showCloudLibrary = false" @open="loadFromCloud" />
 
     <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
         <h2 style="border: none; padding: 0; margin: 0;"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5H13.5L9.3 8.4V12.6L6.7 13.9V8.4Z"/></svg> Screening</h2>

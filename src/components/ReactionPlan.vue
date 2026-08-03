@@ -1,11 +1,13 @@
 <script setup>
 import { ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
+import { filterInventory } from '../utils/inventoryFilter'
 import { concentrationRatio, compatibleUnits, dimsCompatible, defaultUnitForDim, CONC_UNITS } from '../utils/units.js'
 import { esc } from '../utils/htmlSafe'
 import { invChip } from '../utils/invChip'
 import ExpStatusPicker from './ExpStatusPicker.vue'
 import { usePlanWorkspace } from '../composables/usePlanWorkspace'
+import CloudLibraryModal from './CloudLibraryModal.vue'
 
 
 const store = useLabStore()
@@ -23,17 +25,7 @@ const getInvName = (id) => {
     return 'Select...';
 }
 
-const filterBlockInventory = (query, scope) => {
-    const term = query ? query.toLowerCase() : '';
-    const targetScope = scope || 'Global';
-    return store.inventory.filter(item => 
-        (item.scope === targetScope || (!item.scope && targetScope === 'Global')) &&
-        ((!term) || 
-         (item.name && item.name.toLowerCase().includes(term)) || 
-         (item.code && item.code.toLowerCase().includes(term)) ||
-         (item.cas && item.cas.toLowerCase().includes(term)))
-    );
-}
+const filterBlockInventory = (query, scope) => filterInventory(store.inventory, query, scope)
 
 // --- Reaction Logic ---
 const addReaction = () => { 
@@ -167,44 +159,9 @@ const saveReactionToWell = (reaction) => {
 <template>
   <div class="card">
     
-    <div v-if="showCloudLibrary" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000;">
-        <div style="background: var(--surface); padding: 25px; border-radius: var(--radius); border: 1px solid var(--border); max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
-            <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 10px; margin-bottom: 15px;">
-                <h3 style="margin: 0; color: var(--primary);"><i class="fas fa-cloud"></i> Protocol Library</h3>
-                <button class="danger small" @click="showCloudLibrary = false"><i class="fas fa-times"></i></button>
-            </div>
-
-            <h4 style="margin-bottom: 10px;"><span class="scope-badge lab" style="margin-right:6px;">Lab</span> Shared protocols</h4>
-            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 25px;">
-                <div v-for="rxn in store.cloudReactions.filter(r => r.scope === 'Global')" :key="'cloud_g_'+rxn.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
-                    <div>
-                        <strong style="font-size: 1.05rem;">{{ rxn.name }}</strong>
-                        <div style="font-size: 0.75rem; opacity: 0.7;">{{ rxn.targetVolume }} {{ rxn.targetVolumeUnit }} • {{ rxn.items.length }} Components</div>
-                    </div>
-                    <div style="display: flex; gap: 5px;">
-                        <button class="small" @click="loadFromCloud(rxn)"><i class="fas fa-download"></i> Open</button>
-                        <button v-if="rxn.owner_id === store.user.id" class="danger small" @click="store.deleteFromCloud('reactions', rxn.id)"><i class="fas fa-trash"></i></button>
-                    </div>
-                </div>
-                <div v-if="store.cloudReactions.filter(r => r.scope === 'Global').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No protocols published to the lab yet.</div>
-            </div>
-
-            <h4 style="margin-bottom: 10px;"><span class="scope-badge private" style="margin-right:6px;">Private</span> My drafts</h4>
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-                <div v-for="rxn in store.cloudReactions.filter(r => r.scope === 'Personal')" :key="'cloud_p_'+rxn.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
-                    <div>
-                        <strong style="font-size: 1.05rem;">{{ rxn.name }}</strong>
-                        <div style="font-size: 0.75rem; opacity: 0.7;">{{ rxn.targetVolume }} {{ rxn.targetVolumeUnit }} • {{ rxn.items.length }} Components</div>
-                    </div>
-                    <div style="display: flex; gap: 5px;">
-                        <button class="small secondary" @click="loadFromCloud(rxn)"><i class="fas fa-folder-open"></i> Open</button>
-                        <button class="danger small" @click="store.deleteFromCloud('reactions', rxn.id)"><i class="fas fa-trash"></i></button>
-                    </div>
-                </div>
-                <div v-if="store.cloudReactions.filter(r => r.scope === 'Personal').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No personal drafts saved.</div>
-            </div>
-        </div>
-    </div>
+    <CloudLibraryModal :show="showCloudLibrary" title="Protocol Library" noun="protocols"
+                       :items="store.cloudReactions" table="reactions"
+                       @close="showCloudLibrary = false" @open="loadFromCloud" />
 
     <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
         <h2 style="border: none; padding: 0; margin: 0;"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.5h4M8 2.5v4L12.5 13a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1L8 6.5"/></svg> Reaction Plan</h2>

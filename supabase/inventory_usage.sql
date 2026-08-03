@@ -60,9 +60,12 @@ create table if not exists public.inventory_archive (
 
 alter table public.inventory_archive enable row level security;
 
+-- Archiving must not widen visibility: a Personal (private) stock stays private
+-- after it is deleted, exactly as it was in `inventory`. Global/Lab stock is
+-- readable by everyone, as before.
 drop policy if exists "inventory_archive read" on public.inventory_archive;
 create policy "inventory_archive read" on public.inventory_archive
-  for select using (auth.role() = 'authenticated');
+  for select using (coalesce(scope, 'Global') <> 'Personal' or owner_id = auth.uid());
 drop policy if exists "inventory_archive insert" on public.inventory_archive;
 create policy "inventory_archive insert" on public.inventory_archive
   for insert with check (auth.role() = 'authenticated');

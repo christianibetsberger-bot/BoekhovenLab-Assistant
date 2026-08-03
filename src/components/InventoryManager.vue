@@ -275,10 +275,17 @@ const deleteViewingItem = async () => {
 const archiveRows = ref([])
 const archiveLoading = ref(false)
 const archiveMissing = ref(false)
+const archiveError = ref('')
 const openArchive = async () => {
-    inventoryMode.value = 'Archived'; archiveLoading.value = true; archiveMissing.value = false;
+    inventoryMode.value = 'Archived'; archiveLoading.value = true;
+    archiveMissing.value = false; archiveError.value = '';
     const { data, error } = await db.from('inventory_archive').select('*').order('deleted_at', { ascending: false });
-    if (error) archiveMissing.value = true; else archiveRows.value = data || [];
+    if (error) {
+        // Only a genuinely absent table means "run the SQL" — anything else is a real
+        // failure and must not be reported as a setup problem.
+        if (/relation|does not exist|schema cache/i.test(error.message || '')) archiveMissing.value = true;
+        else { archiveError.value = error.message || 'Could not load the archive'; archiveRows.value = []; }
+    } else archiveRows.value = data || [];
     archiveLoading.value = false;
 }
 const filteredArchive = computed(() => {
@@ -1370,6 +1377,10 @@ const generateLabelsPDF = () => {
             <p style="font-size: 0.76rem; color: var(--tx2); margin: 0 0 10px;">Deleted compounds are kept here with their full data and usage history, so past experiments stay traceable. Restore one to put it back in the active inventory.</p>
             <div v-if="archiveMissing" style="font-size: 0.8rem; color: var(--tx2); padding: 14px 0;">Run <code>supabase/inventory_usage.sql</code> to enable the archive.</div>
             <div v-else-if="archiveLoading" style="font-size: 0.8rem; color: var(--tx2); padding: 14px 0;"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+            <div v-else-if="archiveError" style="font-size: 0.8rem; color: var(--wr, #dc2626); padding: 14px 0;">
+                Could not load the archive — {{ archiveError }}.
+                <button class="secondary small" @click="openArchive" style="margin-left: 8px;">Retry</button>
+            </div>
             <div v-else class="table-responsive" style="max-height: 500px; border: 1px solid var(--ln2); border-radius: var(--rc); background: var(--surface-solid);">
                 <table style="margin-bottom: 0;">
                     <thead style="position: sticky; top: 0; z-index: 1;">

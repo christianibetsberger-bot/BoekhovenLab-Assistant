@@ -9,6 +9,16 @@
 import { db } from '../services/supabase'
 import { extractInvRefsFromHtml, reconcileUsage } from './usageTracker'
 
+// The blank-content guard below refuses to overwrite a saved entry with an empty
+// editor. That must never be silent — the UI registers a notifier here so the user
+// learns their change wasn't stored (e.g. after deleting the entry's only chip).
+let _blankNotifier = null
+export function onBlankJournalSaveSkipped(fn) { _blankNotifier = fn }
+function onBlankSaveSkipped() {
+  try { _blankNotifier?.('Nothing saved — an entry can’t be left completely empty. Add a note or delete the entry.') }
+  catch { /* notifier is best-effort */ }
+}
+
 // Build the `journals` row payload from an in-memory entry.
 export function journalEntryPayload(e, userEmail) {
   return {
@@ -45,7 +55,10 @@ export async function persistJournalEntry(e, userEmail) {
   if (isBlankJournalContent(e.content)) {
     const { data } = await db.from('journals').select('data').eq('id', e.id).maybeSingle()
     if (data && !isBlankJournalContent(data.data?.content)) {
+      // Refuse the write, but say so — silently skipping made removing the last
+      // compound chip look saved while the entry (and its usage row) stayed put.
       console.warn('journal save skipped: refusing to overwrite a non-empty entry with blank content')
+      onBlankSaveSkipped()
       return
     }
   }

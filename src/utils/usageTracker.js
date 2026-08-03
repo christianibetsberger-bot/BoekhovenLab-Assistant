@@ -82,6 +82,7 @@ export async function extractInvRefsFromHtml(html, inventory = null) {
   catch { return { items: [], unresolved: 1 } }
   const out = new Map()
   const legacy = []
+  let unresolvedEls = 0
   doc.querySelectorAll('span.inv-ref').forEach(el => {
     const text = el.textContent || ''
     const m = text.match(/\[([^\]]+)\]/)
@@ -90,8 +91,9 @@ export async function extractInvRefsFromHtml(html, inventory = null) {
     const id = el.getAttribute('data-inv-id')
     if (id) out.set(String(id), { id: String(id), code, name })
     else if (code) legacy.push({ code, name })
+    else unresolvedEls++          // a chip we can't tie to anything — never silently ignore it
   })
-  let unresolved = 0
+  let unresolved = unresolvedEls
   if (legacy.length) {
     const map = await legacyCodeMap(inventory)
     for (const l of legacy) {
@@ -112,7 +114,6 @@ export async function extractInvRefsFromHtml(html, inventory = null) {
 // ── Reconciliation ────────────────────────────────────────────────────────────
 const sourceKey = (t, id) => `${t}:${id}`
 const _seq = new Map()         // source -> latest issued sequence (ordering guard)
-const _lastState = new Map()   // source -> last reconciled signature (skip no-ops)
 
 // One row per (item × source). status !== 'in_progress' → rows upserted for the
 // current refs and stale ones removed; in_progress (or no refs) → rows removed.
@@ -128,29 +129,27 @@ export async function reconcileUsage({ sourceType, sourceId, sourceLabel, status
 
   const counts = !!status && status !== 'in_progress'
   const ids = (items || []).map(i => String(i.id)).sort()
-  const signature = `${counts ? status : 'none'}|${ids.join(',')}|${unresolved}`
-  if (_lastState.get(key) === signature) return          // nothing changed this session
 
   try {
     if (!counts || !ids.length) {
       // Unfinished (or nothing referenced) → this source contributes no history.
-      // Skip when we already know it has none, and never wipe when chips failed
-      // to resolve — that would delete history we simply couldn't read.
-      if (unresolved > 0 && ids.length === 0) return
+      // An unfinished source ALWAYS clears its rows: how well its chips resolved is
+      // irrelevant once it no longer counts. Only the "status counts but we couldn't
+      // read the refs" case is protected, since deleting there would lose history.
+      if (counts && unresolved > 0) return
       const { error } = await db.from('inventory_usage').delete().eq('source_type', sourceType).eq('source_id', sid)
-      if (error) { if (!/relation|does not exist|schema cache/i.test(error.message || '')) console.warn('usage delete failed:', error.message); return }
-      if (isCurrent()) _lastState.set(key, signature)
+      if (error && !/relation|does not exist|schema cache/i.test(error.message || '')) console.warn('usage delete failed:', error.message)
       return
     }
 
     // Read existing rows so we can preserve each use's original date and find
     // rows that are no longer referenced.
     const { data: existing, error: readErr } = await db.from('inventory_usage')
-      .select('id, item_id, used_at').eq('source_type', sourceType).eq('source_id', sid)
+      .select('id, item_id, used_at, item_code, item_name').eq('source_type', sourceType).eq('source_id', sid)
     if (readErr) { if (!/relation|does not exist|schema cache/i.test(readErr.message || '')) console.warn('usage read failed:', readErr.message); return }
     if (!isCurrent()) return                              // a newer reconcile took over
 
-    const prevDate = new Map((existing || []).map(r => [String(r.item_id), r.used_at]))
+    const prev = new Map((existing || []).map(r => [String(r.item_id), r]))
     const now = new Date().toISOString()
     // Dedupe by item id — two plan rows can reference the same stock, and a
     // duplicate key would make Postgres reject the whole upsert.
@@ -162,15 +161,17 @@ export async function reconcileUsage({ sourceType, sourceId, sourceLabel, status
       seen.add(id)
       rows.push({
         item_id: id,
-        item_code: it.code || null,
-        item_name: it.name || null,
+        // Never overwrite a good snapshot with a blank one (e.g. the item was archived
+        // and so is no longer in the live inventory used for the lookup).
+        item_code: it.code || prev.get(id)?.item_code || null,
+        item_name: it.name || prev.get(id)?.item_name || null,
         source_type: sourceType,
         source_id: sid,
         source_label: sourceLabel || null,
         status,
         user_email: userEmail || null,
         // Keep the original date on re-save; only a brand-new use gets "now".
-        used_at: prevDate.get(id) || usedAt || now,
+        used_at: prev.get(id)?.used_at || usedAt || now,
         updated_at: now,
       })
     }
@@ -184,17 +185,18 @@ export async function reconcileUsage({ sourceType, sourceId, sourceLabel, status
         if (!isCurrent()) return
       }
     }
+    if (!isCurrent()) return
     const { error: upErr } = await db.from('inventory_usage').upsert(rows, { onConflict: 'item_id,source_type,source_id' })
-    if (upErr) { console.warn('usage upsert failed:', upErr.message); return }
-    if (isCurrent()) _lastState.set(key, signature)
+    if (upErr) console.warn('usage upsert failed:', upErr.message)
   } catch (e) { console.warn('usage reconcile skipped:', e?.message || e) }
 }
 
 // Remove every usage row a deleted source left behind.
 export async function deleteUsageForSource(sourceType, sourceId) {
+  const key = sourceKey(sourceType, String(sourceId))
+  _seq.set(key, (_seq.get(key) || 0) + 1)   // tombstone: aborts any reconcile still in flight
   try {
     await db.from('inventory_usage').delete().eq('source_type', sourceType).eq('source_id', String(sourceId))
-    _lastState.delete(sourceKey(sourceType, String(sourceId)))
   } catch { /* ignore */ }
 }
 
@@ -237,9 +239,12 @@ export async function fetchUsageHistory(itemId) {
   try {
     const { data, error } = await db.from('inventory_usage').select('*')
       .eq('item_id', String(itemId)).order('used_at', { ascending: false })
-    if (error) return { rows: [], missing: /relation|does not exist|schema cache/i.test(error.message || '') }
-    return { rows: data || [], missing: false }
-  } catch {
-    return { rows: [], missing: true }
+    if (error) {
+      const missing = /relation|does not exist|schema cache/i.test(error.message || '')
+      return { rows: [], missing, error: missing ? null : (error.message || 'Could not load the history') }
+    }
+    return { rows: data || [], missing: false, error: null }
+  } catch (e) {
+    return { rows: [], missing: false, error: e?.message || 'Could not load the history' }
   }
 }

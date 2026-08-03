@@ -588,6 +588,7 @@ import * as XLSX from 'xlsx'
 import { db } from '../services/supabase'
 import { useLabStore } from '../stores/labStore'
 import { ttBumpCounter, bumpTT, signalModuleActive, ttProjectList } from '../composables/timeTrackerBus'
+import { isBavarianHoliday } from '../utils/holidays'
 
 const store = useLabStore()
 
@@ -791,54 +792,6 @@ function entryMinutes(e) {
 function isNachbuchung(entry) {
   if (!entry.created_at || !entry.checked_in) return false
   return (new Date(entry.created_at) - new Date(entry.checked_in)) > 3600000
-}
-
-// ─── Bavarian public holidays ────────────────────────────────────────────────
-// Anonymous Gregorian algorithm (Meeus/Jones/Butcher) for Easter Sunday
-function easterDate(year) {
-  const a = year % 19
-  const b = Math.floor(year / 100), c = year % 100
-  const d = Math.floor(b / 4),  e = b % 4
-  const f = Math.floor((b + 8) / 25)
-  const g = Math.floor((b - f + 1) / 3)
-  const h = (19 * a + b - d - g + 15) % 30
-  const i = Math.floor(c / 4),  k = c % 4
-  const l = (32 + 2 * e + 2 * i - h - k) % 7
-  const m = Math.floor((a + 11 * h + 22 * l) / 451)
-  const n = h + l - 7 * m + 114
-  return new Date(year, Math.floor(n / 31) - 1, (n % 31) + 1)
-}
-
-function _fmtDate(d) {
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
-}
-
-const _holidayCache = new Map()
-function getBavarianHolidays(year) {
-  if (_holidayCache.has(year)) return _holidayCache.get(year)
-  const set = new Set([
-    `${year}-01-01`,  // Neujahr
-    `${year}-01-06`,  // Hl. Drei Könige (Bayern)
-    `${year}-05-01`,  // Tag der Arbeit
-    `${year}-08-15`,  // Mariä Himmelfahrt (Bayern, kath.)
-    `${year}-10-03`,  // Tag der Deutschen Einheit
-    `${year}-11-01`,  // Allerheiligen (Bayern)
-    `${year}-12-25`,  // 1. Weihnachtstag
-    `${year}-12-26`,  // 2. Weihnachtstag
-  ])
-  const easter = easterDate(year)
-  for (const off of [-2, 1, 39, 50, 60]) {
-    // Karfreitag, Ostermontag, Christi Himmelfahrt, Pfingstmontag, Fronleichnam
-    const d = new Date(easter); d.setDate(d.getDate() + off)
-    set.add(_fmtDate(d))
-  }
-  _holidayCache.set(year, set)
-  return set
-}
-
-function isBavarianHoliday(dateStr) {
-  const yr = parseInt(dateStr.split('-')[0])
-  return getBavarianHolidays(yr).has(dateStr)
 }
 
 function toDatetimeLocal(ts) {

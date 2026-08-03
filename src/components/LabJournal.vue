@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onUnmounted, watch, defineAsyncComponent } from 'vue'
 import { useLabStore } from '../stores/labStore'
+import { filterInventory } from '../utils/inventoryFilter'
 import { db } from '../services/supabase' // Using your Supabase client
 import { esc, sanitize } from '../utils/htmlSafe'
 import { invChip } from '../utils/invChip'
@@ -611,17 +612,7 @@ const deleteJournalEntry = async (id) => {
     }
 }
 
-const filterBlockInventory = (query, scope) => {
-    const term = query ? query.toLowerCase() : '';
-    const targetScope = scope || 'Global';
-    return store.inventory.filter(item => 
-        (item.scope === targetScope || (!item.scope && targetScope === 'Global')) &&
-        ((!term) || 
-         (item.name && item.name.toLowerCase().includes(term)) || 
-         (item.code && item.code.toLowerCase().includes(term)) ||
-         (item.cas && item.cas.toLowerCase().includes(term)))
-    );
-}
+const filterBlockInventory = (query, scope) => filterInventory(store.inventory, query, scope)
 
 const insertInventoryRef = () => {
     if (!store.selectedInvRef) return;

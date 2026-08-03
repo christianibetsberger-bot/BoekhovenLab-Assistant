@@ -1,11 +1,13 @@
 <script setup>
 import { ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
+import { filterInventory } from '../utils/inventoryFilter'
 import { concentrationRatio, dimsCompatible, CONC_UNITS } from '../utils/units.js'
 import { esc } from '../utils/htmlSafe'
 import { invChip, textChip } from '../utils/invChip'
 import ExpStatusPicker from './ExpStatusPicker.vue'
 import { usePlanWorkspace } from '../composables/usePlanWorkspace'
+import CloudLibraryModal from './CloudLibraryModal.vue'
 
 
 const store = useLabStore()
@@ -17,14 +19,7 @@ const showCloudLibrary = ref(false)
 const { loadFromCloud, closeInWorkspace, archivePlan, duplicatePlan, setStatus: setPlanStatus } =
     usePlanWorkspace({ store, table: 'matrices', open: 'matrices', archived: 'archivedMatrices', noun: 'matrix', showLibrary: showCloudLibrary })
 
-const filterBlockInventory = (query, scope) => {
-    const term = query ? query.toLowerCase() : '';
-    const targetScope = scope || 'Global';
-    return store.inventory.filter(item => 
-        (item.scope === targetScope || (!item.scope && targetScope === 'Global')) &&
-        ((!term) || (item.name && item.name.toLowerCase().includes(term)) || (item.code && item.code.toLowerCase().includes(term)) || (item.cas && item.cas.toLowerCase().includes(term)))
-    );
-}
+const filterBlockInventory = (query, scope) => filterInventory(store.inventory, query, scope)
 
 const getBlockName = (matrix, blockId) => {
     const block = matrix.customBlocks.find(b => b.id === blockId);
@@ -211,42 +206,9 @@ const saveMatrixToPlate = (matrix) => {
 <template>
   <div class="card">
     
-    <div v-if="showCloudLibrary" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000;">
-        <div style="background: var(--surface); padding: 25px; border-radius: var(--radius); border: 1px solid var(--border); max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
-            <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 10px; margin-bottom: 15px;">
-                <h3 style="margin: 0; color: var(--primary);"><i class="fas fa-cloud"></i> Matrix Library</h3>
-                <button class="danger small" @click="showCloudLibrary = false"><i class="fas fa-times"></i></button>
-            </div>
-
-            <h4 style="margin-bottom: 10px;"><span class="scope-badge lab" style="margin-right:6px;">Lab</span> Shared matrices</h4>
-            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 25px;">
-                <div v-for="mat in store.cloudMatrices.filter(m => m.scope === 'Global')" :key="'cloud_mg_'+mat.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
-                    <div>
-                        <strong style="font-size: 1.05rem;">{{ mat.name }}</strong>
-                    </div>
-                    <div style="display: flex; gap: 5px;">
-                        <button class="small" @click="loadFromCloud(mat)"><i class="fas fa-download"></i> Open</button>
-                        <button v-if="mat.owner_id === store.user.id" class="danger small" @click="store.deleteFromCloud('matrices', mat.id)"><i class="fas fa-trash"></i></button>
-                    </div>
-                </div>
-                <div v-if="store.cloudMatrices.filter(m => m.scope === 'Global').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No matrices published to the lab yet.</div>
-            </div>
-
-            <h4 style="margin-bottom: 10px;"><span class="scope-badge private" style="margin-right:6px;">Private</span> My drafts</h4>
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-                <div v-for="mat in store.cloudMatrices.filter(m => m.scope === 'Personal')" :key="'cloud_mp_'+mat.id" style="display: flex; justify-content: space-between; align-items: center; background: var(--panel-bg); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border);">
-                    <div>
-                        <strong style="font-size: 1.05rem;">{{ mat.name }}</strong>
-                    </div>
-                    <div style="display: flex; gap: 5px;">
-                        <button class="small secondary" @click="loadFromCloud(mat)"><i class="fas fa-folder-open"></i> Open</button>
-                        <button class="danger small" @click="store.deleteFromCloud('matrices', mat.id)"><i class="fas fa-trash"></i></button>
-                    </div>
-                </div>
-                <div v-if="store.cloudMatrices.filter(m => m.scope === 'Personal').length === 0" style="font-size: 0.85rem; opacity: 0.5; font-style: italic;">No personal drafts saved.</div>
-            </div>
-        </div>
-    </div>
+    <CloudLibraryModal :show="showCloudLibrary" title="Matrix Library" noun="matrices"
+                       :items="store.cloudMatrices" table="matrices"
+                       @close="showCloudLibrary = false" @open="loadFromCloud" />
 
     <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
         <h2 style="border: none; padding: 0; margin: 0;"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="11" height="11" rx="1"/><line x1="2.5" y1="6.5" x2="13.5" y2="6.5"/><line x1="2.5" y1="10" x2="13.5" y2="10"/><line x1="6.5" y1="2.5" x2="6.5" y2="13.5"/><line x1="10" y1="2.5" x2="10" y2="13.5"/></svg> Matrix</h2>

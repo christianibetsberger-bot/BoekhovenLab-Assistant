@@ -315,6 +315,24 @@ export const useLabStore = defineStore('lab', {
       if (loc) { loc.scope = 'Global'; await this.saveLocationToCloud(loc); }
     },
 
+    // Which store arrays each cloud table feeds. Previously this mapping was an
+    // if-chain duplicated verbatim in saveToCloud and deleteFromCloud, so adding a
+    // table meant remembering to edit both.
+    applyCloudRows(tableName, mapped) {
+      const TARGETS = {
+        reactions:     ['cloudReactions', 'archivedReactions'],
+        matrices:      ['cloudMatrices', 'archivedMatrices'],
+        screenings:    ['cloudReverseMatrices', 'archivedReverseMatrices'],
+        plates:        ['cloudPlates', 'archivedPlates'],
+        kinetics_data: ['cloudKinetics', 'archivedKinetics'],
+      };
+      const t = TARGETS[tableName];
+      if (!t) return;
+      const [live, archived] = t;
+      this[live] = mapped.filter(x => x.scope !== 'Archived');
+      this[archived] = mapped.filter(x => x.scope === 'Archived');
+    },
+
     async saveToCloud(tableName, payloadData) {
         if (!this.user) return;
         const payload = {
@@ -333,11 +351,7 @@ export const useLabStore = defineStore('lab', {
         const { data } = await db.from(tableName).select('*');
         if (data) {
             const mapped = data.map(row => { const obj = row.data; obj.owner_id = row.owner_id; return obj; });
-            if (tableName === 'reactions') { this.cloudReactions = mapped.filter(r => r.scope !== 'Archived'); this.archivedReactions = mapped.filter(r => r.scope === 'Archived'); }
-            if (tableName === 'matrices') { this.cloudMatrices = mapped.filter(m => m.scope !== 'Archived'); this.archivedMatrices = mapped.filter(m => m.scope === 'Archived'); }
-            if (tableName === 'screenings') { this.cloudReverseMatrices = mapped.filter(s => s.scope !== 'Archived'); this.archivedReverseMatrices = mapped.filter(s => s.scope === 'Archived'); }
-            if (tableName === 'plates') { this.cloudPlates = mapped.filter(p => p.scope !== 'Archived'); this.archivedPlates = mapped.filter(p => p.scope === 'Archived'); }
-            if (tableName === 'kinetics_data') { this.cloudKinetics = mapped.filter(k => k.scope !== 'Archived'); this.archivedKinetics = mapped.filter(k => k.scope === 'Archived'); }
+            this.applyCloudRows(tableName, mapped);
         }
 
         // Ensure registry is updated after a save (especially for new items)
@@ -383,11 +397,7 @@ export const useLabStore = defineStore('lab', {
         const { data } = await db.from(tableName).select('*');
         if (data) {
             const mapped = data.map(row => { const obj = row.data; obj.owner_id = row.owner_id; return obj; });
-            if (tableName === 'reactions') { this.cloudReactions = mapped.filter(r => r.scope !== 'Archived'); this.archivedReactions = mapped.filter(r => r.scope === 'Archived'); }
-            if (tableName === 'matrices') { this.cloudMatrices = mapped.filter(m => m.scope !== 'Archived'); this.archivedMatrices = mapped.filter(m => m.scope === 'Archived'); }
-            if (tableName === 'screenings') { this.cloudReverseMatrices = mapped.filter(s => s.scope !== 'Archived'); this.archivedReverseMatrices = mapped.filter(s => s.scope === 'Archived'); }
-            if (tableName === 'plates') { this.cloudPlates = mapped.filter(p => p.scope !== 'Archived'); this.archivedPlates = mapped.filter(p => p.scope === 'Archived'); }
-            if (tableName === 'kinetics_data') { this.cloudKinetics = mapped.filter(k => k.scope !== 'Archived'); this.archivedKinetics = mapped.filter(k => k.scope === 'Archived'); }
+            this.applyCloudRows(tableName, mapped);
         }
 
         this.saveWorkspaceState();

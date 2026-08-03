@@ -584,12 +584,10 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import Plotly from 'plotly.js-dist-min'
+import * as XLSX from 'xlsx'
 import { db } from '../services/supabase'
 import { useLabStore } from '../stores/labStore'
 import { ttBumpCounter, bumpTT, signalModuleActive, ttProjectList } from '../composables/timeTrackerBus'
-import { isBavarianHoliday } from '../utils/holidays'
-import { formatDuration, formatHours, formatDate, formatTime, toDatetimeLocal, getMonday, entryMinutes, isNachbuchung } from '../utils/timeFormat'
-import { exportTimeXlsx } from '../utils/timeExport'
 
 const store = useLabStore()
 
@@ -777,6 +775,79 @@ function hexToRgba(hex, a) {
 const todayStr = computed(() => new Date().toISOString().split('T')[0])
 const currentYear = computed(() => new Date().getFullYear())
 
+function getMonday(d) {
+  const dt = new Date(d)
+  const day = dt.getDay()
+  dt.setDate(dt.getDate() + (day === 0 ? -6 : 1 - day))
+  dt.setHours(0, 0, 0, 0)
+  return dt
+}
+
+function entryMinutes(e) {
+  if (!e.checked_out) return 0
+  return (new Date(e.checked_out) - new Date(e.checked_in)) / 60000
+}
+
+function isNachbuchung(entry) {
+  if (!entry.created_at || !entry.checked_in) return false
+  return (new Date(entry.created_at) - new Date(entry.checked_in)) > 3600000
+}
+
+// ─── Bavarian public holidays ────────────────────────────────────────────────
+// Anonymous Gregorian algorithm (Meeus/Jones/Butcher) for Easter Sunday
+function easterDate(year) {
+  const a = year % 19
+  const b = Math.floor(year / 100), c = year % 100
+  const d = Math.floor(b / 4),  e = b % 4
+  const f = Math.floor((b + 8) / 25)
+  const g = Math.floor((b - f + 1) / 3)
+  const h = (19 * a + b - d - g + 15) % 30
+  const i = Math.floor(c / 4),  k = c % 4
+  const l = (32 + 2 * e + 2 * i - h - k) % 7
+  const m = Math.floor((a + 11 * h + 22 * l) / 451)
+  const n = h + l - 7 * m + 114
+  return new Date(year, Math.floor(n / 31) - 1, (n % 31) + 1)
+}
+
+function _fmtDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+}
+
+const _holidayCache = new Map()
+function getBavarianHolidays(year) {
+  if (_holidayCache.has(year)) return _holidayCache.get(year)
+  const set = new Set([
+    `${year}-01-01`,  // Neujahr
+    `${year}-01-06`,  // Hl. Drei Könige (Bayern)
+    `${year}-05-01`,  // Tag der Arbeit
+    `${year}-08-15`,  // Mariä Himmelfahrt (Bayern, kath.)
+    `${year}-10-03`,  // Tag der Deutschen Einheit
+    `${year}-11-01`,  // Allerheiligen (Bayern)
+    `${year}-12-25`,  // 1. Weihnachtstag
+    `${year}-12-26`,  // 2. Weihnachtstag
+  ])
+  const easter = easterDate(year)
+  for (const off of [-2, 1, 39, 50, 60]) {
+    // Karfreitag, Ostermontag, Christi Himmelfahrt, Pfingstmontag, Fronleichnam
+    const d = new Date(easter); d.setDate(d.getDate() + off)
+    set.add(_fmtDate(d))
+  }
+  _holidayCache.set(year, set)
+  return set
+}
+
+function isBavarianHoliday(dateStr) {
+  const yr = parseInt(dateStr.split('-')[0])
+  return getBavarianHolidays(yr).has(dateStr)
+}
+
+function toDatetimeLocal(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  const p = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 // ── Computed ──────────────────────────────────────────────────────────────────
 
 const activeEntry = computed(() =>
@@ -953,6 +1024,29 @@ const totalVacationThisYear = computed(() =>
 const vacationRemaining = computed(() =>
   totalVacationThisYear.value - vacationUsedThisYear.value
 )
+
+// ── Formatters ────────────────────────────────────────────────────────────────
+
+function formatDuration(ms) {
+  if (!ms || ms <= 0) return '0m'
+  const h = Math.floor(ms / 3600000)
+  const m = Math.floor((ms % 3600000) / 60000)
+  return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
+function formatHours(h) {
+  const abs = Math.abs(h), sign = h < 0 ? '-' : ''
+  const hh = Math.floor(abs), mm = Math.round((abs - hh) * 60)
+  return mm > 0 ? `${sign}${hh}h ${mm}m` : `${sign}${hh}h`
+}
+
+function formatDate(ts) {
+  return new Date(ts).toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'2-digit' })
+}
+
+function formatTime(ts) {
+  return new Date(ts).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' })
+}
 
 // ── Supabase ──────────────────────────────────────────────────────────────────
 
@@ -1234,26 +1328,263 @@ async function saveEdit(id) {
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────
-// The workbook itself is built in utils/timeExport.js (pure data → file, tested);
-// the component only gathers its reactive state and manages the busy flag.
+
+// ── Excel Export (per-month sheets with embedded charts) ──────────────────────
 
 async function exportXlsx() {
   isSaving.value = true
   try {
-    await exportTimeXlsx({
-      entries: entries.value,
-      absences: absences.value,
-      ownerName: store.user?.email?.split('@')[0] ?? 'user',
-      year: currentYear.value,
-      weeklyHours: settings.weekly_hours,
-      vacationPerYear: settings.vacation_days_per_year,
-      vacationUsed: vacationUsedThisYear.value,
-      vacationRemaining: vacationRemaining.value,
-      sickDays: sickDaysThisYear.value,
-    })
+    const wb   = XLSX.utils.book_new()
+    const name = store.user?.email?.split('@')[0] ?? 'user'
+
+    // Collect all months that have entries, plus current month.
+    const monthSet = new Set(
+      entries.value.map(e => {
+        const d = new Date(e.checked_in)
+        return `${d.getFullYear()}-${String(d.getMonth()).padStart(2,'0')}`
+      })
+    )
+    const today = new Date()
+    monthSet.add(`${today.getFullYear()}-${String(today.getMonth()).padStart(2,'0')}`)
+
+    const months = [...monthSet]
+      .map(k => { const [y, m] = k.split('-'); return { year: +y, month: +m } })
+      .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month)
+
+    for (const { year, month } of months) {
+      const mEntries  = entries.value.filter(e => {
+        const d = new Date(e.checked_in)
+        return d.getFullYear() === year && d.getMonth() === month
+      })
+      const mAbsences = absences.value.filter(a => {
+        const [ay, am] = a.date.split('-').map(Number)
+        return ay === year && (am - 1) === month
+      })
+
+      const sheetName = new Date(year, month, 1).toLocaleDateString('de-DE', { month: 'short', year: 'numeric' })
+      const ws = buildMonthSheet(year, month, mEntries, mAbsences, name)
+
+      // Generate Plotly chart and embed as PNG
+      try {
+        const chartPng = await renderMonthChart(year, month, mEntries)
+        if (chartPng) {
+          const dataRow = (ws['!lastrow'] ?? 0) + 3
+          if (!ws['!images']) ws['!images'] = []
+          ws['!images'].push({
+            '!data': chartPng,
+            '!ext': '.png',
+            '!pos': { r: dataRow, c: 0, x: 0, y: 0, w: 7315200, h: 3200400 },
+          })
+          // Reserve rows so the chart area is visible
+          ws['!rows'] = ws['!rows'] || []
+          for (let r = dataRow; r < dataRow + 22; r++) ws['!rows'][r] = { hpt: 18 }
+        }
+      } catch (_) { /* chart embed failed — sheet still has data */ }
+
+      XLSX.utils.book_append_sheet(wb, ws, sheetName)
+    }
+
+    // Final sheet: Year summary
+    XLSX.utils.book_append_sheet(wb, buildYearSummarySheet(), `Year ${currentYear.value}`)
+
+    XLSX.writeFile(wb, `WorkProtocol_${name}_${currentYear.value}.xlsx`, { bookImages: true })
   } finally {
     isSaving.value = false
   }
+}
+
+function buildMonthSheet(year, month, mEntries, mAbsences, ownerName) {
+  const monthLabel = new Date(year, month, 1).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })
+  const dInMonth   = new Date(year, month + 1, 0).getDate()
+  const totalH     = mEntries.reduce((s, e) => s + entryMinutes(e), 0) / 60
+  const reqH       = settings.weekly_hours * (dInMonth / 7)
+  const ot         = totalH - reqH
+  const daysWorked = new Set(mEntries.filter(e => e.checked_out).map(e =>
+    new Date(e.checked_in).toISOString().split('T')[0]
+  )).size
+  const mSick    = mAbsences.filter(a => a.type === 'sick').reduce((s, a) => s + (a.half_day ? .5 : 1), 0)
+  const mVac     = mAbsences.filter(a => a.type === 'vacation').reduce((s, a) => s + (a.half_day ? .5 : 1), 0)
+
+  const DAYS_DE = ['So','Mo','Di','Mi','Do','Fr','Sa']
+  const rows    = []
+
+  // ── Header block ──────────────────────────────────────────────────────────
+  rows.push(['ARBEITSZEITPROTOKOLL / WORK TIME PROTOCOL'])
+  rows.push([])
+  rows.push(['Name / Email:', ownerName])
+  rows.push(['Monat / Month:', monthLabel])
+  rows.push(['Wochenstunden / Weekly target:', `${settings.weekly_hours} h`])
+  rows.push([])
+
+  // ── Monthly summary ────────────────────────────────────────────────────────
+  rows.push(['─── MONATSÜBERSICHT / MONTHLY SUMMARY ───'])
+  rows.push([
+    'Geleistete Stunden', 'Soll-Stunden', 'Überstunden', 'Arbeitstage', 'Kranktage', 'Urlaubstage',
+  ])
+  rows.push([
+    +totalH.toFixed(2),
+    +reqH.toFixed(2),
+    +ot.toFixed(2),
+    daysWorked,
+    mSick,
+    mVac,
+  ])
+  rows.push([])
+
+  // ── Daily entries table ────────────────────────────────────────────────────
+  rows.push(['─── TAGESEINTRÄGE / DAILY ENTRIES ───'])
+  rows.push(['Datum','Tag','Check-In','Check-Out','Std.','Aufgabe','Projekt','Notiz','NB'])
+
+  let currentWeek = null
+  let weekH = 0
+  const sortedEntries = [...mEntries].sort((a, b) => new Date(a.checked_in) - new Date(b.checked_in))
+
+  for (const e of sortedEntries) {
+    const d    = new Date(e.checked_in)
+    const week = getMonday(d).toISOString().split('T')[0]
+
+    if (currentWeek !== null && week !== currentWeek) {
+      // Week subtotal separator
+      rows.push(['', '', '', 'KW-Summe →', +weekH.toFixed(2), '', '', '', ''])
+      rows.push([])
+      weekH = 0
+    }
+    currentWeek = week
+
+    const h = entryMinutes(e) / 60
+    weekH += h
+    rows.push([
+      d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'2-digit' }),
+      DAYS_DE[d.getDay()],
+      formatTime(e.checked_in),
+      e.checked_out ? formatTime(e.checked_out) : '(laufend)',
+      e.checked_out ? +h.toFixed(2) : '',
+      e.task,
+      e.project || '',
+      e.note   || '',
+      isNachbuchung(e) ? 'NB' : '',
+    ])
+  }
+  if (currentWeek !== null) {
+    rows.push(['', '', '', 'KW-Summe →', +weekH.toFixed(2), '', '', '', ''])
+  }
+  rows.push([])
+  rows.push(['', '', '', 'MONATSSUMME →', +totalH.toFixed(2), '', '', '', ''])
+  rows.push([])
+
+  // ── Absences ───────────────────────────────────────────────────────────────
+  if (mAbsences.length) {
+    rows.push(['─── ABWESENHEITEN / ABSENCES ───'])
+    rows.push(['Datum','Art','Dauer','Notiz'])
+    for (const a of mAbsences.sort((x, y) => x.date.localeCompare(y.date))) {
+      rows.push([
+        a.date,
+        a.type === 'sick' ? 'Krank / Sick' : 'Urlaub / Vacation',
+        a.half_day ? 'Halbtag' : 'Ganztag',
+        a.note || '',
+      ])
+    }
+    rows.push([])
+  }
+
+  // ── Chart placeholder label ────────────────────────────────────────────────
+  rows.push(['─── STUNDENDIAGRAMM / HOURS CHART ───'])
+
+  const ws = XLSX.utils.aoa_to_sheet(rows)
+  ws['!lastrow'] = rows.length
+
+  ws['!cols'] = [
+    { wch: 12 }, { wch: 5 }, { wch: 9 }, { wch: 9 }, { wch: 7 },
+    { wch: 22 }, { wch: 22 }, { wch: 32 }, { wch: 4 },
+  ]
+
+  // Merge title cell across columns A–I
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }]
+
+  return ws
+}
+
+async function renderMonthChart(year, month, mEntries) {
+  const dInMonth = new Date(year, month + 1, 0).getDate()
+  const days     = Array.from({ length: dInMonth }, (_, i) => i + 1)
+  const hours    = days.map(d => {
+    const start = new Date(year, month, d)
+    const end   = new Date(year, month, d + 1)
+    return mEntries
+      .filter(e => e.checked_out && new Date(e.checked_in) >= start && new Date(e.checked_in) < end)
+      .reduce((s, e) => s + entryMinutes(e), 0) / 60
+  })
+  const labels   = days.map(d => `${String(d).padStart(2,'0')}.${String(month+1).padStart(2,'0')}`)
+  const dailyReq = settings.weekly_hours / 5
+
+  const div = document.createElement('div')
+  div.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:800px;height:350px;'
+  document.body.appendChild(div)
+
+  try {
+    await Plotly.react(div, [
+      {
+        type: 'bar', x: labels, y: hours.map(h => +h.toFixed(2)), name: 'Hours',
+        marker: { color: hours.map(h => h >= dailyReq ? '#10b981' : h > 0 ? '#3b82f6' : '#e5e7eb') },
+        hoverinfo: 'none',
+      },
+      {
+        type: 'scatter', mode: 'lines', x: labels, y: Array(dInMonth).fill(dailyReq),
+        line: { color: '#ef4444', width: 1.5, dash: 'dot' }, name: 'Target', hoverinfo: 'none',
+      },
+    ], {
+      paper_bgcolor: '#ffffff', plot_bgcolor: '#f9fafb',
+      font: { color: '#1f2937', size: 11, family: 'Arial' },
+      margin: { l: 55, r: 20, b: 60, t: 30 },
+      xaxis: { title: { text: 'Day', font: { size: 11 } }, tickangle: -45, gridcolor: '#e5e7eb' },
+      yaxis: { title: { text: 'Hours', font: { size: 11 } }, gridcolor: '#e5e7eb', rangemode: 'tozero' },
+      showlegend: true,
+      legend: { orientation: 'h', y: 1.1, x: 0 },
+      title: {
+        text: `Work Hours — ${new Date(year, month, 1).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })}`,
+        font: { size: 13 },
+      },
+    }, { staticPlot: true })
+
+    const dataUrl = await Plotly.toImage(div, { format: 'png', width: 800, height: 350, scale: 2 })
+    return dataUrl.replace(/^data:image\/png;base64,/, '')
+  } finally {
+    Plotly.purge(div)
+    document.body.removeChild(div)
+  }
+}
+
+function buildYearSummarySheet() {
+  const yr     = currentYear.value
+  const monday = getMonday(new Date())
+  const rows   = []
+
+  rows.push([`JAHRESÜBERSICHT / YEAR SUMMARY ${yr}`])
+  rows.push([])
+  rows.push(['URLAUBSKONTO / VACATION BALANCE'])
+  rows.push(['Anspruch / Total',        settings.vacation_days_per_year])
+  rows.push(['Genommen / Used',         vacationUsedThisYear.value])
+  rows.push(['Verbleibend / Remaining', vacationRemaining.value])
+  rows.push([])
+  rows.push(['Kranktage / Sick days (YTD)', sickDaysThisYear.value])
+  rows.push([])
+  rows.push(['─── WOCHENÜBERSICHT / WEEKLY OVERVIEW ───'])
+  rows.push(['Woche / Week','Std. geleistet','Soll','Überstunden'])
+
+  for (let w = 25; w >= 0; w--) {
+    const wStart = new Date(monday); wStart.setDate(wStart.getDate() - w * 7)
+    const wEnd   = new Date(wStart); wEnd.setDate(wEnd.getDate() + 7)
+    const h = entries.value
+      .filter(e => e.checked_out && new Date(e.checked_in) >= wStart && new Date(e.checked_in) < wEnd)
+      .reduce((s, e) => s + entryMinutes(e), 0) / 60
+    const label = wStart.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' })
+    rows.push([label, +h.toFixed(2), settings.weekly_hours, +(h - settings.weekly_hours).toFixed(2)])
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(rows)
+  ws['!cols'] = [{ wch: 20 }, { wch: 16 }, { wch: 10 }, { wch: 14 }]
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }]
+  return ws
 }
 
 // ── Charts ────────────────────────────────────────────────────────────────────

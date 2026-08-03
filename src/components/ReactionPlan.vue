@@ -3,19 +3,19 @@ import { ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { concentrationRatio, compatibleUnits, dimsCompatible, defaultUnitForDim, CONC_UNITS } from '../utils/units.js'
 import { esc } from '../utils/htmlSafe'
+import { invChip } from '../utils/invChip'
 import ExpStatusPicker from './ExpStatusPicker.vue'
+import { usePlanWorkspace } from '../composables/usePlanWorkspace'
 
-// Set + persist an experiment status; reverts if the save was rejected.
-const setPlanStatus = async (reaction, v) => {
-    const prev = reaction.status || 'in_progress'
-    reaction.status = v
-    if (await store.saveToCloud('reactions', reaction)) store.toast('Status updated')
-    else reaction.status = prev
-}
 
 const store = useLabStore()
 const activeDropdown = ref(null)
 const showCloudLibrary = ref(false)
+
+// Workspace behaviour (open / close / archive / duplicate / status) is shared by
+// all plan modules — see composables/usePlanWorkspace.js.
+const { loadFromCloud, closeInWorkspace, archivePlan, duplicatePlan, setStatus: setPlanStatus } =
+    usePlanWorkspace({ store, table: 'reactions', open: 'reactions', archived: 'archivedReactions', noun: 'reaction plan', showLibrary: showCloudLibrary })
 
 const getInvName = (id) => {
     const inv = store.inventory.find(i => i.id === id);
@@ -51,14 +51,6 @@ const addReaction = () => {
     store.saveWorkspaceState();
 }
 
-const loadFromCloud = (cloudReaction) => {
-    const alreadyOpen = store.reactions.find(r => r.id === cloudReaction.id);
-    if (!alreadyOpen) {
-        store.reactions.unshift(JSON.parse(JSON.stringify(cloudReaction)));
-    }
-    showCloudLibrary.value = false; 
-    store.saveWorkspaceState();
-}
 
 const removeReaction = (index) => { 
     store.reactions.splice(index, 1); 
@@ -68,24 +60,7 @@ const removeReaction = (index) => {
 const addItem = (reaction) => { reaction.items.push({ invId: '', searchQuery: '', searchScope: 'Global', target: 1, targetUnit: 'µM', isFixed: false, fixedVol: 1, fixedVolUnit: 'µL', labware: '' }); }
 const removeItem = (reaction, itemIndex) => { reaction.items.splice(itemIndex, 1); }
 
-const duplicateReaction = (index) => {
-    const copy = JSON.parse(JSON.stringify(store.reactions[index]));
-    copy.id = crypto.randomUUID();
-    copy.name += ' (Copy)';
-    copy.scope = 'Personal';
-    copy.owner_id = store.user.id; 
-    store.reactions.splice(index + 1, 0, copy);
-    store.saveWorkspaceState();
-}
 
-const archiveReaction = async (index) => {
-    if(confirm("Archive this reaction plan?")) {
-        const item = store.reactions.splice(index, 1)[0];
-        item.scope = 'Archived';
-        store.archivedReactions.push(item);
-        await store.saveToCloud('reactions', item);
-    }
-}
 
 const calc1xVol = (reaction, item) => {
     if (item.isFixed) {
@@ -145,7 +120,7 @@ const saveReactionToJournal = (reaction) => {
     let total1x = 0;
     reaction.items.forEach(item => {
         const invItem = store.inventory.find(i => i.id === item.invId);
-        const nameTag = invItem ? `&nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(invItem.id)}"><i class="fas fa-tag"></i>&nbsp;[${esc(invItem.code)}] ${esc(invItem.name)} (${esc(store.formatNum(invItem.stock))} ${esc(invItem.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp;` : 'Unknown';
+        const nameTag = invItem ? `&nbsp;${invChip(invItem, { fmt: store.formatNum })}&nbsp;` : 'Unknown';
         const target = item.isFixed ? 'Fixed' : `${esc(item.target)} ${esc(item.targetUnit || 'µM')}`;
         const vol1x = calc1xVol(reaction, item);
         const volMM = calcMMVol(reaction, item);
@@ -178,7 +153,7 @@ const saveReactionToWell = (reaction) => {
         if (invItem) {
             const vol1x = calc1xVol(reaction, item);
             const targetText = item.isFixed ? '(Fixed)' : `(${esc(item.target)} ${esc(item.targetUnit || 'µM')})`;
-            html += `&nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(invItem.id)}" data-labware="${esc(item.labware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(invItem.code)}] ${esc(invItem.name)} (${esc(store.formatNum(invItem.stock))} ${esc(invItem.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(vol1x))} ${esc(unit)} ${targetText}<br>`;
+            html += `&nbsp;${invChip(invItem, { labware: item.labware, fmt: store.formatNum })}&nbsp; ${esc(store.formatNum(vol1x))} ${esc(unit)} ${targetText}<br>`;
         }
     });
     const h2o1x = Math.max(0, reaction.targetVolume - reactionTotalVol(reaction));
@@ -280,8 +255,8 @@ const saveReactionToWell = (reaction) => {
                 <div style="width: 1px; height: 24px; background: var(--border); margin: 0 5px;"></div>
 
                 <button class="small" @click="saveReactionToJournal(reaction)" title="Append table to active journal entry"><i class="fas fa-file-import"></i> Log</button>
-                <button class="secondary small" @click="duplicateReaction(rIndex)" title="Duplicate"><i class="fas fa-copy"></i></button>
-                <button class="secondary small" @click="archiveReaction(rIndex)" title="Local Archive"><i class="fas fa-box-archive"></i></button>
+                <button class="secondary small" @click="duplicatePlan(rIndex)" title="Duplicate"><i class="fas fa-copy"></i></button>
+                <button class="secondary small" @click="archivePlan(rIndex)" title="Local Archive"><i class="fas fa-box-archive"></i></button>
                 
                 <button class="danger small" @click="removeReaction(rIndex)" title="Close from workspace"><i class="fas fa-times"></i></button>
             </div>

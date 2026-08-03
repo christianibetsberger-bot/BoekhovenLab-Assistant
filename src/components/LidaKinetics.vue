@@ -1112,6 +1112,7 @@ import { parseSeqLibraryCsv } from '../utils/seqLibrary'
 import { areaToMicromolar, concentrationToConversion, dilutionFactorFromVial, DEFAULT_HPLC_PARAMS } from '../utils/hplcConcentration'
 import { calcSeqExtinction } from '../utils/seqUtils'
 import { esc } from '../utils/htmlSafe'
+import { invChip } from '../utils/invChip'
 
 const store = useLabStore()
 
@@ -2909,7 +2910,7 @@ function getInvTag(inv, vol, targetConc, unit, label = '') {
   if (!inv) {
     return `${pre}<strong>Manual:</strong> ${esc(vol)} µL (${esc(targetConc)} ${esc(unit)})<br>`
   }
-  return `${pre}&nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(inv.id)}" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(inv.code)}] ${esc(inv.name)} (${esc(store.formatNum ? store.formatNum(inv.stock) : inv.stock)} ${esc(inv.stockUnit || unit)})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity:0.7;"></i></span>&nbsp; ${esc(vol)} µL (${esc(targetConc)} ${esc(unit)})<br>`
+  return `${pre}&nbsp;${invChip(inv, { unit, fmt: store.formatNum || ((v) => v) })}&nbsp; ${esc(vol)} µL (${esc(targetConc)} ${esc(unit)})<br>`
 }
 
 function exportSuggestionsToPlate() {

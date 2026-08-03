@@ -8,31 +8,10 @@ const store = useLabStore()
 const emit = defineEmits(['open'])
 function open(id) { emit('open', id) }
 
-// ── Hero: PhD gallows humour (Galgenhumor) ──
+// ── Hero ──
 const greetingWord = computed(() => {
   const h = new Date().getHours()
   return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
-})
-const GALLOWS = [
-  'the thesis won’t write itself. it never will.',
-  'a fresh day, a fresh chance for the control to fail.',
-  'p = 0.06. we do not speak of it.',
-  'reviewer 2 is out there. sharpening something.',
-  'sleep is a variable you chose not to control.',
-  'the −80 is warmer than your advisor’s feedback.',
-  'n = 1, and even that one looks suspicious.',
-  'today’s hypothesis: this also will not work.',
-  'the gel ran beautifully. off a cliff.',
-  'results pending — much like your graduation.',
-  'at least the bacteria are thriving.',
-  'the only reproducible result is the doubt.',
-  'science: 10% pipetting, 90% recalculating life choices.',
-  'hope is not a validated method, yet here we are.',
-  'coffee — still cheaper than therapy.',
-]
-const gallows = computed(() => {
-  const d = new Date()
-  return GALLOWS[(d.getFullYear() * 1000 + d.getMonth() * 31 + d.getDate()) % GALLOWS.length]
 })
 const today = computed(() => new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }))
 
@@ -132,7 +111,7 @@ const MORE = [
 <template>
   <div class="dash">
     <div class="dash-hero">
-      <div class="dash-hi">{{ greetingWord }} — {{ gallows }}</div>
+      <div class="dash-hi">{{ greetingWord }}</div>
       <div class="dash-date">{{ today }}</div>
     </div>
 

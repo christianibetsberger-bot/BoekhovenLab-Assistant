@@ -39,6 +39,7 @@ export const useLabStore = defineStore('lab', {
     
     inventory: [],
     profiles: [],   // lab user directory {email, display_name} — for sharing pickers
+    archivedItemIds: [],   // inventory items in the archive — never shown in the live list
     // Predefined storage locations. Global ones are shared with everyone; Personal ones
     // are only visible to their creator. Each: { id, name, scope, owner_id }.
     locations: [],
@@ -119,9 +120,20 @@ export const useLabStore = defineStore('lab', {
       const registryRaw = localStorage.getItem('lab_workspace_registry');
       const registry = registryRaw ? JSON.parse(registryRaw) : { rxnIds: [], matIds: [], scrIds: [], pltIds: [] };
 
-      // 1. Load Inventory
+      // 1. Load Inventory. Archived items must NEVER appear in the live inventory —
+      // filter by the archive so a stale `inventory` row (e.g. a delete that failed
+      // in another session) can't resurrect a compound that was archived.
       const { data: invData } = await db.from('inventory').select('*');
-      if (invData) this.inventory = invData.map(row => row.item_data);
+      let archivedIds = [];
+      try {
+        const { data: arch } = await db.from('inventory_archive').select('item_id');
+        archivedIds = (arch || []).map(r => String(r.item_id));
+      } catch { /* archive table may not exist yet */ }
+      this.archivedItemIds = archivedIds;
+      if (invData) {
+        const gone = new Set(archivedIds);
+        this.inventory = invData.map(row => row.item_data).filter(it => it && !gone.has(String(it.id)));
+      }
       this.inventoryLoaded = true;
 
       // 2. Load Reactions
@@ -236,6 +248,7 @@ export const useLabStore = defineStore('lab', {
         this.toast('Delete failed: ' + delErr.message);
         return false;
       }
+      if (!this.archivedItemIds.includes(id)) this.archivedItemIds.push(id);
       return true;
     },
 
@@ -246,6 +259,7 @@ export const useLabStore = defineStore('lab', {
       const ok = await this.saveItemToCloud(item);
       if (ok === false) { this.toast('Restore failed — the item stays in the archive'); return false; }
       await db.from('inventory_archive').delete().eq('item_id', String(archRow.item_id));
+      this.archivedItemIds = this.archivedItemIds.filter(x => x !== String(archRow.item_id));
       if (!this.inventory.some(i => String(i.id) === String(item.id))) this.inventory.unshift(item);
       this.toast(`Restored "${item.name || item.code}"`);
       return true;

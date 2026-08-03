@@ -2,15 +2,10 @@
 import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { esc, sanitize } from '../utils/htmlSafe'
+import { invChip } from '../utils/invChip'
 import ExpStatusPicker from './ExpStatusPicker.vue'
+import { usePlanWorkspace } from '../composables/usePlanWorkspace'
 
-// Set + persist an experiment status; reverts if the save was rejected.
-const setPlanStatus = async (plate, v) => {
-    const prev = plate.status || 'in_progress'
-    plate.status = v
-    if (await store.saveToCloud('plates', plate)) store.toast('Status updated')
-    else plate.status = prev
-}
 import { BOEKHOVEN_PALETTE, assignColors } from '../utils/palette'
 
 const store = useLabStore()
@@ -40,6 +35,11 @@ function wellColor(plate, wId) {
 }
 const activeDropdown = ref(null)
 const showCloudLibrary = ref(false)
+
+// Workspace behaviour (open / close / archive / duplicate / status) is shared by
+// all plan modules — see composables/usePlanWorkspace.js.
+const { loadFromCloud, closeInWorkspace, archivePlan, duplicatePlan, setStatus: setPlanStatus } =
+    usePlanWorkspace({ store, table: 'plates', open: 'wellPlates', archived: 'archivedPlates', noun: 'well plate', showLibrary: showCloudLibrary })
 const showOnpSettings = ref(false)
 
 // Grouped multi-plate .onp export
@@ -90,38 +90,9 @@ const addWellPlate = () => {
     store.saveWorkspaceState(); 
 }
 
-const loadFromCloud = (cloudPlate) => {
-    const alreadyOpen = store.wellPlates.find(p => p.id === cloudPlate.id);
-    if (!alreadyOpen) {
-        store.wellPlates.unshift(JSON.parse(JSON.stringify(cloudPlate)));
-    }
-    showCloudLibrary.value = false;
-    store.saveWorkspaceState();
-}
 
-const closePlateInWorkspace = (index) => {
-    store.wellPlates.splice(index, 1);
-    store.saveWorkspaceState();
-}
 
-const archivePlate = async (index) => {
-    if(confirm("Archive this well plate?")) {
-        const item = store.wellPlates.splice(index, 1)[0];
-        item.scope = 'Archived';
-        store.archivedPlates.push(item);
-        await store.saveToCloud('plates', item);
-    }
-}
 
-const duplicateWellPlate = (index) => {
-    const copy = JSON.parse(JSON.stringify(store.wellPlates[index]));
-    copy.id = crypto.randomUUID();
-    copy.name += ' (Copy)';
-    copy.scope = 'Personal';
-    copy.owner_id = store.user.id;
-    store.wellPlates.splice(index + 1, 0, copy);
-    store.saveWorkspaceState();
-}
 
 const updateDefaultLabware = (plate) => {
     if (plate.format === 384) plate.targetLabware = '201901101700';
@@ -154,7 +125,7 @@ const insertInventoryRefToWell = (plate) => {
     const editor = document.getElementById('wellEditor_' + plate.id);
     if (item && editor) {
         editor.focus();
-        const html = `&nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(item.id)}" data-labware=""><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp;`;
+        const html = `&nbsp;${invChip(item, { fmt: store.formatNum })}&nbsp;`;
         document.execCommand('insertHTML', false, html);
         plate.wells[plate.selectedWell] = sanitize(editor.innerHTML);
     }
@@ -924,9 +895,9 @@ const exportAndrewPlusMulti = () => {
                 </select>
                 <button class="small" @click="savePlateToJournal(plate)" title="Log to Journal"><i class="fas fa-file-import"></i> Log</button>
                 <button class="small" @click="exportAndrewPlus(plate)" title="Export Robot Protocol (.onp) — Requires a valid Andrew+ license. Not affiliated with or endorsed by Waters Corporation."><i class="fas fa-robot"></i> .onp</button>
-                <button class="secondary small" @click="duplicateWellPlate(pIndex)" title="Duplicate"><i class="fas fa-copy"></i></button>
-                <button class="secondary small" @click="archivePlate(pIndex)" title="Archive"><i class="fas fa-box-archive"></i></button>
-                <button class="danger small" @click="closePlateInWorkspace(pIndex)" title="Close from workspace"><i class="fas fa-times"></i></button>
+                <button class="secondary small" @click="duplicatePlan(pIndex)" title="Duplicate"><i class="fas fa-copy"></i></button>
+                <button class="secondary small" @click="archivePlan(pIndex)" title="Archive"><i class="fas fa-box-archive"></i></button>
+                <button class="danger small" @click="closeInWorkspace(pIndex)" title="Close from workspace"><i class="fas fa-times"></i></button>
             </div>
         </div>
 

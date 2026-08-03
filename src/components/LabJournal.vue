@@ -3,6 +3,7 @@ import { ref, computed, nextTick, onMounted, onUnmounted, watch, defineAsyncComp
 import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase' // Using your Supabase client
 import { esc, sanitize } from '../utils/htmlSafe'
+import { invChip } from '../utils/invChip'
 import { persistJournalEntry, isBlankJournalContent, onBlankJournalSaveSkipped, onJournalConflict } from '../utils/journalPersist'
 import { deleteUsageForSource } from '../utils/usageTracker'
 import { createVersion, listVersions, signCurrent, JournalVersionsTableMissing } from '../utils/journalVersions'
@@ -627,7 +628,7 @@ const insertInventoryRef = () => {
     const item = store.inventory.find(i => i.id === store.selectedInvRef);
     if (item) {
         if (journalEditor.value) journalEditor.value.focus();
-        const html = `&nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(item.id)}"><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp;`;
+        const html = `&nbsp;${invChip(item, { fmt: store.formatNum })}&nbsp;`;
         document.execCommand('insertHTML', false, html);
         updateRtfContent();
     }

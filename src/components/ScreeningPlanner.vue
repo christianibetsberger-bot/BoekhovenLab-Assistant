@@ -3,19 +3,19 @@ import { ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { concentrationRatio, compatibleUnits, dimsCompatible, defaultUnitForDim, CONC_UNITS } from '../utils/units.js'
 import { esc } from '../utils/htmlSafe'
+import { invChip } from '../utils/invChip'
 import ExpStatusPicker from './ExpStatusPicker.vue'
+import { usePlanWorkspace } from '../composables/usePlanWorkspace'
 
-// Set + persist an experiment status; reverts if the save was rejected.
-const setPlanStatus = async (rm, v) => {
-    const prev = rm.status || 'in_progress'
-    rm.status = v
-    if (await store.saveToCloud('screenings', rm)) store.toast('Status updated')
-    else rm.status = prev
-}
 
 const store = useLabStore()
 const activeDropdown = ref(null)
 const showCloudLibrary = ref(false)
+
+// Workspace behaviour (open / close / archive / duplicate / status) is shared by
+// all plan modules — see composables/usePlanWorkspace.js.
+const { loadFromCloud, closeInWorkspace, archivePlan, duplicatePlan, setStatus: setPlanStatus } =
+    usePlanWorkspace({ store, table: 'screenings', open: 'reverseMatrices', archived: 'archivedReverseMatrices', noun: 'screening', showLibrary: showCloudLibrary })
 
 // --- Unit helpers ---
 const targetUnitsForComp = (comp) => {
@@ -79,19 +79,7 @@ const addReverseMatrix = () => {
     store.saveWorkspaceState();
 }
 
-const loadFromCloud = (cloudRM) => {
-    const alreadyOpen = store.reverseMatrices.find(m => m.id === cloudRM.id);
-    if (!alreadyOpen) {
-        store.reverseMatrices.unshift(JSON.parse(JSON.stringify(cloudRM)));
-    }
-    showCloudLibrary.value = false;
-    store.saveWorkspaceState();
-}
 
-const closePlanInWorkspace = (index) => {
-    store.reverseMatrices.splice(index, 1);
-    store.saveWorkspaceState();
-}
 
 // Fixed: Added persistence
 const removeReverseMatrix = (index) => { 
@@ -99,25 +87,8 @@ const removeReverseMatrix = (index) => {
     store.saveWorkspaceState();
 }
 
-const archiveReverseMatrix = async (index) => {
-    if(confirm("Archive this screening?")) {
-        const item = store.reverseMatrices.splice(index, 1)[0];
-        item.scope = 'Archived';
-        store.archivedReverseMatrices.push(item);
-        await store.saveToCloud('screenings', item);
-    }
-}
 
 // Fixed: Added persistence because duplicating adds a new item to screen
-const duplicateReverseMatrix = (index) => {
-    const copy = JSON.parse(JSON.stringify(store.reverseMatrices[index]));
-    copy.id = crypto.randomUUID();
-    copy.name += ' (Copy)';
-    copy.scope = 'Personal';
-    copy.owner_id = store.user.id;
-    store.reverseMatrices.splice(index + 1, 0, copy);
-    store.saveWorkspaceState();
-}
 
 const addReverseMatrixComponent = (rm) => {
     rm.components.push({ 
@@ -204,7 +175,7 @@ const calcRMCellHTML = (rm, rIndex, cIndex) => {
                     displayTarget = `${esc(targetVal)} ${esc(comp.targetUnit)}`;
                 }
                 totalVol += v;
-                htmlStr += `&nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(invItem.id)}" data-labware="${esc(comp.labware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(invItem.code)}] ${esc(invItem.name)} (${esc(store.formatNum(invItem.stock))} ${esc(invItem.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(v))} ${esc(unit)} (${displayTarget})<br>`;
+                htmlStr += `&nbsp;${invChip(invItem, { labware: comp.labware, fmt: store.formatNum })}&nbsp; ${esc(store.formatNum(v))} ${esc(unit)} (${displayTarget})<br>`;
             }
         }
     });
@@ -373,9 +344,9 @@ const saveReverseMatrixToPlate = (rm) => {
                 
                 <div style="width: 1px; height: 24px; background: var(--border); margin: 0 5px;"></div>
                 <button class="small" @click="saveReverseMatrixToJournal(rm)"><i class="fas fa-file-import"></i> Log</button>
-                <button class="secondary small" @click="duplicateReverseMatrix(rmIndex)"><i class="fas fa-copy"></i></button>
-                <button class="secondary small" @click="archiveReverseMatrix(rmIndex)" title="Local Archive"><i class="fas fa-box-archive"></i></button>
-                <button class="danger small" @click="closePlanInWorkspace(rmIndex)" title="Remove from screen only"><i class="fas fa-times"></i></button>
+                <button class="secondary small" @click="duplicatePlan(rmIndex)"><i class="fas fa-copy"></i></button>
+                <button class="secondary small" @click="archivePlan(rmIndex)" title="Local Archive"><i class="fas fa-box-archive"></i></button>
+                <button class="danger small" @click="closeInWorkspace(rmIndex)" title="Remove from screen only"><i class="fas fa-times"></i></button>
             </div>
             </div>
 

@@ -3,20 +3,19 @@ import { ref } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { concentrationRatio, dimsCompatible, CONC_UNITS } from '../utils/units.js'
 import { esc } from '../utils/htmlSafe'
+import { invChip, textChip } from '../utils/invChip'
 import ExpStatusPicker from './ExpStatusPicker.vue'
+import { usePlanWorkspace } from '../composables/usePlanWorkspace'
 
-// Set + persist an experiment status; reverts if the save was rejected, so the
-// pill never shows a state the cloud didn't accept.
-const setPlanStatus = async (matrix, v) => {
-    const prev = matrix.status || 'in_progress'
-    matrix.status = v
-    if (await store.saveToCloud('matrices', matrix)) store.toast('Status updated')
-    else matrix.status = prev
-}
 
 const store = useLabStore()
 const activeDropdown = ref(null)
 const showCloudLibrary = ref(false)
+
+// Workspace behaviour (open / close / archive / duplicate / status) is shared by
+// all plan modules — see composables/usePlanWorkspace.js.
+const { loadFromCloud, closeInWorkspace, archivePlan, duplicatePlan, setStatus: setPlanStatus } =
+    usePlanWorkspace({ store, table: 'matrices', open: 'matrices', archived: 'archivedMatrices', noun: 'matrix', showLibrary: showCloudLibrary })
 
 const filterBlockInventory = (query, scope) => {
     const term = query ? query.toLowerCase() : '';
@@ -62,40 +61,12 @@ const addMatrix = () => {
     store.saveWorkspaceState(); 
 }
 
-const loadFromCloud = (cloudMatrix) => {
-    const alreadyOpen = store.matrices.find(m => m.id === cloudMatrix.id);
-    if (!alreadyOpen) {
-        store.matrices.unshift(JSON.parse(JSON.stringify(cloudMatrix)));
-    }
-    showCloudLibrary.value = false;
-    store.saveWorkspaceState(); 
-}
 
-const closePlanInWorkspace = (index) => {
-    store.matrices.splice(index, 1);
-    store.saveWorkspaceState(); 
-}
 
 const addBlockToMatrix = (matrix) => { matrix.customBlocks.push({ id: 'blk_' + crypto.randomUUID(), name: 'New Block', itemIds: [], searchQuery: '', searchScope: 'Global', labware: '' }); }
 const addFixedAdditive = (matrix) => {
     if(!matrix.fixedAdditives) matrix.fixedAdditives = [];
     matrix.fixedAdditives.push({ name: 'New Component', vol: 1, searchQuery: '', searchScope: 'Global', labware: '' });
-}
-const archiveMatrix = async (index) => {
-    if(confirm("Archive this matrix?")) {
-        const item = store.matrices.splice(index, 1)[0];
-        item.scope = 'Archived';
-        store.archivedMatrices.push(item);
-        await store.saveToCloud('matrices', item);
-    }
-}
-const duplicateMatrix = (index) => {
-    const copy = JSON.parse(JSON.stringify(store.matrices[index]));
-    copy.id = crypto.randomUUID();
-    copy.name += ' (Copy)';
-    copy.scope = 'Personal';
-    copy.owner_id = store.user.id;
-    store.matrices.splice(index + 1, 0, copy);
 }
 
 // --- Unit mismatch detection ---
@@ -139,7 +110,7 @@ const calculateMatrixCell = (matrix, rowBlockId, colBlockId) => {
         }
         const v = ratio * tv;
         totalVol += v;
-        htmlStr += `<strong>${role}:</strong> &nbsp;<span class="inv-ref" contenteditable="false" data-inv-id="${esc(item.id)}" data-labware="${esc(blockLabware || '')}"><i class="fas fa-tag"></i>&nbsp;[${esc(item.code)}] ${esc(item.name)} (${esc(store.formatNum(item.stock))} ${esc(item.stockUnit || 'µM')})&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(v))} ${esc(unit)} (${esc(targetConc)} ${esc(targetConcUnit || 'µM')})<br>`;
+        htmlStr += `<strong>${role}:</strong> &nbsp;${invChip(item, { labware: blockLabware, fmt: store.formatNum })}&nbsp; ${esc(store.formatNum(v))} ${esc(unit)} (${esc(targetConc)} ${esc(targetConcUnit || 'µM')})<br>`;
     };
 
     // Row contributions first (so a shared block is dosed at the row target), then any
@@ -152,7 +123,7 @@ const calculateMatrixCell = (matrix, rowBlockId, colBlockId) => {
         matrix.fixedAdditives.forEach(add => {
             let vol = Number(add.vol) || 0;
             fixedVolTotal += vol;
-            fixedHtml += `&nbsp;<span class="inv-ref" contenteditable="false" data-labware="${esc(add.labware || '')}" style="background-color: #6b7280;"><i class="fas fa-flask"></i>&nbsp;${esc(add.name)}&nbsp;<i class="fas fa-times inv-ref-remove" style="cursor:pointer; margin-left:4px; opacity: 0.7;"></i></span>&nbsp; ${esc(store.formatNum(vol))} ${esc(unit)}<br>`;
+            fixedHtml += `&nbsp;${textChip(add.name, { labware: add.labware })}&nbsp; ${esc(store.formatNum(vol))} ${esc(unit)}<br>`;
         });
     }
     
@@ -179,7 +150,7 @@ const saveMatrixToJournal = (matrix) => {
     if(matrix.fixedAdditives && matrix.fixedAdditives.length > 0) {
         matrix.fixedAdditives.forEach(add => {
             let vol = Number(add.vol) || 0;
-            fixedText.push(`&nbsp;<span class="inv-ref" contenteditable="false" style="background-color: #6b7280;"><i class="fas fa-flask"></i>&nbsp;${esc(add.name)}&nbsp;</span>&nbsp; (${esc(store.formatNum(vol))} ${esc(unit)})`);
+            fixedText.push(`&nbsp;${textChip(add.name, { removable: false })}&nbsp; (${esc(store.formatNum(vol))} ${esc(unit)})`);
         });
         html += `<p style="font-size: 0.85rem; margin-bottom: 15px;"><strong>Fixed Additives:</strong> ${fixedText.join(', ')}</p>`;
     }
@@ -320,9 +291,9 @@ const saveMatrixToPlate = (matrix) => {
                 <div style="width: 1px; height: 24px; background: var(--border); margin: 0 5px;"></div>
 
                 <button class="small" @click="saveMatrixToJournal(matrix)" title="Append table to active journal entry"><i class="fas fa-file-import"></i> Log</button>
-                <button class="secondary small" @click="duplicateMatrix(mIndex)" title="Duplicate"><i class="fas fa-copy"></i></button>
-                <button class="secondary small" @click="archiveMatrix(mIndex)" title="Local Archive"><i class="fas fa-box-archive"></i></button>
-                <button class="danger small" @click="closePlanInWorkspace(mIndex)" title="Remove from screen only"><i class="fas fa-times"></i></button>
+                <button class="secondary small" @click="duplicatePlan(mIndex)" title="Duplicate"><i class="fas fa-copy"></i></button>
+                <button class="secondary small" @click="archivePlan(mIndex)" title="Local Archive"><i class="fas fa-box-archive"></i></button>
+                <button class="danger small" @click="closeInWorkspace(mIndex)" title="Remove from screen only"><i class="fas fa-times"></i></button>
             </div>
             </div>
 

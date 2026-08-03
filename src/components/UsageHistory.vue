@@ -15,6 +15,7 @@ const open = ref(props.defaultOpen)
 const loading = ref(false)
 const loaded = ref(false)
 const missing = ref(false)
+const loadError = ref('')
 const rows = ref([])
 const openYears = ref({})
 
@@ -32,13 +33,16 @@ const STATUS_META = {
   repeat: { label: 'To be repeated', color: '#0072B2' },
 }
 const srcMeta = (t) => SOURCE_META[t] || { icon: 'fa-vial', label: t || 'Use' }
-const fmtDate = (d) => { if (!d) return '—'; const x = new Date(d); return isNaN(x) ? '—' : x.toLocaleDateString() }
+// Dates are stored as an instant anchored at midday UTC-of-writer; render and group
+// them in UTC so the calendar day/year can't shift for a reader in another timezone.
+const fmtDate = (d) => { if (!d) return '—'; const x = new Date(d); return isNaN(x) ? '—' : x.toLocaleDateString(undefined, { timeZone: 'UTC' }) }
+const yearOf = (d) => { const x = new Date(d); return isNaN(x) ? 'Undated' : String(x.getUTCFullYear()) }
 
 // year -> uses (newest first)
 const tree = computed(() => {
   const by = new Map()
   for (const r of rows.value) {
-    const y = r.used_at ? String(new Date(r.used_at).getFullYear()) : 'Undated'
+    const y = r.used_at ? yearOf(r.used_at) : 'Undated'
     if (!by.has(y)) by.set(y, [])
     by.get(y).push(r)
   }
@@ -49,8 +53,9 @@ async function load() {
   if (!props.itemId) return
   loading.value = true
   const res = await fetchUsageHistory(props.itemId)
-  rows.value = res.rows; missing.value = res.missing
-  loading.value = false; loaded.value = true
+  rows.value = res.rows; missing.value = res.missing; loadError.value = res.error || ''
+  loading.value = false
+  loaded.value = !res.error          // a failed read must not be remembered as "loaded"…
   // newest year expanded by default, the rest collapsed (tree recomputes off rows)
   openYears.value = {}
   const first = tree.value[0]?.[0]
@@ -79,6 +84,10 @@ watch(() => props.itemId, () => {
     <div v-if="open" class="uh-body">
       <div v-if="loading" class="uh-empty"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
       <div v-else-if="missing" class="uh-empty">Run <code>supabase/inventory_usage.sql</code> to start tracking usage.</div>
+      <div v-else-if="loadError" class="uh-empty" style="color: var(--wr, #dc2626);">
+        Could not load the history — {{ loadError }}.
+        <button class="uh-retry" @click="load()">Retry</button>
+      </div>
       <div v-else-if="!rows.length" class="uh-empty">No recorded uses yet. A compound is logged when an experiment that references it is saved with a status other than “In progress”.</div>
 
       <div v-else class="uh-tree">
@@ -88,10 +97,11 @@ watch(() => props.itemId, () => {
             <strong>{{ year }}</strong><span class="uh-count">{{ uses.length }}</span>
           </button>
           <ul v-if="openYears[year]" class="uh-list">
-            <li v-for="u in uses" :key="u.id" class="uh-item">
+            <li v-for="u in uses" :key="u.id" class="uh-item" :title="srcMeta(u.source_type).label + ' · id ' + u.source_id">
               <i class="fas uh-ico" :class="srcMeta(u.source_type).icon" :title="srcMeta(u.source_type).label"></i>
               <div class="uh-main">
                 <div class="uh-title">{{ u.source_label || srcMeta(u.source_type).label }}</div>
+                <div v-if="u.item_code || u.item_name" class="uh-as">used as [{{ u.item_code || '—' }}] {{ u.item_name || '' }}</div>
                 <div class="uh-meta">
                   <span>{{ fmtDate(u.used_at) }}</span>
                   <span>· {{ srcMeta(u.source_type).label }}</span>
@@ -111,7 +121,9 @@ watch(() => props.itemId, () => {
 .uh { margin-top: 14px; border: 1px solid var(--ln, #e2e8f0); border-radius: 10px; overflow: hidden; }
 .uh-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: var(--fl, #f8fafc); border: none; box-shadow: none; color: inherit; font-size: 0.82rem; font-weight: 600; cursor: pointer; text-align: left; }
 .uh-count { margin-left: 6px; font-size: 0.7rem; font-weight: 700; background: var(--primary, #2563eb); color: #fff; border-radius: 999px; padding: 1px 7px; }
-.uh-body { padding: 10px 12px; }
+.uh-body { padding: 10px 12px; max-height: 340px; overflow-y: auto; }
+.uh-as { font-size: 0.68rem; color: var(--tx2, #64748b); font-family: ui-monospace, monospace; margin-top: 1px; }
+.uh-retry { margin-left: 8px; font-size: 0.7rem; padding: 2px 8px; border: 1px solid currentColor; background: transparent; color: inherit; border-radius: 6px; cursor: pointer; box-shadow: none; }
 .uh-empty { font-size: 0.76rem; color: var(--tx2, #64748b); line-height: 1.5; }
 .uh-year + .uh-year { margin-top: 6px; }
 .uh-year-head { display: flex; align-items: center; gap: 6px; width: 100%; background: transparent; border: none; box-shadow: none; color: inherit; font-size: 0.78rem; padding: 4px 2px; cursor: pointer; text-align: left; }

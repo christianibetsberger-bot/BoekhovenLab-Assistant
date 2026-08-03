@@ -3,7 +3,7 @@ import { ref, computed, nextTick, onMounted, onUnmounted, watch, defineAsyncComp
 import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase' // Using your Supabase client
 import { esc, sanitize } from '../utils/htmlSafe'
-import { persistJournalEntry, isBlankJournalContent } from '../utils/journalPersist'
+import { persistJournalEntry, isBlankJournalContent, onBlankJournalSaveSkipped } from '../utils/journalPersist'
 import { deleteUsageForSource } from '../utils/usageTracker'
 import { createVersion, listVersions, signCurrent, JournalVersionsTableMissing } from '../utils/journalVersions'
 import { diffLines } from '../utils/textDiff'
@@ -812,6 +812,8 @@ const onEditorClick = (e) => {
 onMounted(async () => {
     if (journalEditor.value) journalEditor.value.addEventListener('click', onEditorClick)
     window.addEventListener('beforeunload', flushPendingSave)
+    // Surface refused blank saves instead of failing silently.
+    onBlankJournalSaveSkipped((msg) => store.toast(msg))
     const { data: { user } } = await db.auth.getUser();
 
     if (user) {

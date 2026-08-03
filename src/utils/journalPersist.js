@@ -8,6 +8,7 @@
 
 import { db } from '../services/supabase'
 import { extractInvRefsFromHtml, reconcileUsage } from './usageTracker'
+import { createVersion } from './journalVersions'
 
 // The blank-content guard below refuses to overwrite a saved entry with an empty
 // editor. That must never be silent — the UI registers a notifier here so the user
@@ -63,10 +64,8 @@ export async function persistJournalEntry(e, userEmail) {
     }
   }
   const payload = journalEntryPayload(e, userEmail)
-  let { error } = await db.from('journals').update(payload).eq('id', e.id)
-  if (error && /shared_with|scope|column|schema/i.test(error.message)) {
-    ({ error } = await db.from('journals').update({ data: payload.data }).eq('id', e.id))
-  }
+  const error = await writeEntry(e, payload, userEmail)
+  if (error === CONFLICT) return          // handled: nothing overwritten, both sides kept
   if (error) { console.error('journal save failed:', error); return }
   // Usage traceability: reconcile this entry's compound chips into the usage log.
   // Only finished experiments count (status !== 'in_progress'); reconcileUsage
@@ -75,6 +74,54 @@ export async function persistJournalEntry(e, userEmail) {
   // here (editor autosave, status changes, AND appendToActiveJournal from the
   // planners — so "Log to journal" content is picked up automatically).
   reconcileJournalUsage(e, userEmail)
+}
+
+// ── Concurrent editing: optimistic concurrency, and never lose the loser ──────
+// Journal rows carry a `rev` counter. An UPDATE only applies if the row is still
+// at the revision we based our edit on; if someone else wrote in the meantime the
+// update matches 0 rows and we DON'T overwrite them. Instead their content is
+// snapshotted into journal_versions (so it is recoverable and diffable in the
+// existing History UI), we re-base onto their revision, and the user is told.
+// Without the `rev` column (SQL not run) this degrades to the old last-write-wins.
+const CONFLICT = Symbol('conflict')
+let _conflictNotifier = null
+export function onJournalConflict(fn) { _conflictNotifier = fn }
+
+async function writeEntry(e, payload, userEmail) {
+  const base = Number.isFinite(e.rev) ? e.rev : null
+  // No rev known → legacy path (unguarded), keeps working on an un-migrated DB.
+  if (base === null) return await legacyUpdate(e, payload)
+
+  const { data, error } = await db.from('journals')
+    .update({ ...payload, rev: base + 1 }).eq('id', e.id).eq('rev', base).select('rev')
+  if (error) {
+    if (/rev|column|schema/i.test(error.message || '')) { e.rev = null; return await legacyUpdate(e, payload) }
+    return error
+  }
+  if (data && data.length) { e.rev = data[0].rev; return null }   // clean win
+
+  // 0 rows matched → someone else advanced the row. Preserve their work first.
+  const { data: remote } = await db.from('journals').select('*').eq('id', e.id).maybeSingle()
+  if (!remote) return null                                        // entry was deleted — nothing to do
+  try {
+    await createVersion(
+      { id: e.id, content: remote.data?.content || '' },
+      { id: remote.owner_id, email: remote.data?.lastEditor || remote.data?.ownerEmail || '' },
+      { changeSummary: 'Auto-saved before a concurrent edit' },
+    )
+  } catch { /* versions table missing — the re-base below still prevents silent loss */ }
+  e.rev = remote.rev ?? null
+  const by = remote.data?.lastEditor || 'someone else'
+  try { _conflictNotifier?.({ id: e.id, by }) } catch { /* best-effort */ }
+  return CONFLICT
+}
+
+async function legacyUpdate(e, payload) {
+  let { error } = await db.from('journals').update(payload).eq('id', e.id)
+  if (error && /shared_with|scope|column|schema/i.test(error.message)) {
+    ({ error } = await db.from('journals').update({ data: payload.data }).eq('id', e.id))
+  }
+  return error || null
 }
 
 async function reconcileJournalUsage(e, userEmail) {

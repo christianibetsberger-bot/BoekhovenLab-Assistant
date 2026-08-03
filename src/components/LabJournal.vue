@@ -3,7 +3,7 @@ import { ref, computed, nextTick, onMounted, onUnmounted, watch, defineAsyncComp
 import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase' // Using your Supabase client
 import { esc, sanitize } from '../utils/htmlSafe'
-import { persistJournalEntry, isBlankJournalContent, onBlankJournalSaveSkipped } from '../utils/journalPersist'
+import { persistJournalEntry, isBlankJournalContent, onBlankJournalSaveSkipped, onJournalConflict } from '../utils/journalPersist'
 import { deleteUsageForSource } from '../utils/usageTracker'
 import { createVersion, listVersions, signCurrent, JournalVersionsTableMissing } from '../utils/journalVersions'
 import { diffLines } from '../utils/textDiff'
@@ -206,6 +206,7 @@ function mapRow(row) {
         scope: row.scope || 'Personal',
         sharedWith: row.shared_with || [],
         owner_id: row.owner_id,
+        rev: row.rev ?? null,
         owner_email: row.data?.ownerEmail || '',
         created_at: row.created_at,
     }
@@ -349,6 +350,9 @@ function onRemoteJournalChange(payload) {
     const syncMetaOnly = () => {
         local.status = mapped.status; local.category = mapped.category
         local.scope = mapped.scope; local.sharedWith = mapped.sharedWith
+        // Track the row's revision even when we keep our own body, so our next
+        // save is judged against what is actually stored.
+        local.rev = mapped.rev
     }
 
     // If I'm actively editing this entry, my editor holds the freshest content — never
@@ -814,6 +818,11 @@ onMounted(async () => {
     window.addEventListener('beforeunload', flushPendingSave)
     // Surface refused blank saves instead of failing silently.
     onBlankJournalSaveSkipped((msg) => store.toast(msg))
+    // A concurrent edit was detected: the other version is safe in History.
+    onJournalConflict(({ id, by }) => {
+        coEditNotice.value = { id, by }
+        store.toast(`${by} edited this entry — their version was saved to History`)
+    })
     const { data: { user } } = await db.auth.getUser();
 
     if (user) {

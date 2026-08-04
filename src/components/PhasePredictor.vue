@@ -4,9 +4,6 @@
       <h2 style="display: flex; align-items: center; gap: 10px;">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 2.5v11h11"/><circle cx="5.5" cy="10.5" r="1"/><circle cx="8.5" cy="7" r="1"/><circle cx="11.5" cy="9" r="1"/></svg> Active Learning Phase Predictor
       </h2>
-      <p style="font-size: 0.85rem; opacity: 0.8; margin-top: 5px;">
-        Map chemical phase space and calculate pipetting volumes using smart experimental design.
-      </p>
     </div>
 
     <div class="cond-bar">
@@ -25,7 +22,7 @@
       <div class="col-left">
         <div class="internal-section">
           <div class="flex-between">
-            <h3>1. Search Space, Steps & Volumes</h3>
+            <h3>Search Space, Steps &amp; Volumes</h3>
             <div class="target-vol-input">
               <label>Target Well Vol (µL):</label>
               <input type="number" v-model="config.targetVolume" @change="renderPlot" title="Total Volume per well in µL" />
@@ -34,7 +31,7 @@
           
           <div class="config-grid-complex">
             <div class="input-group">
-              <label>Component A (Anion) <select :value="config.anionUnit" @change="changeUnit('anion', config.anionUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
+              <label>Component A <select :value="config.anionUnit" @change="changeUnit('anion', config.anionUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
               <div style="display: flex; gap: 5px; align-items: flex-end;">
                 <div style="flex: 2; position: relative;" @click.stop>
                   <div @click="activeDropdown = activeDropdown === 'anion' ? null : 'anion'" class="inventory-select-box">
@@ -64,7 +61,7 @@
             </div>
             
             <div class="input-group">
-              <label>Component B (Cation) <select :value="config.cationUnit" @change="changeUnit('cation', config.cationUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
+              <label>Component B <select :value="config.cationUnit" @change="changeUnit('cation', config.cationUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
               <div style="display: flex; gap: 5px; align-items: flex-end;">
                 <div style="flex: 2; position: relative;" @click.stop>
                   <div @click="activeDropdown = activeDropdown === 'cation' ? null : 'cation'" class="inventory-select-box">
@@ -94,7 +91,7 @@
             </div>
             
             <div class="input-group">
-              <label>Component C (Salt/Buffer) <select :value="config.saltUnit" @change="changeUnit('salt', config.saltUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
+              <label>Component C <select :value="config.saltUnit" @change="changeUnit('salt', config.saltUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
               <div style="display: flex; gap: 5px; align-items: flex-end;">
                 <div style="flex: 2; position: relative;" @click.stop>
                   <div @click="activeDropdown = activeDropdown === 'salt' ? null : 'salt'" class="inventory-select-box">
@@ -123,42 +120,111 @@
               </div>
             </div>
 
-            <div class="input-group" v-if="config.enableCompD">
-              <label>Component D <select :value="config.compDUnit" @change="changeUnit('compD', config.compDUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
-              <div style="display: flex; gap: 5px; align-items: flex-end;">
-                <div style="flex: 2; position: relative;" @click.stop>
-                  <div @click="activeDropdown = activeDropdown === 'compD' ? null : 'compD'" class="inventory-select-box">
-                    <span class="truncate-text">{{ config.compDName || 'Search inventory...' }}</span>
-                    <i class="fas fa-search" style="font-size: 0.7rem; opacity: 0.5;"></i>
-                  </div>
-                  <div v-if="activeDropdown === 'compD'" class="inventory-dropdown">
-                    <div class="dropdown-scope-selector">
-                      <label class="checkbox-label"><input type="radio" value="Global" v-model="config.compDSearchScope"> Global</label>
-                      <label class="checkbox-label"><input type="radio" value="Personal" v-model="config.compDSearchScope"> Personal</label>
+          </div>
+
+          <!-- ── 4th component (D) ── -->
+          <div style="margin-top: 8px;">
+            <button type="button"
+              @click="toggleCompD"
+              style="width:100%; text-align:left; background:transparent; border:1px dashed var(--border-color,#cbd5e1); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
+              <i class="fas" :class="config.enableCompD ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
+              <span title="Sweeps a 4th component through the design and adds a D slider to the 3D scatter. Opening this panel turns it on.">4th component (D)</span>
+              <span v-if="config.enableCompD" style="margin-left:auto; background:rgba(139,92,246,0.2); color:#8b5cf6; border-radius:10px; padding:1px 7px; font-size:0.7rem;">on</span>
+            </button>
+
+            <div v-if="config.enableCompD" style="margin-top:8px; padding:10px 12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px;">
+              <div class="input-group" style="margin:0;">
+                <label>Component D <select :value="config.compDUnit" @change="changeUnit('compD', config.compDUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
+                <div style="display: flex; gap: 5px; align-items: flex-end;">
+                  <div style="flex: 2; position: relative;" @click.stop>
+                    <div @click="activeDropdown = activeDropdown === 'compD' ? null : 'compD'" class="inventory-select-box">
+                      <span class="truncate-text">{{ config.compDName || 'Search inventory...' }}</span>
+                      <i class="fas fa-search" style="font-size: 0.7rem; opacity: 0.5;"></i>
                     </div>
-                    <div class="dropdown-search">
-                      <input type="text" v-model="config.compDSearchQuery" placeholder="Filter inventory..." @click.stop>
-                    </div>
-                    <div class="dropdown-results">
-                      <div v-for="inv in filterBlockInventory(config.compDSearchQuery, config.compDSearchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="selectInventory('compD', inv)">
-                        [{{ inv.code }}] {{ inv.name }} ({{inv.stock}} {{inv.stockUnit || 'µM'}})
+                    <div v-if="activeDropdown === 'compD'" class="inventory-dropdown">
+                      <div class="dropdown-scope-selector">
+                        <label class="checkbox-label"><input type="radio" value="Global" v-model="config.compDSearchScope"> Global</label>
+                        <label class="checkbox-label"><input type="radio" value="Personal" v-model="config.compDSearchScope"> Personal</label>
+                      </div>
+                      <div class="dropdown-search">
+                        <input type="text" v-model="config.compDSearchQuery" placeholder="Filter inventory..." @click.stop>
+                      </div>
+                      <div class="dropdown-results">
+                        <div v-for="inv in filterBlockInventory(config.compDSearchQuery, config.compDSearchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="selectInventory('compD', inv)">
+                          [{{ inv.code }}] {{ inv.name }} ({{inv.stock}} {{inv.stockUnit || 'µM'}})
+                        </div>
                       </div>
                     </div>
                   </div>
+                  <input type="number" v-model="config.compDMin" @change="renderPlot" style="flex: 0.4;" :title="`Min (${config.compDUnit})`" placeholder="Min" />
+                  <input type="number" v-model="config.compDMax" @change="renderPlot" style="flex: 0.4;" :title="`Max (${config.compDUnit})`" placeholder="Max" />
+                  <input type="number" v-model="config.compDStep" @change="renderPlot" style="flex: 0.4;" :title="`Step (${config.compDUnit})`" placeholder="Step" />
+                  <input type="number" v-model="config.stockCompD" style="flex: 0.6;" :title="`Stock (${config.compDUnit})`" :placeholder="`Stock ${config.compDUnit}`" />
                 </div>
-                <input type="number" v-model="config.compDMin" @change="renderPlot" style="flex: 0.4;" :title="`Min (${config.compDUnit})`" placeholder="Min" />
-                <input type="number" v-model="config.compDMax" @change="renderPlot" style="flex: 0.4;" :title="`Max (${config.compDUnit})`" placeholder="Max" />
-                <input type="number" v-model="config.compDStep" @change="renderPlot" style="flex: 0.4;" :title="`Step (${config.compDUnit})`" placeholder="Step" />
-                <input type="number" v-model="config.stockCompD" style="flex: 0.6;" :title="`Stock (${config.compDUnit})`" :placeholder="`Stock ${config.compDUnit}`" />
               </div>
             </div>
           </div>
 
+          <!-- ── Constant components (same in every well) ── -->
           <div style="margin-top: 8px;">
-            <label class="checkbox-label" style="font-size: 0.78rem;">
-              <input type="checkbox" v-model="config.enableCompD" @change="renderPlot">
-              Enable 4th component (Component D) — adds a slider sweep through D in the 3D scatter
-            </label>
+            <button type="button"
+              @click="config.showConstants = !config.showConstants"
+              style="width:100%; text-align:left; background:transparent; border:1px dashed var(--border-color,#cbd5e1); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
+              <i class="fas" :class="config.showConstants ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
+              <span title="A fixed final concentration in every well (a dye, a background buffer), taken from the fill-up.">Constant components</span>
+              <span v-if="config.constants && config.constants.length" style="margin-left:auto; background:rgba(139,92,246,0.2); color:#8b5cf6; border-radius:10px; padding:1px 7px; font-size:0.7rem;">{{ config.constants.length }}</span>
+            </button>
+
+            <div v-if="config.showConstants" style="margin-top:8px; padding:10px 12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
+              <template v-if="config.constants && config.constants.length">
+                <div style="display:grid; grid-template-columns:1.7fr 74px 66px 74px 66px 24px; gap:6px; font-size:0.66rem; font-weight:700; opacity:0.5; padding:0 2px;">
+                  <span>Component</span><span>Final</span><span>unit</span><span>Stock</span><span>unit</span><span></span>
+                </div>
+                <div v-for="(k, i) in config.constants" :key="k.id" style="display:grid; grid-template-columns:1.7fr 74px 66px 74px 66px 24px; gap:6px; align-items:center;">
+                  <div style="position:relative; display:flex; gap:4px; align-items:center; min-width:0;" @click.stop>
+                    <div class="inventory-select-box" style="flex:1.2 1 0; min-width:0; font-size:0.78rem; padding:4px 8px; min-height:30px;"
+                      :title="k.inv ? `[${k.inv.code}] ${k.inv.name} — chipped into every well` : 'Link an inventory item so this component reaches the wellplate, the lab journal and the usage log as a chip'"
+                      @click="toggleConstantDropdown(k)">
+                      <span class="truncate-text">{{ k.inv ? `[${k.inv.code}] ${k.inv.name}` : 'Link inventory…' }}</span>
+                      <i class="fas" :class="k.inv ? 'fa-tag' : 'fa-search'" style="font-size:0.7rem; opacity:0.55;"></i>
+                    </div>
+                    <input v-if="!k.inv" type="text" v-model="k.name" placeholder="or free-text name…" style="flex:1 1 0; min-width:0; font-size:0.8rem; padding:5px;">
+                    <button v-else @click="unlinkConstant(k)" title="Unlink from inventory (keeps the name)"
+                      style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:0.75rem; padding:0 2px;">✕</button>
+                    <div v-if="activeDropdown === 'const:' + k.id" class="inventory-dropdown">
+                      <div class="dropdown-scope-selector">
+                        <label class="checkbox-label"><input type="radio" value="Global" v-model="k.searchScope"> Global</label>
+                        <label class="checkbox-label"><input type="radio" value="Personal" v-model="k.searchScope"> Personal</label>
+                      </div>
+                      <div class="dropdown-search">
+                        <input type="text" v-model="k.searchQuery" placeholder="Filter inventory..." @click.stop>
+                      </div>
+                      <div class="dropdown-results">
+                        <div v-for="inv in filterBlockInventory(k.searchQuery, k.searchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="selectConstantInventory(k, inv)">
+                          [{{ inv.code }}] {{ inv.name }} ({{ inv.stock }} {{ inv.stockUnit || 'µM' }})
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <input type="number" v-model.number="k.conc" min="0" step="any" @change="renderPlot" style="font-size:0.8rem; padding:5px;" title="Final concentration in every well">
+                  <select v-model="k.unit" @change="renderPlot" style="font-size:0.76rem; padding:4px;"><option v-for="u in CONST_UNITS" :key="u" :value="u">{{ u }}</option></select>
+                  <input type="number" v-model.number="k.stockConc" min="0" step="any" @change="renderPlot" style="font-size:0.8rem; padding:5px;" title="Stock concentration">
+                  <select v-model="k.stockUnit" @change="renderPlot" style="font-size:0.76rem; padding:4px;"><option v-for="u in CONST_UNITS" :key="u" :value="u">{{ u }}</option></select>
+                  <button @click="removeConstant(i)" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:0.9rem;" title="Remove">✕</button>
+                </div>
+                <div style="font-size:0.72rem; opacity:0.6;" title="Linked components are written into every exported well as an inventory chip, so they carry through to the lab journal, the usage log and the robot protocols.">
+                  Volume per well = final ÷ stock × {{ config.targetVolume }} µL.
+                </div>
+              </template>
+
+              <div v-else style="font-size:0.75rem; opacity:0.45; text-align:center; padding:4px 0;">
+                No constant components yet.
+              </div>
+
+              <button class="small" @click="addConstant" style="align-self:flex-start; padding:3px 10px; font-size:0.75rem;">
+                <i class="fas fa-plus"></i> Add Constant
+              </button>
+            </div>
           </div>
 
           <!-- ── Component Links (dependencies) ── -->
@@ -167,31 +233,38 @@
               @click="config.showDependencies = !config.showDependencies"
               style="width:100%; text-align:left; background:transparent; border:1px dashed var(--border-color,#cbd5e1); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
               <i class="fas" :class="config.showDependencies ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
-              Component Links — lock one component as a function of another (e.g. D = 2 × C)
+              <span title="Tie one component to another — either pinned to an exact value (D = 2 × C) or held within a range (D between 1× and 3× C). Values are in each component's configured unit.">Component Links</span>
               <span v-if="config.dependencies && config.dependencies.length" style="margin-left:auto; background:rgba(139,92,246,0.2); color:#8b5cf6; border-radius:10px; padding:1px 7px; font-size:0.7rem;">{{ config.dependencies.length }} link{{ config.dependencies.length > 1 ? 's' : '' }}</span>
             </button>
 
             <div v-if="config.showDependencies" style="margin-top:8px; padding:10px 12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
-              <p style="font-size:0.72rem; opacity:0.6; margin:0;">
-                Each link enforces <strong>target = source × factor + offset</strong> (values in each component's configured unit).
-                Applied when exporting to wellplate and when post-processing AI suggestions.
-              </p>
-
               <!-- Existing links -->
               <div v-for="(dep, di) in (config.dependencies || [])" :key="di"
-                style="display:grid; grid-template-columns:1fr 20px 1fr 16px 80px 16px 70px auto; gap:6px; align-items:center;">
-                <select v-model="dep.source" style="font-size:0.78rem; padding:3px 5px;">
+                style="display:flex; gap:5px; align-items:center; flex-wrap:wrap;">
+                <select v-model="dep.source" style="font-size:0.78rem; padding:3px 5px; flex:1 1 82px; min-width:0;">
                   <option v-for="k in COMP_KEYS" :key="k" :value="k">{{ compLabel(k) }}</option>
                 </select>
-                <span style="text-align:center; opacity:0.5;">→</span>
-                <select v-model="dep.target" @change="dep.target === 'compD' && (config.enableCompD = true)" style="font-size:0.78rem; padding:3px 5px;">
+                <span style="opacity:0.5;">→</span>
+                <select v-model="dep.target" @change="dep.target === 'compD' && (config.enableCompD = true)" style="font-size:0.78rem; padding:3px 5px; flex:1 1 82px; min-width:0;">
                   <option v-for="k in COMP_KEYS" :key="k" :value="k" :disabled="k === dep.source">{{ compLabel(k) }}</option>
                 </select>
-                <span style="text-align:center; opacity:0.5; font-size:0.7rem;">×</span>
-                <input type="number" v-model.number="dep.factor" step="any" style="font-size:0.78rem; padding:3px 5px;" placeholder="factor" title="Multiplier">
-                <span style="text-align:center; opacity:0.5; font-size:0.7rem;">+</span>
-                <input type="number" v-model.number="dep.offset" step="any" style="font-size:0.78rem; padding:3px 5px;" placeholder="offset" title="Offset (in target unit)">
-                <button @click="removeDependency(di)" style="background:none; border:none; cursor:pointer; color:#ef4444; font-size:0.85rem; padding:0 4px;" title="Remove link">✕</button>
+                <select :value="dep.mode || 'fixed'" @change="setDependencyMode(dep, $event.target.value)"
+                  style="font-size:0.78rem; padding:3px 5px; flex:0 0 78px;"
+                  title="Fixed pins the target to one value. Range keeps it between two limits and lets the sweep explore in between.">
+                  <option value="fixed">=</option>
+                  <option value="range">between</option>
+                </select>
+                <span style="opacity:0.5; font-size:0.7rem;">×</span>
+                <input type="number" v-model.number="dep.factor" step="any" style="font-size:0.78rem; padding:3px 5px; width:60px;" placeholder="factor" :title="(dep.mode === 'range' ? 'Lower-limit ' : '') + 'multiplier'">
+                <span style="opacity:0.5; font-size:0.7rem;">+</span>
+                <input type="number" v-model.number="dep.offset" step="any" style="font-size:0.78rem; padding:3px 5px; width:56px;" placeholder="offset" :title="(dep.mode === 'range' ? 'Lower-limit ' : '') + 'offset (target unit)'">
+                <template v-if="dep.mode === 'range'">
+                  <span style="opacity:0.5; font-size:0.7rem;">…&nbsp;×</span>
+                  <input type="number" v-model.number="dep.factorMax" step="any" style="font-size:0.78rem; padding:3px 5px; width:60px;" placeholder="factor" title="Upper-limit multiplier">
+                  <span style="opacity:0.5; font-size:0.7rem;">+</span>
+                  <input type="number" v-model.number="dep.offsetMax" step="any" style="font-size:0.78rem; padding:3px 5px; width:56px;" placeholder="offset" title="Upper-limit offset (target unit)">
+                </template>
+                <button @click="removeDependency(di)" style="background:none; border:none; cursor:pointer; color:#ef4444; font-size:0.85rem; padding:0 4px; margin-left:auto;" title="Remove link">✕</button>
               </div>
 
               <div v-if="!config.dependencies || config.dependencies.length === 0" style="font-size:0.75rem; opacity:0.45; text-align:center; padding:4px 0;">
@@ -210,14 +283,10 @@
               @click="config.showMediumSettings = !config.showMediumSettings"
               style="width:100%; text-align:left; background:transparent; border:1px dashed var(--border-color,#cbd5e1); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
               <i class="fas" :class="config.showMediumSettings ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
-              Advanced: Component Solvents · Background Salt (Na⁺) · pH
+              <span title="Background Na⁺ from the solvents is subtracted from the Component C volume on export so the final concentration is met exactly. Volume-weighted H⁺ mixing gives the per-well pH estimate.">Advanced: solvents · background Na⁺ · pH</span>
             </button>
 
             <div v-if="config.showMediumSettings" style="margin-top:8px; padding:12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.8rem; display:flex; flex-direction:column; gap:10px;">
-              <p style="font-size:0.72rem; opacity:0.6; margin:0;">
-                Specify the solvent each stock is dissolved in. Background Na⁺ is subtracted from the Component C (salt) volume during well-plate export so the target final concentration is met exactly. Volume-weighted H⁺ mixing gives a per-well pH estimate.
-              </p>
-
               <!-- Header row -->
               <div style="display:grid; grid-template-columns:120px 100px 1fr 130px 80px; gap:6px; align-items:center; font-size:0.7rem; font-weight:700; opacity:0.55; text-transform: none; letter-spacing:0.04em;">
                 <span>Component</span>
@@ -263,7 +332,7 @@
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
               </div>
 
-              <!-- Component C (salt) -->
+              <!-- Component C -->
               <div style="display:grid; grid-template-columns:120px 100px 1fr 130px 80px; gap:6px; align-items:center;">
                 <span style="font-size:0.78rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" :title="config.saltName">C: {{ config.saltName }}</span>
                 <select v-model="config.saltMedium.type" style="font-size:0.78rem; padding:3px 5px;">
@@ -369,35 +438,140 @@
               </template>
             </div>
           </div>
-        </div>
+          <!-- ── Additive Experiment Layer ── -->
+          <div style="margin-top: 8px;">
+            <button type="button"
+              @click="additiveConfig.enabled = !additiveConfig.enabled"
+              style="width:100%; text-align:left; background:transparent; border:1px dashed var(--border-color,#cbd5e1); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
+              <i class="fas" :class="additiveConfig.enabled ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
+              <span title="Spike a new component on top of existing wells. Concentrations of all existing components are automatically diluted by the added volume.">Additive Experiment Layer</span>
+              <span v-if="additiveConfig.enabled && additivePreviewRows.length" style="margin-left:auto; background:rgba(139,92,246,0.2); color:#8b5cf6; border-radius:10px; padding:1px 7px; font-size:0.7rem;">{{ additivePreviewRows.length }} wells</span>
+            </button>
 
-        <div class="internal-section">
-          <div class="flex-between" style="margin-bottom:8px;">
-            <h3 style="margin:0; border:none; padding:0; font-size:0.95rem;">Constant components <span style="font-weight:400; opacity:0.55; font-size:0.78rem;">(same in every well)</span></h3>
-            <button class="cond-btn ghost" style="padding:4px 10px;" @click="addConstant"><i class="fas fa-plus"></i> Add</button>
+            <div v-if="additiveConfig.enabled" style="margin-top:8px; padding:10px 12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px;">
+              <!-- Row 1: source + additive component definition -->
+              <!-- auto-fit: this panel now lives in the narrow left column, so the four
+                   controls reflow onto as many rows as the width allows. -->
+              <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; align-items:end; margin-bottom:12px;">
+                <!-- Source -->
+                <div class="input-group" style="margin:0;">
+                  <label style="font-size:0.75rem;">Base rows from</label>
+                  <select v-model="additiveConfig.source" style="padding:5px; font-size:0.82rem; width:100%;">
+                    <option value="suggestions">AI Suggestions ({{ suggestions.length }})</option>
+                    <option value="experiments">Experiment Ledger ({{ experiments.length }})</option>
+                  </select>
+                </div>
+                <!-- Component name + inventory -->
+                <div class="input-group" style="margin:0; position:relative;" @click.stop>
+                  <label style="font-size:0.75rem;">Additive component</label>
+                  <div style="display:flex; gap:5px;">
+                    <input type="text" v-model="additiveConfig.name" placeholder="Name…" style="flex:1; font-size:0.82rem; padding:5px;" />
+                    <div style="flex:1.5; position:relative;">
+                      <div @click="additiveConfig.showAdditiveInvDropdown = !additiveConfig.showAdditiveInvDropdown" class="inventory-select-box" style="min-height:30px; font-size:0.78rem;">
+                        <span class="truncate-text">{{ additiveConfig.inv ? `[${additiveConfig.inv.code}] ${additiveConfig.inv.name}` : 'Search inventory…' }}</span>
+                        <i class="fas fa-search" style="font-size:0.7rem; opacity:0.5;"></i>
+                      </div>
+                      <div v-if="additiveConfig.showAdditiveInvDropdown" class="inventory-dropdown">
+                        <div class="dropdown-scope-selector">
+                          <label class="checkbox-label"><input type="radio" value="Global" v-model="additiveConfig.invSearchScope"> Global</label>
+                          <label class="checkbox-label"><input type="radio" value="Personal" v-model="additiveConfig.invSearchScope"> Personal</label>
+                        </div>
+                        <div class="dropdown-search"><input type="text" v-model="additiveConfig.invSearchQuery" placeholder="Filter…" @click.stop /></div>
+                        <div class="dropdown-results">
+                          <div v-for="inv in filterBlockInventory(additiveConfig.invSearchQuery, additiveConfig.invSearchScope)" :key="inv.id"
+                            class="dropdown-item"
+                            @mousedown.prevent="additiveConfig.inv = inv; additiveConfig.name = inv.name; additiveConfig.stockConc = inv.stock; additiveConfig.stockUnit = inv.stockUnit || 'mM'; additiveConfig.showAdditiveInvDropdown = false">
+                            [{{ inv.code }}] {{ inv.name }} ({{ inv.stock }} {{ inv.stockUnit || 'µM' }})
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <button v-if="additiveConfig.inv" @click="additiveConfig.inv = null" style="background:none; border:none; cursor:pointer; color:#ef4444; font-size:0.75rem; padding:0 4px;" title="Clear">✕</button>
+                  </div>
+                </div>
+                <!-- Stock concentration + unit -->
+                <div class="input-group" style="margin:0;">
+                  <label style="font-size:0.75rem;">Stock conc.</label>
+                  <div style="display:flex; gap:4px;">
+                    <input type="number" v-model.number="additiveConfig.stockConc" min="0" step="any" style="flex:1; font-size:0.82rem; padding:5px;" placeholder="100" />
+                    <select v-model="additiveConfig.stockUnit" class="unit-select" style="max-width:56px;">
+                      <option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option>
+                    </select>
+                  </div>
+                </div>
+                <!-- Volumes to add -->
+                <div class="input-group" style="margin:0;">
+                  <label style="font-size:0.75rem;">Volumes to add (µL, comma-sep.)</label>
+                  <input type="text" v-model="additiveConfig.volumesText" placeholder="1, 2, 5, 10" style="font-size:0.82rem; padding:5px; width:100%;" />
+                </div>
+              </div>
+
+              <!-- Summary line -->
+              <div style="font-size:0.76rem; opacity:0.65; margin-bottom:10px;">
+                <strong>{{ additiveBaseRows.length }}</strong> base rows × <strong>{{ additiveVolumes.length }}</strong> volumes
+                = <strong>{{ additivePreviewRows.length }}</strong> wells
+                | Base volume: <strong>{{ config.targetVolume }} µL</strong>
+                | Stock: <strong>{{ additiveConfig.stockConc }} {{ additiveConfig.stockUnit }}</strong>
+              </div>
+
+              <!-- Preview table (first 12 rows) -->
+              <div v-if="additivePreviewRows.length > 0" style="overflow-x:auto; margin-bottom:12px;">
+                <table class="ledger-table" style="font-size:0.74rem; min-width:600px;">
+                  <thead>
+                    <tr>
+                      <th>Base ID</th>
+                      <th>+Vol (µL)</th>
+                      <th>{{ config.anionName || 'A' }} ({{ config.anionUnit }})</th>
+                      <th>{{ config.cationName || 'B' }} ({{ config.cationUnit }})</th>
+                      <th>{{ config.saltName || 'C' }} ({{ config.saltUnit }})</th>
+                      <th v-if="config.enableCompD">{{ config.compDName || 'D' }} ({{ config.compDUnit }})</th>
+                      <th>{{ additiveConfig.name || 'Additive' }} ({{ additiveConfig.stockUnit }})</th>
+                      <th>Total (µL)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(row, ri) in additivePreviewRows.slice(0, 24)" :key="ri" :style="ri % additiveVolumes.length === 0 ? 'border-top:2px solid var(--border-color,#e2e8f0);' : ''">
+                      <td style="opacity:0.6;">{{ row._baseId }}</td>
+                      <td><strong>{{ row._vAdd }}</strong></td>
+                      <td>{{ row.anion }}</td>
+                      <td>{{ row.cation }}</td>
+                      <td>{{ row.salt }}</td>
+                      <td v-if="config.enableCompD">{{ row.compD }}</td>
+                      <td style="color:#f59e0b; font-weight:600;">{{ row.additive }}</td>
+                      <td style="opacity:0.6;">{{ row._totalVol }}</td>
+                    </tr>
+                    <tr v-if="additivePreviewRows.length > 24">
+                      <td :colspan="config.enableCompD ? 8 : 7" style="text-align:center; opacity:0.45; font-style:italic;">
+                        … {{ additivePreviewRows.length - 24 }} more rows not shown
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Export controls -->
+              <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                <span style="font-size:0.82rem; font-weight:600; opacity:0.7;">Export additive wells:</span>
+                <select v-model="targetPlateId" class="compact-select">
+                  <option value="" disabled>Select Plate…</option>
+                  <option v-for="p in store.wellPlates" :key="p.id" :value="p.id">{{ p.name }}</option>
+                </select>
+                <input type="text" v-model="targetStartWell" placeholder="A1" class="compact-input" />
+                <button class="small" @click="exportAdditiveToPlate"
+                  style="background:var(--wr); color:#fff; border:none; padding:4px 14px; border-radius:var(--rc); cursor:pointer; font-weight:600;">
+                  <i class="fas fa-arrow-down"></i> Send to Plate
+                </button>
+                <span style="font-size:0.72rem; opacity:0.5;">
+                  {{ additivePreviewRows.length }} wells → fills {{ Math.ceil(additivePreviewRows.length / 12) }} rows
+                </span>
+              </div>
+            </div>
           </div>
-          <p v-if="!config.constants || !config.constants.length" style="font-size:0.78rem; opacity:0.5; margin:0;">
-            Components added here go into every well at a fixed final concentration (e.g. a dye or a background buffer), taking their volume from the fill-up.
-          </p>
-          <template v-else>
-            <div style="display:grid; grid-template-columns:1fr 74px 66px 74px 66px 24px; gap:6px; font-size:0.66rem; font-weight:700; opacity:0.5; padding:0 2px 3px;">
-              <span>Component</span><span>Final</span><span>unit</span><span>Stock</span><span>unit</span><span></span>
-            </div>
-            <div v-for="(k, i) in config.constants" :key="k.id" style="display:grid; grid-template-columns:1fr 74px 66px 74px 66px 24px; gap:6px; align-items:center; margin-bottom:6px;">
-              <input type="text" v-model="k.name" placeholder="e.g. Thioflavin T" style="font-size:0.8rem; padding:5px;">
-              <input type="number" v-model.number="k.conc" min="0" step="any" @change="renderPlot" style="font-size:0.8rem; padding:5px;" title="Final concentration in every well">
-              <select v-model="k.unit" @change="renderPlot" style="font-size:0.76rem; padding:4px;"><option>M</option><option>mM</option><option>µM</option><option>nM</option><option>mg/mL</option><option>µg/µL</option><option>ng/µL</option><option>X</option><option>%</option></select>
-              <input type="number" v-model.number="k.stockConc" min="0" step="any" @change="renderPlot" style="font-size:0.8rem; padding:5px;" title="Stock concentration">
-              <select v-model="k.stockUnit" @change="renderPlot" style="font-size:0.76rem; padding:4px;"><option>M</option><option>mM</option><option>µM</option><option>nM</option><option>mg/mL</option><option>µg/µL</option><option>ng/µL</option><option>X</option><option>%</option></select>
-              <button @click="removeConstant(i)" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:0.9rem;" title="Remove">✕</button>
-            </div>
-            <div style="font-size:0.72rem; opacity:0.6;">Volume per well = final ÷ stock × {{ config.targetVolume }} µL, taken from the fill-up.</div>
-          </template>
         </div>
 
         <div class="internal-section" style="flex-grow: 1;">
           <div class="flex-between" style="margin-bottom: 6px;">
-            <h3 style="margin: 0; border: none; padding: 0;">2. Experiment Ledger</h3>
+            <h3 style="margin: 0; border: none; padding: 0;">Experiment Ledger</h3>
             <span v-if="activeDataset" style="font-size: 0.72rem; opacity: 0.65;">
               <i class="fas fa-database"></i> Loaded:
               <strong>{{ activeDataset.name || '—' }}</strong>
@@ -536,18 +710,16 @@
               </div>
             </div>
             <div style="font-weight:700; font-size:0.75rem; text-transform: none; letter-spacing:.4px; opacity:.7; margin-top:4px;">Dissolution Detection</div>
-            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;"
+              title="If OD drops below the threshold after peaking, the well is classified as Clear (dissolved droplets).">
               <label class="checkbox-label" style="font-size:0.8rem;">
                 <input type="checkbox" v-model="prDissolutionEnabled" /> Enable
               </label>
-              <template v-if="prDissolutionEnabled">
-                <div class="input-group" style="margin:0; display:flex; align-items:center; gap:6px;">
-                  <label style="font-size:0.75rem; white-space:nowrap;">OD drops below</label>
-                  <input type="number" step="0.01" min="0" max="2" v-model.number="prDissolutionThreshold" style="width:64px; padding:3px 5px; font-size:0.8rem;" />
-                  <span style="opacity:.6; font-size:0.75rem;">→ classified as Clear (dissolved)</span>
-                </div>
-              </template>
-              <span v-else style="opacity:.55; font-size:0.75rem;">If OD drops below a threshold after peaking, classify the well as Clear (dissolved droplets).</span>
+              <div v-if="prDissolutionEnabled" class="input-group" style="margin:0; display:flex; align-items:center; gap:6px;">
+                <label style="font-size:0.75rem; white-space:nowrap;">OD drops below</label>
+                <input type="number" step="0.01" min="0" max="2" v-model.number="prDissolutionThreshold" style="width:64px; padding:3px 5px; font-size:0.8rem;" />
+                <span style="opacity:.6; font-size:0.75rem;">→ Clear</span>
+              </div>
             </div>
           </div>
 
@@ -621,19 +793,18 @@
             </div>
           </template>
 
-          <p v-if="!prODMap" style="font-size:0.75rem; opacity:0.6; margin:4px 0 0;">
+          <p v-if="!prODMap" style="font-size:0.75rem; opacity:0.6; margin:4px 0 0;"
+            title="Concentrations are read directly from each well cell and OD determines the phase, so this works even if the AI suggestions were never logged to the active learning.">
             Select the wellplate that was used, then load the plate-reader CSV.
-            Concentrations are read directly from each well cell; OD determines the phase.
-            Works even if the AI suggestions were never logged to the active learning.
           </p>
         </div>
       </div>
 
       <div class="col-right">
         <div class="internal-section" style="display: flex; flex-direction: column;">
-          <div class="flex-between" style="margin-bottom: 10px;">
-            <h3 style="margin: 0; border: none; padding: 0;">3. Phase Map ({{ fixedAxis ? '2D Slice + 3D' : '3D Space' }})</h3>
-            <div style="display: flex; gap: 10px; align-items: center;">
+          <div class="flex-between" style="margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+            <h3 style="margin: 0; border: none; padding: 0;">Phase Map</h3>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
               <span v-if="boundaryData" style="font-size: 0.75rem; opacity: 0.7;">
                 {{ boundaryData.n_labeled }} pts · phases {{ boundaryData.phases_used?.join(', ') }}
               </span>
@@ -680,7 +851,7 @@
         </div>
 
         <div class="internal-section">
-          <h3>4. Active Learning Engine</h3>
+          <h3>Active Learning Engine</h3>
           
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; padding: 10px; background: rgba(59, 130, 246, 0.05); border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px;">
               <div class="input-group" style="margin: 0;">
@@ -734,7 +905,7 @@
 
     <div class="internal-section full-width-section" v-if="existingPlateData.length > 0 || suggestions.length > 0">
       <div class="flex-between" style="border-bottom: 1px solid var(--border-color, #e2e8f0); padding-bottom: 8px; margin-bottom: 15px;">
-        <h3 style="margin: 0; border: none; padding: 0;">5. Wet Lab Mapping: 96-Well Plates</h3>
+        <h3 style="margin: 0; border: none; padding: 0;">Wet Lab Mapping: 96-Well Plates</h3>
         <div v-if="suggestedPlateData.length > 0" class="export-controls">
             <span style="font-size: 0.85rem; font-weight: bold; opacity: 0.7;">Export AI Targets with Volumes:</span>
             <select v-model="targetPlateId" class="compact-select">
@@ -789,141 +960,6 @@
             </div>
           </div>
       </div>
-    </div>
-
-    <!-- ── 6. Additive Experiment Layer ── -->
-    <div class="internal-section full-width-section">
-      <div class="flex-between" style="border-bottom:1px solid var(--border-color,#e2e8f0); padding-bottom:8px; margin-bottom:12px;">
-        <h3 style="margin:0; border:none; padding:0;">
-          <i class="fas fa-flask" style="font-size:0.85rem; opacity:0.7;"></i> 6. Additive Experiment Layer
-        </h3>
-        <label class="checkbox-label" style="font-size:0.8rem; gap:8px;">
-          <input type="checkbox" v-model="additiveConfig.enabled">
-          Enable
-        </label>
-      </div>
-
-      <div v-if="!additiveConfig.enabled" style="font-size:0.8rem; opacity:0.5; text-align:center; padding:8px 0;">
-        Add a new component ON TOP of existing wells. Concentrations of all existing components are
-        automatically diluted by the added volume.
-      </div>
-
-      <template v-else>
-        <!-- Row 1: source + additive component definition -->
-        <div style="display:grid; grid-template-columns:180px 1fr 120px 120px; gap:10px; align-items:end; margin-bottom:12px; flex-wrap:wrap;">
-          <!-- Source -->
-          <div class="input-group" style="margin:0;">
-            <label style="font-size:0.75rem;">Base rows from</label>
-            <select v-model="additiveConfig.source" style="padding:5px; font-size:0.82rem; width:100%;">
-              <option value="suggestions">AI Suggestions ({{ suggestions.length }})</option>
-              <option value="experiments">Experiment Ledger ({{ experiments.length }})</option>
-            </select>
-          </div>
-          <!-- Component name + inventory -->
-          <div class="input-group" style="margin:0; position:relative;" @click.stop>
-            <label style="font-size:0.75rem;">Additive component</label>
-            <div style="display:flex; gap:5px;">
-              <input type="text" v-model="additiveConfig.name" placeholder="Name…" style="flex:1; font-size:0.82rem; padding:5px;" />
-              <div style="flex:1.5; position:relative;">
-                <div @click="additiveConfig.showAdditiveInvDropdown = !additiveConfig.showAdditiveInvDropdown" class="inventory-select-box" style="min-height:30px; font-size:0.78rem;">
-                  <span class="truncate-text">{{ additiveConfig.inv ? `[${additiveConfig.inv.code}] ${additiveConfig.inv.name}` : 'Search inventory…' }}</span>
-                  <i class="fas fa-search" style="font-size:0.7rem; opacity:0.5;"></i>
-                </div>
-                <div v-if="additiveConfig.showAdditiveInvDropdown" class="inventory-dropdown">
-                  <div class="dropdown-scope-selector">
-                    <label class="checkbox-label"><input type="radio" value="Global" v-model="additiveConfig.invSearchScope"> Global</label>
-                    <label class="checkbox-label"><input type="radio" value="Personal" v-model="additiveConfig.invSearchScope"> Personal</label>
-                  </div>
-                  <div class="dropdown-search"><input type="text" v-model="additiveConfig.invSearchQuery" placeholder="Filter…" @click.stop /></div>
-                  <div class="dropdown-results">
-                    <div v-for="inv in filterBlockInventory(additiveConfig.invSearchQuery, additiveConfig.invSearchScope)" :key="inv.id"
-                      class="dropdown-item"
-                      @mousedown.prevent="additiveConfig.inv = inv; additiveConfig.name = inv.name; additiveConfig.stockConc = inv.stock; additiveConfig.stockUnit = inv.stockUnit || 'mM'; additiveConfig.showAdditiveInvDropdown = false">
-                      [{{ inv.code }}] {{ inv.name }} ({{ inv.stock }} {{ inv.stockUnit || 'µM' }})
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <button v-if="additiveConfig.inv" @click="additiveConfig.inv = null" style="background:none; border:none; cursor:pointer; color:#ef4444; font-size:0.75rem; padding:0 4px;" title="Clear">✕</button>
-            </div>
-          </div>
-          <!-- Stock concentration + unit -->
-          <div class="input-group" style="margin:0;">
-            <label style="font-size:0.75rem;">Stock conc.</label>
-            <div style="display:flex; gap:4px;">
-              <input type="number" v-model.number="additiveConfig.stockConc" min="0" step="any" style="flex:1; font-size:0.82rem; padding:5px;" placeholder="100" />
-              <select v-model="additiveConfig.stockUnit" class="unit-select" style="max-width:56px;">
-                <option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option>
-              </select>
-            </div>
-          </div>
-          <!-- Volumes to add -->
-          <div class="input-group" style="margin:0;">
-            <label style="font-size:0.75rem;">Volumes to add (µL, comma-sep.)</label>
-            <input type="text" v-model="additiveConfig.volumesText" placeholder="1, 2, 5, 10" style="font-size:0.82rem; padding:5px; width:100%;" />
-          </div>
-        </div>
-
-        <!-- Summary line -->
-        <div style="font-size:0.76rem; opacity:0.65; margin-bottom:10px;">
-          <strong>{{ additiveBaseRows.length }}</strong> base rows × <strong>{{ additiveVolumes.length }}</strong> volumes
-          = <strong>{{ additivePreviewRows.length }}</strong> wells
-          | Base volume: <strong>{{ config.targetVolume }} µL</strong>
-          | Stock: <strong>{{ additiveConfig.stockConc }} {{ additiveConfig.stockUnit }}</strong>
-        </div>
-
-        <!-- Preview table (first 12 rows) -->
-        <div v-if="additivePreviewRows.length > 0" style="overflow-x:auto; margin-bottom:12px;">
-          <table class="ledger-table" style="font-size:0.74rem; min-width:600px;">
-            <thead>
-              <tr>
-                <th>Base ID</th>
-                <th>+Vol (µL)</th>
-                <th>{{ config.anionName || 'A' }} ({{ config.anionUnit }})</th>
-                <th>{{ config.cationName || 'B' }} ({{ config.cationUnit }})</th>
-                <th>{{ config.saltName || 'C' }} ({{ config.saltUnit }})</th>
-                <th v-if="config.enableCompD">{{ config.compDName || 'D' }} ({{ config.compDUnit }})</th>
-                <th>{{ additiveConfig.name || 'Additive' }} ({{ additiveConfig.stockUnit }})</th>
-                <th>Total (µL)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(row, ri) in additivePreviewRows.slice(0, 24)" :key="ri" :style="ri % additiveVolumes.length === 0 ? 'border-top:2px solid var(--border-color,#e2e8f0);' : ''">
-                <td style="opacity:0.6;">{{ row._baseId }}</td>
-                <td><strong>{{ row._vAdd }}</strong></td>
-                <td>{{ row.anion }}</td>
-                <td>{{ row.cation }}</td>
-                <td>{{ row.salt }}</td>
-                <td v-if="config.enableCompD">{{ row.compD }}</td>
-                <td style="color:#f59e0b; font-weight:600;">{{ row.additive }}</td>
-                <td style="opacity:0.6;">{{ row._totalVol }}</td>
-              </tr>
-              <tr v-if="additivePreviewRows.length > 24">
-                <td :colspan="config.enableCompD ? 8 : 7" style="text-align:center; opacity:0.45; font-style:italic;">
-                  … {{ additivePreviewRows.length - 24 }} more rows not shown
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Export controls -->
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <span style="font-size:0.82rem; font-weight:600; opacity:0.7;">Export additive wells:</span>
-          <select v-model="targetPlateId" class="compact-select">
-            <option value="" disabled>Select Plate…</option>
-            <option v-for="p in store.wellPlates" :key="p.id" :value="p.id">{{ p.name }}</option>
-          </select>
-          <input type="text" v-model="targetStartWell" placeholder="A1" class="compact-input" />
-          <button class="small" @click="exportAdditiveToPlate"
-            style="background:var(--wr); color:#fff; border:none; padding:4px 14px; border-radius:var(--rc); cursor:pointer; font-weight:600;">
-            <i class="fas fa-arrow-down"></i> Send to Plate
-          </button>
-          <span style="font-size:0.72rem; opacity:0.5;">
-            {{ additivePreviewRows.length }} wells → fills {{ Math.ceil(additivePreviewRows.length / 12) }} rows
-          </span>
-        </div>
-      </template>
     </div>
 
     <!-- ── Save conditions dialog (teleported to centre on the viewport) ── -->
@@ -1035,16 +1071,55 @@ const config = ref({
   dependencies: [],
   showDependencies: false,
   // Constant components — same final concentration in every well. Each:
-  // { id, name, conc, unit, stockConc, stockUnit }.
+  // { id, name, conc, unit, stockConc, stockUnit, inv, searchQuery, searchScope }.
   constants: [],
+  showConstants: false,
 })
 
 // ── Constant components (same in every well) ─────────────────────────────────
+// A constant is a real dosing step, so it is an inventory reference like every
+// other component: linking one makes the wellplate export write an inv-ref chip
+// instead of a plain label, which is what carries the compound through to the
+// lab journal, the usage log and the robot protocols. Free text still works for
+// anything that isn't stocked.
+// Units mirror InventoryManager's list so any stock unit can be represented.
+const CONST_UNITS = ['M', 'mM', 'µM', 'nM', 'mg/mL', 'µg/µL', 'ng/µL', 'X', 'U/µL', '%']
+
 const addConstant = () => {
   if (!config.value.constants) config.value.constants = []
-  config.value.constants.push({ id: 'k_' + (globalThis.crypto?.randomUUID?.() || Date.now().toString(36)), name: '', conc: 0, unit: 'mM', stockConc: 100, stockUnit: 'mM' })
+  config.value.constants.push({ id: 'k_' + (globalThis.crypto?.randomUUID?.() || Date.now().toString(36)), name: '', conc: 0, unit: 'mM', stockConc: 100, stockUnit: 'mM', inv: null, searchQuery: '', searchScope: 'Global' })
 }
 const removeConstant = (i) => { config.value.constants.splice(i, 1); renderPlot() }
+
+// Constants saved before the inventory link existed have no search fields — seed
+// them on first open rather than migrating, so old presets keep loading as-is.
+const toggleConstantDropdown = (k) => {
+  const key = 'const:' + k.id
+  if (activeDropdown.value === key) { activeDropdown.value = null; return }
+  if (!k.searchScope) k.searchScope = 'Global'
+  if (k.searchQuery === undefined) k.searchQuery = ''
+  activeDropdown.value = key
+}
+
+const selectConstantInventory = (k, inv) => {
+  k.inv = inv
+  k.name = inv.name
+  k.stockConc = inv.stock
+  k.stockUnit = inv.stockUnit || 'µM'
+  activeDropdown.value = null
+  renderPlot()
+}
+
+// Keeps the name so the well still says what was added, just untraceably.
+const unlinkConstant = (k) => { k.inv = null; renderPlot() }
+
+// Opening the 4th-component panel is what switches D on — one gesture, matching the
+// other disclosures, so there is no separate checkbox to drift out of sync with it.
+// D's configured range/stock survive a collapse; only the enable flag flips.
+const toggleCompD = () => {
+  config.value.enableCompD = !config.value.enableCompD
+  renderPlot()
+}
 
 // Current D-slice value for the 4th-component slider in the 3D scatter plot.
 // Points whose |compD − currentDSlice| ≤ compDStep/2 are shown in the scatter.
@@ -1370,7 +1445,9 @@ const computeWellVolumes = (sug) => {
 }
 
 // Apply component-dependency links to a (copied) experiment/suggestion object.
-// Formula (stored-unit arithmetic): target = source * factor + offset
+// Stored-unit arithmetic, two modes:
+//   fixed — target  = source * factor + offset
+//   range — target ∈ [source * factor + offset, source * factorMax + offsetMax]
 const COMP_KEYS = ['anion', 'cation', 'salt', 'compD']
 const compLabel = (key) => ({
   anion: () => config.value.anionName || 'A',
@@ -1379,11 +1456,42 @@ const compLabel = (key) => ({
   compD: () => config.value.compDName || 'D',
 }[key]?.() ?? key)
 
+// Nearest point on a component's own grid (min + n·step) inside [lo, hi], approached
+// from the given edge. Keeps a clamped value grid-locked like the rest of the plate;
+// falls back to the raw edge when the band is narrower than one step.
+const EPS = 1e-9
+const snapIntoBand = (key, edge, lo, hi) => {
+  const min  = Number(config.value[key + 'Min'])
+  const max  = Number(config.value[key + 'Max'])
+  const step = Number(config.value[key + 'Step'])
+  if (!isFinite(min) || !isFinite(step) || step <= 0) return edge
+  const n = edge <= lo
+    ? Math.ceil((lo - min) / step - EPS)
+    : Math.floor((hi - min) / step + EPS)
+  const snapped = min + n * step
+  if (snapped < lo - EPS || snapped > hi + EPS) return edge
+  if (isFinite(max) && (snapped < Math.min(min, max) - EPS || snapped > Math.max(min, max) + EPS)) return edge
+  return snapped
+}
+
 const applyDependencies = (exp) => {
   const deps = config.value.dependencies || []
   deps.forEach(dep => {
     if (!dep.source || !dep.target || dep.source === dep.target) return
     const srcVal = Number(exp[dep.source]) || 0
+    if (dep.mode === 'range') {
+      // A range link CONSTRAINS rather than determines: the engine's own value for the
+      // target is kept whenever it already sits inside the band, so the sweep still
+      // explores the target. Only out-of-band values are pulled to the nearer edge.
+      // Missing max coefficients fall back to the min side, collapsing to a fixed link.
+      const a = srcVal * (dep.factor ?? 1) + (dep.offset ?? 0)
+      const b = srcVal * (dep.factorMax ?? dep.factor ?? 1) + (dep.offsetMax ?? dep.offset ?? 0)
+      const lo = Math.min(a, b), hi = Math.max(a, b)
+      const cur = Number(exp[dep.target]) || 0
+      if (cur >= lo - EPS && cur <= hi + EPS) return
+      exp[dep.target] = +snapIntoBand(dep.target, cur < lo ? lo : hi, lo, hi).toFixed(6)
+      return
+    }
     exp[dep.target] = +(srcVal * (dep.factor ?? 1) + (dep.offset ?? 0)).toFixed(6)
   })
   return exp
@@ -1391,8 +1499,16 @@ const applyDependencies = (exp) => {
 
 const addDependency = () => {
   if (!config.value.dependencies) config.value.dependencies = []
-  config.value.dependencies.push({ source: 'salt', target: 'compD', factor: 1, offset: 0 })
+  config.value.dependencies.push({ source: 'salt', target: 'compD', mode: 'fixed', factor: 1, offset: 0, factorMax: 2, offsetMax: 0 })
   config.value.enableCompD = true
+}
+// Seeds the upper limit on first switch so a link saved before ranges existed —
+// or one left at its defaults — starts as a real band rather than a collapsed point.
+const setDependencyMode = (dep, mode) => {
+  dep.mode = mode
+  if (mode !== 'range') return
+  if (dep.factorMax === undefined || dep.factorMax === null) dep.factorMax = (dep.factor ?? 1) * 2
+  if (dep.offsetMax === undefined || dep.offsetMax === null) dep.offsetMax = dep.offset ?? 0
 }
 const removeDependency = (i) => { config.value.dependencies.splice(i, 1) }
 
@@ -1476,10 +1592,19 @@ const exportSuggestionsToPlate = () => {
                 ? getInventoryTag(config.value.compDInv, fmt(vD), effectiveSug.compD || 0)
                 : '';
 
+            // Constants are emitted in the same `chip → volume → (target conc)` shape as
+            // A–D, so the journal, the usage tracker and the robot exporters all read them
+            // the same way. A zero-volume constant gets the plain label instead: a chip
+            // would claim the compound was used in a well that never receives any.
+            // These lines stay AFTER the A/B/C(/D) rows — the platereader importer reads
+            // the first three "µL (x mM)" pairs back out as the component concentrations.
             let constHtml = '';
             (config.value.constants || []).forEach((k, ci) => {
                 const v = (constVols && constVols[ci]) || 0;
-                constHtml += `<strong>${esc(k.name || 'Constant')}:</strong> ${fmt(v)} µL (${esc(String(k.conc))} ${esc(k.unit)})<br>`;
+                const target = `(${esc(String(k.conc))} ${esc(k.unit)})`;
+                constHtml += (k.inv && v > 0)
+                    ? `&nbsp;${invChip(k.inv, { unit: k.stockUnit || 'µM', fmt: store.formatNum })}&nbsp; ${fmt(v)} µL ${target}<br>`
+                    : `<strong>${esc(k.name || 'Constant')}:</strong> ${fmt(v)} µL ${target}<br>`;
             });
 
             let cellHtml = `<strong style="color: var(--primary);">AI Target [${sug.sampleId}]</strong><br>
@@ -2215,10 +2340,12 @@ const onCsvFileSelected = async (event) => {
   const headers = lines[0].split(delimiter).map(s => s.trim().replace(/^﻿/, '').replace(/^["']|["']$/g, '').toLowerCase());
 
   let idxId = headers.findIndex(h => h === '' || h === 'index' || h === 'sampleid');
-  let idxA = headers.indexOf('anion');
-  let idxB = headers.indexOf('cation');
-  let idxC = headers.indexOf('salt');
-  let idxD = headers.findIndex(h => h === 'compd' || h === 'd');
+  // The components are labelled A/B/C in the UI; the older anion/cation/salt headers
+  // stay accepted so CSVs exported before the rename still import.
+  let idxA = headers.findIndex(h => h === 'a' || h === 'anion');
+  let idxB = headers.findIndex(h => h === 'b' || h === 'cation');
+  let idxC = headers.findIndex(h => h === 'c' || h === 'salt');
+  let idxD = headers.findIndex(h => h === 'd' || h === 'compd');
   let idxPhase = headers.indexOf('phase');
 
   if (idxId === -1) idxId = 0;
@@ -2254,7 +2381,7 @@ const onCsvFileSelected = async (event) => {
   }
 
   if (newKnowns.length === 0) {
-    alert('No valid rows found in the CSV. Check that columns Anion, Cation, Salt, Phase exist.');
+    alert('No valid rows found in the CSV. Check that columns A, B, C and Phase exist.');
     return;
   }
 
@@ -2411,8 +2538,10 @@ onMounted(async () => {
 .module-card { display: flex; flex-direction: column; gap: 10px; }
 
 /* Point-colour mode toggle (Distinct hues vs. intensity Gradient) */
-.color-mode-toggle { display: inline-flex; border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px; overflow: hidden; }
-.color-mode-toggle button { background: transparent; border: none; padding: 3px 9px; font-size: 0.72rem; cursor: pointer; color: inherit; opacity: 0.7; display: flex; align-items: center; gap: 4px; }
+/* flex-shrink:0 — the segmented control has no room to give; without it the label
+   text inside gets clipped by the wrapper's overflow:hidden when the row is tight. */
+.color-mode-toggle { display: inline-flex; flex-shrink: 0; border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px; overflow: hidden; }
+.color-mode-toggle button { background: transparent; border: none; padding: 3px 9px; font-size: 0.72rem; cursor: pointer; color: inherit; opacity: 0.7; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .color-mode-toggle button + button { border-left: 1px solid var(--border-color, #cbd5e1); }
 .color-mode-toggle button.active { background: var(--primary, #3b82f6); color: #fff; opacity: 1; }
 

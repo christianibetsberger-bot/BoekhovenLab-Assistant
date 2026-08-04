@@ -875,12 +875,12 @@
             </label>
           </div>
 
-          <div class="plot-area" :style="mapView === '3d' && fixedAxis ? 'display:grid; grid-template-columns:38fr 62fr; gap:2px; overflow:hidden;' : ''">
+          <div class="plot-area" :style="mapView === 'grid' ? 'overflow:auto;' : (fixedAxis ? 'display:grid; grid-template-columns:38fr 62fr; gap:2px; overflow:hidden;' : '')">
             <template v-if="mapView === '3d'">
               <div v-if="fixedAxis" id="phase-2d-plot" style="height:100%; min-width:0; overflow:hidden;"></div>
               <div id="phase-ternary-plot" :style="fixedAxis ? 'height:100%; min-width:0; overflow:hidden;' : 'width:100%; height:100%;'"></div>
             </template>
-            <div v-show="mapView === 'grid'" id="phase-slice-grid" style="width:100%; height:100%;"></div>
+            <div v-show="mapView === 'grid'" id="phase-slice-grid" style="width:100%;"></div>
           </div>
           <div v-if="config.enableCompD && mapView === '3d'" style="display:flex; align-items:center; gap:10px; margin-top:8px; padding:6px 10px; background:var(--summary-bg,#f1f5f9); border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.78rem;">
             <span style="font-weight:600; white-space:nowrap;">
@@ -1853,20 +1853,26 @@ const buildBins = (key, data) => {
   const n = Math.max(1, Math.min(4, gridBins.value))
   const vals = [...new Set(data.map(d => Number(d[key] ?? 0)).filter(v => isFinite(v)))].sort((a, b) => a - b)
 
+  // `value` is what each panel is labelled with; `label` keeps the component name
+  // for anywhere the bin is described on its own.
   if (vals.length && vals.length <= n) {
-    return vals.map(v => ({ exact: true, lo: v, hi: v, label: `${name} ${store.formatNum ? store.formatNum(v) : v} ${unit}` }))
+    return vals.map(v => ({ exact: true, lo: v, hi: v, value: `${+v.toFixed(3)}`, label: `${name} ${+v.toFixed(3)} ${unit}` }))
   }
   if (!isFinite(lo) || !isFinite(hi) || hi <= lo) {
-    return [{ exact: false, lo: -Infinity, hi: Infinity, label: name }]
+    return [{ exact: false, lo: -Infinity, hi: Infinity, value: 'all', label: name }]
   }
   const step = (hi - lo) / n
-  const round = v => +v.toFixed(3)
-  return Array.from({ length: n }, (_, i) => ({
-    exact: false,
-    lo: lo + i * step,
-    hi: i === n - 1 ? hi : lo + (i + 1) * step,
-    label: `${name} ${round(lo + i * step)}–${round(i === n - 1 ? hi : lo + (i + 1) * step)} ${unit}`
-  }))
+  // Label the edges at the precision the component is dosed at — "5–33.333" is a
+  // consequence of dividing by three, not a concentration anyone pipettes.
+  const dose = Number(config.value[key + 'Step'])
+  const dec = !isFinite(dose) || dose <= 0 ? 1 : Math.min(3, Math.max(0, Math.ceil(-Math.log10(dose))))
+  const round = v => +v.toFixed(dec)
+  return Array.from({ length: n }, (_, i) => {
+    const bLo = round(lo + i * step)
+    const bHi = round(i === n - 1 ? hi : lo + (i + 1) * step)
+    return { exact: false, lo: lo + i * step, hi: i === n - 1 ? hi : lo + (i + 1) * step,
+             value: `${bLo}–${bHi}`, label: `${name} ${bLo}–${bHi} ${unit}` }
+  })
 }
 
 // Half-open bins ([lo, hi) except the last, which closes) so a well sitting exactly
@@ -1892,18 +1898,67 @@ const renderSliceGrid = () => {
 
   const xLabel = `${compLabel(xKey)} (${config.value[xKey + 'Unit'] || ''})`
   const yLabel = `${compLabel(yKey)} (${config.value[yKey + 'Unit'] || ''})`
-  const xRange = [Number(config.value[xKey + 'Min']), Number(config.value[xKey + 'Max'])]
-  const yRange = [Number(config.value[yKey + 'Min']), Number(config.value[yKey + 'Max'])]
+
+  // Ticks sit on the values the screen actually visited, not on Plotly's round
+  // numbers — so the axis itself tells you which concentrations were pipetted.
+  // Every visited value gets a gridline; only every k-th gets a label, which is
+  // what stops the numbers from colliding on a small panel.
+  const screenedTicks = (key, maxLabels) => {
+    // Logged wells define the lattice — proposals are not screened concentrations
+    // yet, and letting them add ticks would answer the wrong question.
+    const source = experiments.value.length ? experiments.value : data
+    const vals = [...new Set(source.map(d => Number(d[key])).filter(v => isFinite(v)))].sort((a, b) => a - b)
+    if (!vals.length || vals.length > 24) return null
+    const stride = Math.ceil(vals.length / maxLabels)
+    const last = vals.length - 1
+    // The last value is labelled too, but only when it isn't crowding the label
+    // before it — otherwise "27.5" and "30" end up shoulder to shoulder.
+    const labelLast = last % stride !== 0 && last - Math.floor(last / stride) * stride >= stride / 2
+    return {
+      tickmode: 'array',
+      tickvals: vals,
+      ticktext: vals.map((v, i) => (i % stride === 0 || (i === last && labelLast)) ? String(+v.toFixed(3)) : '')
+    }
+  }
+  const pad = (key, vals) => {
+    const lo = Number(config.value[key + 'Min']), hi = Number(config.value[key + 'Max'])
+    if (!vals || !vals.length) return [lo, hi]
+    const dLo = Math.min(lo, ...vals), dHi = Math.max(hi, ...vals)
+    const m = (dHi - dLo) * 0.06 || 1
+    return [dLo - m, dHi + m]
+  }
+  const xTicks = screenedTicks(xKey, 4)
+  const yTicks = screenedTicks(yKey, 4)
+  const xRange = pad(xKey, xTicks?.tickvals)
+  const yRange = pad(yKey, yTicks?.tickvals)
 
   const C = colBins.length, R = rowBins.length
-  const gapX = C > 1 ? 0.035 : 0, gapY = R > 1 ? 0.075 : 0
+  // Panels get a floor height so labels always have room; the container scrolls
+  // rather than squeezing nine panels into whatever height is left over.
+  const H = Math.max(380, R * 215 + 140)
+  div.style.height = H + 'px'
+
+  // Marker size follows the busiest panel: at plate densities the dots have to be
+  // small enough that the screened lattice still shows through them.
+  const busiest = Math.max(1, ...(function () {
+    const counts = []
+    ;(rowBins.length ? rowBins : [null]).forEach(rb => (colBins.length ? colBins : [null]).forEach(cb => {
+      counts.push(data.filter(d => (!cb || inBin(d[cb.key], cb)) && (!rb || inBin(d[rb.key], rb))).length)
+    }))
+    return counts
+  })())
+  const dotSize = busiest > 200 ? 4 : busiest > 90 ? 5 : busiest > 40 ? 6 : 7.5
+
+  const gapX = C > 1 ? 0.06 : 0, gapY = R > 1 ? 0.14 : 0
   const traces = []
   const layout = {
+    height: H,
     paper_bgcolor: '#000000',
     plot_bgcolor: '#0b0b0b',
-    margin: { l: 58, r: R > 1 ? 96 : 20, t: C > 1 ? 26 : 10, b: 66 },
+    margin: { l: 74, r: R > 1 ? 86 : 26, t: C > 1 ? 52 : 18, b: 84 },
     showlegend: true,
-    legend: { orientation: 'h', y: -0.14, x: 0.5, xanchor: 'center', font: { color: '#ffffff', size: 10 } },
+    legend: { orientation: 'h', y: -0.13, yanchor: 'top', x: 0.5, xanchor: 'center',
+              font: { color: '#ffffff', size: 10 } },
     annotations: [],
     hovermode: 'closest'
   }
@@ -1919,19 +1974,30 @@ const renderSliceGrid = () => {
       const yDom = [yBot + gapY / 2, yTop - gapY / 2]
       const bottomRow = ri === R - 1, leftCol = ci === 0
 
+      // Axis titles are drawn once for the whole grid as annotations below, so a
+      // per-panel title can never collide with a neighbour's tick labels.
       layout['xaxis' + (n === 1 ? '' : n)] = {
-        domain: xDom, anchor: ay, range: xRange, gridcolor: '#2a2a2a', zerolinecolor: '#444',
-        tickfont: { color: '#bbbbbb', size: 9 }, showticklabels: bottomRow,
-        title: bottomRow && ci === Math.floor((C - 1) / 2) ? { text: xLabel, font: { color: '#ffffff', size: 11 } } : undefined
+        domain: xDom, anchor: ay, range: xRange, gridcolor: '#242424', zerolinecolor: '#3a3a3a',
+        tickfont: { color: '#b8b8b8', size: 8.5 }, showticklabels: bottomRow, ticklen: 3,
+        ...(xTicks || {})
       }
       layout['yaxis' + (n === 1 ? '' : n)] = {
-        domain: yDom, anchor: ax, range: yRange, gridcolor: '#2a2a2a', zerolinecolor: '#444',
-        tickfont: { color: '#bbbbbb', size: 9 }, showticklabels: leftCol,
-        title: leftCol && ri === Math.floor((R - 1) / 2) ? { text: yLabel, font: { color: '#ffffff', size: 11 } } : undefined
+        domain: yDom, anchor: ax, range: yRange, gridcolor: '#242424', zerolinecolor: '#3a3a3a',
+        tickfont: { color: '#b8b8b8', size: 8.5 }, showticklabels: leftCol, ticklen: 3,
+        ...(yTicks || {})
       }
 
       const cell = data.filter(d =>
         (!cBin || inBin(d[cBin.key], cBin)) && (!rBin || inBin(d[rBin.key], rBin)))
+
+      // Plotly only draws an axis that something is plotted on, so an empty panel
+      // would lose its frame and gridlines and the grid would look broken where
+      // coverage is missing. This invisible point keeps every panel a panel.
+      traces.push({
+        type: 'scatter', mode: 'markers', xaxis: ax, yaxis: ay,
+        x: [xRange[0]], y: [yRange[0]], hoverinfo: 'skip', showlegend: false,
+        marker: { size: 0.1, color: 'rgba(0,0,0,0)' }
+      })
 
       const byPhase = {}
       const targets = { x: [], y: [], text: [] }
@@ -1953,8 +2019,8 @@ const renderSliceGrid = () => {
         traces.push({
           type: 'scatter', mode: 'markers', xaxis: ax, yaxis: ay,
           x: byPhase[p].x, y: byPhase[p].y, text: byPhase[p].text, hoverinfo: 'text',
-          name: phaseNames[pid] || `Phase ${pid}`, legendgroup: 'phase' + pid, showlegend: first,
-          marker: { color: getPhaseColor(pid), size: 7, line: { color: '#000', width: 0.5 } }
+          name: phaseNames[pid] || `Phase ${pid}`, legendgroup: 'phase' + pid, showlegend: first, legendrank: pid + 1,
+          marker: { color: getPhaseColor(pid), size: dotSize, line: { color: '#000', width: 0.4 } }
         })
       })
       if (targets.x.length) {
@@ -1963,20 +2029,22 @@ const renderSliceGrid = () => {
         traces.push({
           type: 'scatter', mode: 'markers', xaxis: ax, yaxis: ay,
           x: targets.x, y: targets.y, text: targets.text, hoverinfo: 'text',
-          name: 'AI Target', legendgroup: 'target', showlegend: first,
-          marker: { color: getPhaseColor(-1), size: 6, symbol: 'cross' }
+          name: 'AI Target', legendgroup: 'target', showlegend: first, legendrank: 99,
+          marker: { color: getPhaseColor(-1), size: Math.max(4, dotSize - 1), symbol: 'cross' }
         })
       }
 
+      // Panel labels carry the value only — the component's name is stated once
+      // for the whole row of panels, so nine panels don't repeat it nine times.
       if (ri === 0 && cBin) {
-        layout.annotations.push({ text: cBin.label, xref: 'paper', yref: 'paper',
-          x: (xDom[0] + xDom[1]) / 2, y: 1.012, xanchor: 'center', yanchor: 'bottom',
+        layout.annotations.push({ text: cBin.value, xref: 'paper', yref: 'paper',
+          x: (xDom[0] + xDom[1]) / 2, y: 1.008, xanchor: 'center', yanchor: 'bottom',
           showarrow: false, font: { color: '#e2e8f0', size: 10 } })
       }
       if (ci === C - 1 && rBin) {
-        layout.annotations.push({ text: rBin.label, xref: 'paper', yref: 'paper',
-          x: 1.008, y: (yDom[0] + yDom[1]) / 2, xanchor: 'left', yanchor: 'middle',
-          showarrow: false, textangle: 90, font: { color: '#e2e8f0', size: 10 } })
+        layout.annotations.push({ text: rBin.value, xref: 'paper', yref: 'paper',
+          x: 1.006, y: (yDom[0] + yDom[1]) / 2, xanchor: 'left', yanchor: 'middle',
+          showarrow: false, font: { color: '#e2e8f0', size: 10 } })
       }
       if (!cell.length) {
         layout.annotations.push({ text: 'no wells', xref: 'paper', yref: 'paper',
@@ -1985,6 +2053,27 @@ const renderSliceGrid = () => {
       }
     })
   })
+
+  // One title per axis of the grid, and one per facet dimension — placed in the
+  // margins, where nothing else is competing for the space.
+  layout.annotations.push(
+    { text: xLabel, xref: 'paper', yref: 'paper', x: 0.5, y: -0.055, xanchor: 'center', yanchor: 'top',
+      showarrow: false, font: { color: '#ffffff', size: 11 } },
+    { text: yLabel, xref: 'paper', yref: 'paper', x: -0.055, y: 0.5, xanchor: 'right', yanchor: 'middle',
+      showarrow: false, textangle: -90, font: { color: '#ffffff', size: 11 } }
+  )
+  if (facets[0]) {
+    layout.annotations.push({
+      text: `${compLabel(facets[0])} (${config.value[facets[0] + 'Unit'] || ''}) →`,
+      xref: 'paper', yref: 'paper', x: 0.5, y: 1.055, xanchor: 'center', yanchor: 'bottom',
+      showarrow: false, font: { color: '#8ea0b5', size: 10 } })
+  }
+  if (facets[1]) {
+    layout.annotations.push({
+      text: `${compLabel(facets[1])} (${config.value[facets[1] + 'Unit'] || ''}) ↓`,
+      xref: 'paper', yref: 'paper', x: 1.052, y: 0.5, xanchor: 'left', yanchor: 'middle',
+      showarrow: false, textangle: 90, font: { color: '#8ea0b5', size: 10 } })
+  }
 
   Plotly.react('phase-slice-grid', traces, layout, { displayModeBar: false, responsive: true })
 }

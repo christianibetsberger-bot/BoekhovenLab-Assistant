@@ -292,7 +292,7 @@
               @click="config.showMediumSettings = !config.showMediumSettings"
               style="width:100%; text-align:left; background:transparent; border:1px dashed var(--border-color,#cbd5e1); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
               <i class="fas" :class="config.showMediumSettings ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
-              <span title="Background Na⁺ from the solvents is subtracted from the Component C volume on export so the final concentration is met exactly. Volume-weighted H⁺ mixing gives the per-well pH estimate.">Advanced: solvents · background Na⁺ · pH</span>
+              <span title="Analysis only: reports the Na⁺ each well carries from the component solvents and the fill-up, and estimates the well pH from volume-weighted H⁺ mixing. Pipetted volumes are not affected.">Advanced: solvents · background Na⁺ · pH</span>
             </button>
 
             <div v-if="config.showMediumSettings" style="margin-top:8px; padding:12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.8rem; display:flex; flex-direction:column; gap:10px;">
@@ -426,27 +426,9 @@
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
               </div>
 
-              <!-- Na⁺ balance: only meaningful when C really is the sodium salt -->
-              <div style="border-top:1px solid var(--border-color,#e2e8f0); padding-top:8px; display:flex; flex-direction:column; gap:3px;">
-                <label class="checkbox-label" style="font-size:0.78rem;">
-                  <input type="checkbox" :checked="config.balanceNaOnC !== false"
-                    @change="config.balanceNaOnC = $event.target.checked; renderPlot()">
-                  <span>{{ config.saltName || 'Component C' }} is the well's Na⁺ source — subtract background Na⁺ from its volume</span>
-                </label>
-                <span style="font-size:0.7rem; opacity:0.55; padding-left:24px;">
-                  Leave this on when C is NaCl or another sodium salt and its concentration means total Na⁺.
-                  Turn it off when C is a compound in its own right — otherwise the buffers' Na⁺ is subtracted
-                  from something that never carried it, and C's pipetted volume comes out at 0 µL or above the well volume.
-                </span>
-                <span v-if="suggestions.length > 0 && computeWellVolumes(suggestions[0]).cStarved" style="font-size:0.72rem; color:#ef4444; padding-left:24px;">
-                  ⚠️ Right now this drives {{ config.saltName || 'C' }} to 0 µL (plain dilution would be
-                  {{ computeWellVolumes(suggestions[0]).plainC.toFixed(2) }} µL) — the background Na⁺ already exceeds the target.
-                </span>
-                <span v-else-if="suggestions.length > 0 && computeWellVolumes(suggestions[0]).cRunaway" style="font-size:0.72rem; color:#ef4444; padding-left:24px;">
-                  ⚠️ Right now this asks for {{ computeWellVolumes(suggestions[0]).vC.toFixed(2) }} µL of
-                  {{ config.saltName || 'C' }} in a {{ config.targetVolume }} µL well (plain dilution would be
-                  {{ computeWellVolumes(suggestions[0]).plainC.toFixed(2) }} µL).
-                </span>
+              <div style="border-top:1px solid var(--border-color,#e2e8f0); padding-top:8px; font-size:0.7rem; opacity:0.6;">
+                These solvent settings are read-only analysis: they report the Na⁺ each well carries from the
+                buffers and estimate its pH. Pipetted volumes are always the plain dilution from each stock.
               </div>
 
               <!-- Live preview for first suggestion -->
@@ -456,8 +438,7 @@
                   <div style="font-size:0.78rem; display:flex; gap:16px; flex-wrap:wrap;">
                     <span>A: <strong>{{ computeWellVolumes(suggestions[0]).vA.toFixed(2) }} µL</strong></span>
                     <span>B: <strong>{{ computeWellVolumes(suggestions[0]).vB.toFixed(2) }} µL</strong></span>
-                    <span>C{{ computeWellVolumes(suggestions[0]).naBalanceApplied ? ' (Na⁺-adj.)' : '' }}:
-                      <strong :style="computeWellVolumes(suggestions[0]).cStarved || computeWellVolumes(suggestions[0]).cRunaway ? 'color:#ef4444;' : ''">{{ computeWellVolumes(suggestions[0]).vC.toFixed(2) }} µL</strong></span>
+                    <span>C: <strong>{{ computeWellVolumes(suggestions[0]).vC.toFixed(2) }} µL</strong></span>
                     <span v-if="computeWellVolumes(suggestions[0]).vConst > 0.001">Const: <strong>{{ computeWellVolumes(suggestions[0]).vConst.toFixed(2) }} µL</strong></span>
                     <span>Fill: <strong>{{ computeWellVolumes(suggestions[0]).vFill.toFixed(2) }} µL</strong></span>
                     <span v-if="computeWellVolumes(suggestions[0]).backgroundNa_mM > 0.001" style="color:#f59e0b;">
@@ -1100,10 +1081,8 @@ const config = ref({
   strategy: 'safe',
   numSuggestions: 96,
   minDistanceFactor: 0.05,
-  // Advanced medium / background salt / pH settings
+  // Advanced medium / background salt / pH settings — reporting only, never volumes.
   showMediumSettings: false,
-  // Only true when component C is the sodium salt whose concentration means total Na⁺.
-  balanceNaOnC: true,
   anionMedium:  { type: 'water', bufName: '', naMM: 0, pH: 7.0, bufferId: null },
   cationMedium: { type: 'water', bufName: '', naMM: 0, pH: 7.0, bufferId: null },
   saltMedium:   { type: 'water', bufName: '', naMM: 0, pH: 7.0, bufferId: null },
@@ -1429,35 +1408,13 @@ const computeWellVolumes = (sug) => {
   const naC    = medC.type    === 'buffer' ? (medC.naMM    || 0) : 0
   const naFill = medFill.type === 'buffer' ? (medFill.naMM || 0) : 0
 
-  const hasBackground = naA > 0 || naB > 0 || naC > 0 || naFill > 0
-
-  // The Na⁺ balance reads component C's target as a target for TOTAL Na⁺ in the well
-  // and subtracts what the buffers already bring — right when C is the sodium salt
-  // being screened, nonsense when C is anything else (an RNA, a polymer, a dye). It
-  // used to engage on its own as soon as any solvent was a buffer, which silently
-  // drove C's volume to 0 (background above the target) or past the well volume
-  // (Na⁺-rich fill-up). Opt-in now, defaulting to on so saved screens are unchanged.
-  const balanceNa = cfg.balanceNaOnC !== false
-  const plainC = cfg.stockSalt > 0 ? (sug.salt * V) / cfg.stockSalt : 0
-
-  let vC = plainC
-  let naBalanceApplied = false
-  if (balanceNa && hasBackground && cfg.stockSalt > 0) {
-    // Solve for vC so that total Na+ in well equals target:
-    //   target_Na*V = vA*naA + vB*naB + vC*(stockSalt_mM + naC) + (V-vA-vB-vC)*naFill
-    const stockC_mM = getMM(cfg.stockSalt, cfg.saltUnit)
-    const targetNa  = getMM(sug.salt,      cfg.saltUnit)
-    const denom = stockC_mM + naC - naFill
-    if (denom !== 0) {
-      const numer = (targetNa - naFill) * V - vA * (naA - naFill) - vB * (naB - naFill)
-      vC = Math.max(0, numer / denom)
-      naBalanceApplied = true
-    }
-  }
-  // Flagged rather than silently accepted: a zeroed or runaway C volume means the
-  // Na⁺ balance is being asked to do something the chemistry does not support.
-  const cStarved = naBalanceApplied && plainC > 0.001 && vC < 0.001
-  const cRunaway = naBalanceApplied && vC > V
+  // Every component is a plain dilution from its stock: c_target · V / c_stock.
+  // The solvent Na⁺ figures below are REPORTING ONLY — they say how much sodium each
+  // well carries from the buffers, and never change a pipetted volume. (They used to:
+  // C's volume was solved so the well's total Na⁺ hit C's target, which is only
+  // meaningful if C is itself the sodium salt. With anything else in that slot —
+  // pU, a polymer, a dye — it silently pipetted 0 µL, or more stock than the well holds.)
+  const vC = cfg.stockSalt > 0 ? (sug.salt * V) / cfg.stockSalt : 0
 
   // Constant components — the same final concentration in every well. Each adds a
   // fixed volume that reduces the fill-up. (Treated as inert for the Na⁺ balance;
@@ -1497,8 +1454,7 @@ const computeWellVolumes = (sug) => {
     mixedPH = +((-Math.log10(totalH / V)).toFixed(2))
   }
 
-  return { vA, vB, vC, vD, vConst, constVols, vFill: Math.max(0, vFill), backgroundNa_mM, mixedPH,
-           exceeds: vFill < 0, naBalanceApplied, plainC, cStarved, cRunaway }
+  return { vA, vB, vC, vD, vConst, constVols, vFill: Math.max(0, vFill), backgroundNa_mM, mixedPH, exceeds: vFill < 0 }
 }
 
 // Apply component-dependency links to a (copied) experiment/suggestion object.
@@ -1652,7 +1608,6 @@ const exportSuggestionsToPlate = () => {
     };
     
     const fmt = n => Number(n).toFixed(2)
-    const naIssues = { starved: 0, runaway: 0 }
     suggestions.value.forEach((sug, i) => {
         let rOffset = Math.floor((startCol + i) / 12);
         let cOffset = (startCol + i) % 12;
@@ -1664,11 +1619,9 @@ const exportSuggestionsToPlate = () => {
             let wId = String.fromCharCode(65 + targetR) + (targetC + 1);
 
             const effectiveSug = applyDependencies({ ...sug })
-            const { vA, vB, vC, vD, vFill, constVols, backgroundNa_mM, mixedPH, exceeds, cStarved, cRunaway } = computeWellVolumes(effectiveSug)
+            const { vA, vB, vC, vD, vFill, constVols, backgroundNa_mM, mixedPH, exceeds } = computeWellVolumes(effectiveSug)
 
             let warningHtml = exceeds ? `<br><span style="color:#ef4444; font-size:0.7rem;">⚠️ Vol Exceeds Limit</span>` : '';
-            if (cStarved) { naIssues.starved++; warningHtml += `<br><span style="color:#ef4444; font-size:0.7rem;">⚠️ ${esc(config.value.saltName || 'C')} 0 µL — background Na⁺ above target</span>`; }
-            else if (cRunaway) { naIssues.runaway++; warningHtml += `<br><span style="color:#ef4444; font-size:0.7rem;">⚠️ ${esc(config.value.saltName || 'C')} volume exceeds the well</span>`; }
 
             let bgHtml = ''
             if (backgroundNa_mM > 0.001) {
@@ -1717,14 +1670,11 @@ const exportSuggestionsToPlate = () => {
             plate.wells[wId] = cellHtml;
         }
     });
-    const cName = config.value.saltName || 'Component C'
-    let naMsg = ''
-    if (naIssues.starved) naMsg = `\n\n⚠️ ${naIssues.starved} well(s) got 0 µL of ${cName}: the Na⁺ balance subtracted more background Na⁺ than the target concentration. If ${cName} is not a sodium salt, untick "${cName} is the well's Na⁺ source" under Advanced and export again.`
-    else if (naIssues.runaway) naMsg = `\n\n⚠️ ${naIssues.runaway} well(s) ask for more ${cName} than the well holds, for the same reason. Check the same setting under Advanced.`
-    alert(`Successfully sent pipetting volumes to Plate: ${plate.name} starting at ${startWell}${naMsg}`);
+    alert(`Successfully sent pipetting volumes to Plate: ${plate.name} starting at ${startWell}`);
 }
 
 const renderPlot = () => {
+
   const plotDiv = document.getElementById('phase-ternary-plot')
   if (!plotDiv) return
 

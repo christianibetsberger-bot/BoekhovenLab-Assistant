@@ -264,7 +264,16 @@
                   <span style="opacity:0.5; font-size:0.7rem;">+</span>
                   <input type="number" v-model.number="dep.offsetMax" step="any" style="font-size:0.78rem; padding:3px 5px; width:56px;" placeholder="offset" title="Upper-limit offset (target unit)">
                 </template>
+                <label v-if="(dep.mode || 'fixed') !== 'range'" class="checkbox-label" style="font-size:0.7rem; opacity:0.75; gap:4px;"
+                  :title="'Off (default): the ratio is kept exactly, so ' + compLabel(dep.target) + ' follows ' + compLabel(dep.source) + '\'s step. On: the derived value is rounded onto ' + compLabel(dep.target) + '\'s own step grid, which breaks the exact ratio.'">
+                  <input type="checkbox" v-model="dep.snapStep"> snap to step
+                </label>
                 <button @click="removeDependency(di)" style="background:none; border:none; cursor:pointer; color:#ef4444; font-size:0.85rem; padding:0 4px; margin-left:auto;" title="Remove link">✕</button>
+              </div>
+
+              <div v-if="config.dependencies && config.dependencies.length" style="font-size:0.7rem; opacity:0.55; line-height:1.5;">
+                A linked component is no longer swept independently: the engine only offers wells the link allows,
+                so its own min/max still bound it but its step no longer sets its spacing (unless “snap to step” is on).
               </div>
 
               <div v-if="!config.dependencies || config.dependencies.length === 0" style="font-size:0.75rem; opacity:0.45; text-align:center; padding:4px 0;">
@@ -880,6 +889,13 @@
             <span>{{ isCalculating ? 'Calculating...' : 'Auto-Suggest Grid-Locked Plate' }}</span>
           </button>
 
+          <div v-if="suggestionNotes.length" style="margin-bottom:10px; padding:8px 10px; border-radius:6px; border:1px solid rgba(217,119,6,0.35); background:rgba(217,119,6,0.07); font-size:0.75rem; line-height:1.5;">
+            <div style="font-weight:700; opacity:0.75; margin-bottom:2px;">
+              <i class="fas fa-triangle-exclamation" style="opacity:0.7;"></i> Engine notes
+            </div>
+            <div v-for="(note, i) in suggestionNotes" :key="i" style="opacity:0.85;">· {{ note }}</div>
+          </div>
+
           <div class="suggestions-container" v-if="suggestions.length > 0">
             <div class="flex-between" style="margin-bottom: 5px;">
               <h4 class="priority-label" style="margin-bottom: 0; border: none; padding: 0;">AI Target Queue:</h4>
@@ -1135,6 +1151,9 @@ const fixedAxis = computed(() => {
 
 const experiments = ref([])
 const suggestions = ref([])
+// What the engine had to do to satisfy the ranges/steps/links — shown under the queue
+// so a thinned grid or a link that removed wells is never silent.
+const suggestionNotes = ref([])
 const isCalculating = ref(false)
 
 // ─── Additive Layer ────────────────────────────────────────────────────────
@@ -1456,25 +1475,47 @@ const compLabel = (key) => ({
   compD: () => config.value.compDName || 'D',
 }[key]?.() ?? key)
 
+// A component's own [min, max], ordered.
+const EPS = 1e-9
+const axisBounds = (key) => {
+  const a = Number(config.value[key + 'Min'])
+  const b = Number(config.value[key + 'Max'])
+  if (!isFinite(a) || !isFinite(b)) return null
+  return { lo: Math.min(a, b), hi: Math.max(a, b) }
+}
+
+// Never let a linked value leave the component's configured range — an out-of-range
+// concentration here is pipetted for real by the plate export.
+const clampToAxis = (key, v) => {
+  const b = axisBounds(key)
+  if (!b) return v
+  return Math.min(Math.max(v, b.lo), b.hi)
+}
+
 // Nearest point on a component's own grid (min + n·step) inside [lo, hi], approached
 // from the given edge. Keeps a clamped value grid-locked like the rest of the plate;
-// falls back to the raw edge when the band is narrower than one step.
-const EPS = 1e-9
+// when the band is narrower than one step, fall back to the edge clamped into the
+// component's own range rather than to the raw edge (which can sit far outside it).
 const snapIntoBand = (key, edge, lo, hi) => {
   const min  = Number(config.value[key + 'Min'])
-  const max  = Number(config.value[key + 'Max'])
   const step = Number(config.value[key + 'Step'])
-  if (!isFinite(min) || !isFinite(step) || step <= 0) return edge
+  const b    = axisBounds(key)
+  if (!isFinite(min) || !isFinite(step) || step <= 0) return clampToAxis(key, edge)
   const n = edge <= lo
     ? Math.ceil((lo - min) / step - EPS)
     : Math.floor((hi - min) / step + EPS)
   const snapped = min + n * step
-  if (snapped < lo - EPS || snapped > hi + EPS) return edge
-  if (isFinite(max) && (snapped < Math.min(min, max) - EPS || snapped > Math.max(min, max) + EPS)) return edge
+  if (snapped < lo - EPS || snapped > hi + EPS) return clampToAxis(key, edge)
+  if (b && (snapped < b.lo - EPS || snapped > b.hi + EPS)) return clampToAxis(key, edge)
   return snapped
 }
 
-const applyDependencies = (exp) => {
+// The engine now builds its candidate grid on the linked manifold, so for suggestions
+// this is a safety net that should change nothing. It still matters for hand-entered
+// rows and for suggestions from an older backend, and it is what guarantees no linked
+// value ever leaves its component's configured range.
+// `clamped` counts values that had to be pulled back into range — the caller reports it.
+const applyDependencies = (exp, stats = null) => {
   const deps = config.value.dependencies || []
   deps.forEach(dep => {
     if (!dep.source || !dep.target || dep.source === dep.target) return
@@ -1486,20 +1527,39 @@ const applyDependencies = (exp) => {
       // Missing max coefficients fall back to the min side, collapsing to a fixed link.
       const a = srcVal * (dep.factor ?? 1) + (dep.offset ?? 0)
       const b = srcVal * (dep.factorMax ?? dep.factor ?? 1) + (dep.offsetMax ?? dep.offset ?? 0)
-      const lo = Math.min(a, b), hi = Math.max(a, b)
+      // The band only means anything where it overlaps the component's own range.
+      const bounds = axisBounds(dep.target)
+      let lo = Math.min(a, b), hi = Math.max(a, b)
+      if (bounds) { lo = Math.max(lo, bounds.lo); hi = Math.min(hi, bounds.hi) }
       const cur = Number(exp[dep.target]) || 0
+      if (lo > hi) { // band and range do not overlap at all — stay inside the range
+        if (stats) stats.clamped++
+        exp[dep.target] = +clampToAxis(dep.target, cur).toFixed(6)
+        return
+      }
       if (cur >= lo - EPS && cur <= hi + EPS) return
+      if (stats) stats.clamped++
       exp[dep.target] = +snapIntoBand(dep.target, cur < lo ? lo : hi, lo, hi).toFixed(6)
       return
     }
-    exp[dep.target] = +(srcVal * (dep.factor ?? 1) + (dep.offset ?? 0)).toFixed(6)
+    // Fixed link: the ratio determines the target. `snapStep` trades ratio accuracy
+    // for a target that also sits on its own step grid.
+    let val = srcVal * (dep.factor ?? 1) + (dep.offset ?? 0)
+    if (dep.snapStep) {
+      const min  = Number(config.value[dep.target + 'Min'])
+      const step = Number(config.value[dep.target + 'Step'])
+      if (isFinite(min) && isFinite(step) && step > 0) val = min + Math.round((val - min) / step) * step
+    }
+    const clamped = clampToAxis(dep.target, val)
+    if (stats && Math.abs(clamped - val) > EPS) stats.clamped++
+    exp[dep.target] = +clamped.toFixed(6)
   })
   return exp
 }
 
 const addDependency = () => {
   if (!config.value.dependencies) config.value.dependencies = []
-  config.value.dependencies.push({ source: 'salt', target: 'compD', mode: 'fixed', factor: 1, offset: 0, factorMax: 2, offsetMax: 0 })
+  config.value.dependencies.push({ source: 'salt', target: 'compD', mode: 'fixed', factor: 1, offset: 0, factorMax: 2, offsetMax: 0, snapStep: false })
   config.value.enableCompD = true
 }
 // Seeds the upper limit on first switch so a link saved before ranges existed —
@@ -1964,6 +2024,7 @@ const clearLedger = () => {
   if (!confirm('Clear all data points from the workspace? Saved datasets are not affected.')) return
   experiments.value = []
   suggestions.value = []
+  suggestionNotes.value = []
   boundaryData.value = null
   renderPlot()
 }
@@ -1977,6 +2038,7 @@ const importSuggestion = (sug) => {
 const importAllSuggestions = () => {
   experiments.value.push(...suggestions.value.map(s => ({ ...s })))
   suggestions.value = []
+  suggestionNotes.value = []
   renderPlot()
 }
 
@@ -2486,17 +2548,18 @@ const exportPlot = () => {
 }
 
 const calculateNextExperiments = async () => {
-  isCalculating.value = true; 
-  suggestions.value = []; 
-  
-  let maxId = 8999; 
+  isCalculating.value = true;
+  suggestions.value = [];
+  suggestionNotes.value = []
+
+  let maxId = 8999;
   experiments.value.forEach(e => {
     if (e.sampleId && !isNaN(e.sampleId) && e.sampleId > maxId) {
       maxId = e.sampleId;
     }
   });
   const nextStartId = maxId + 1;
-  
+
   try {
     const response = await fetch('https://experiment-backend-s71q.onrender.com/api/suggest-experiments', {
       method: 'POST',
@@ -2508,15 +2571,42 @@ const calculateNextExperiments = async () => {
         start_id: nextStartId
       })
     });
-    
-    if (!response.ok) throw new Error('Backend responded with an error.');
-    
+
+    // A 4xx/5xx is the engine talking, not a dead server — show what it said.
+    if (!response.ok) {
+      const body = await response.json().catch(() => null)
+      throw new Error(body?.error || `Engine returned HTTP ${response.status}. A very fine step over a wide range can exceed its memory — try a coarser step.`)
+    }
+
     const data = await response.json();
-    suggestions.value = data.suggestions.map(s => applyDependencies({ ...s }));
-    
+    const stats = { clamped: 0 }
+    const asked = config.value.numSuggestions || 96
+    const linked = data.suggestions.map(s => applyDependencies({ ...s }, stats))
+
+    // Links can map several engine picks onto the same well; keep one of each so the
+    // plate does not silently fill with unintended replicates.
+    const seen = new Set()
+    const unique = linked.filter(s => {
+      const key = COMP_KEYS.map(k => Number(s[k] ?? 0).toFixed(6)).join('|')
+      if (seen.has(key)) return false
+      seen.add(key); return true
+    })
+    unique.forEach((s, i) => { s.sampleId = nextStartId + i })
+    suggestions.value = unique
+
+    const notes = (data.warnings || []).map(w => w.message)
+    if (linked.length - unique.length > 0) notes.push(`${linked.length - unique.length} duplicate well(s) removed after applying the links`)
+    if (stats.clamped > 0) notes.push(`${stats.clamped} linked value(s) pulled back into their component's min/max`)
+    if (unique.length < asked && !(data.warnings || []).some(w => w.axis === 'count')) {
+      notes.push(`${unique.length} of ${asked} requested wells available`)
+    }
+    suggestionNotes.value = notes
+
   } catch (err) {
     console.error("Active Learning Engine failed:", err);
-    alert("Could not connect to the Python Active Learning engine. Ensure the backend is running.");
+    alert(err?.message?.startsWith('Engine returned') || err?.message?.startsWith('No well')
+      ? err.message
+      : "Could not reach the Python Active Learning engine. Ensure the backend is running.");
   } finally {
     isCalculating.value = false;
   }

@@ -822,6 +822,14 @@
               <span v-if="boundaryData" style="font-size: 0.75rem; opacity: 0.7;">
                 {{ boundaryData.n_labeled }} pts · phases {{ boundaryData.phases_used?.join(', ') }}
               </span>
+              <div class="color-mode-toggle" title="3D puts three components on the axes and the fourth on a slider — one condition at a time. Slice grid puts two on shared axes and repeats the map across the other two, so the whole screen is visible at once.">
+                <button type="button" :class="{ active: mapView === '3d' }" @click="mapView = '3d'">
+                  <i class="fas fa-cube"></i> 3D
+                </button>
+                <button type="button" :class="{ active: mapView === 'grid' }" @click="mapView = 'grid'">
+                  <i class="fas fa-table-cells"></i> Slice grid
+                </button>
+              </div>
               <div class="color-mode-toggle" title="Distinct hues for independent phases (coacervates, aggregates…); a light→dark intensity ramp for gradations of one phase. Clear is always red.">
                 <button type="button" :class="{ active: colorMode === 'categorical' }" @click="colorMode = 'categorical'">
                   <i class="fas fa-palette"></i> Distinct
@@ -842,11 +850,39 @@
               </button>
             </div>
           </div>
-          <div class="plot-area" :style="fixedAxis ? 'display:grid; grid-template-columns:38fr 62fr; gap:2px; overflow:hidden;' : ''">
-            <div v-if="fixedAxis" id="phase-2d-plot" style="height:100%; min-width:0; overflow:hidden;"></div>
-            <div id="phase-ternary-plot" :style="fixedAxis ? 'height:100%; min-width:0; overflow:hidden;' : 'width:100%; height:100%;'"></div>
+          <!-- Slice-grid axis pickers: the two components NOT chosen here become the facets -->
+          <div v-if="mapView === 'grid'" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; padding:6px 10px; background:var(--summary-bg,#f1f5f9); border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.76rem;">
+            <span style="font-weight:600;">Axes</span>
+            <select v-model="gridXKey" @change="renderPlot" style="font-size:0.76rem; padding:3px 5px; max-width:150px;">
+              <option v-for="k in activeComps" :key="'gx'+k" :value="k" :disabled="k === gridYKey">{{ compLabel(k) }}</option>
+            </select>
+            <span style="opacity:0.5;">×</span>
+            <select v-model="gridYKey" @change="renderPlot" style="font-size:0.76rem; padding:3px 5px; max-width:150px;">
+              <option v-for="k in activeComps" :key="'gy'+k" :value="k" :disabled="k === gridXKey">{{ compLabel(k) }}</option>
+            </select>
+            <span style="opacity:0.55; margin-left:4px;">
+              panels:
+              <template v-if="facetKeys.length">{{ facetKeys.map(compLabel).join(' × ') }}</template>
+              <template v-else>none — every component is on an axis</template>
+            </span>
+            <label v-if="facetKeys.length" style="display:flex; align-items:center; gap:5px; margin-left:auto;">
+              <span style="opacity:0.7;">levels</span>
+              <select v-model.number="gridBins" @change="renderPlot" style="font-size:0.76rem; padding:3px 5px;">
+                <option :value="2">2</option>
+                <option :value="3">3</option>
+                <option :value="4">4</option>
+              </select>
+            </label>
           </div>
-          <div v-if="config.enableCompD" style="display:flex; align-items:center; gap:10px; margin-top:8px; padding:6px 10px; background:var(--summary-bg,#f1f5f9); border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.78rem;">
+
+          <div class="plot-area" :style="mapView === '3d' && fixedAxis ? 'display:grid; grid-template-columns:38fr 62fr; gap:2px; overflow:hidden;' : ''">
+            <template v-if="mapView === '3d'">
+              <div v-if="fixedAxis" id="phase-2d-plot" style="height:100%; min-width:0; overflow:hidden;"></div>
+              <div id="phase-ternary-plot" :style="fixedAxis ? 'height:100%; min-width:0; overflow:hidden;' : 'width:100%; height:100%;'"></div>
+            </template>
+            <div v-show="mapView === 'grid'" id="phase-slice-grid" style="width:100%; height:100%;"></div>
+          </div>
+          <div v-if="config.enableCompD && mapView === '3d'" style="display:flex; align-items:center; gap:10px; margin-top:8px; padding:6px 10px; background:var(--summary-bg,#f1f5f9); border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.78rem;">
             <span style="font-weight:600; white-space:nowrap;">
               <i class="fas fa-sliders-h" style="opacity:0.6;"></i>
               {{ config.compDName || 'Component D' }} slice
@@ -1276,6 +1312,31 @@ const boundaryData = ref(null)
 const isCalculatingBoundary = ref(false)
 const showBoundary = ref(true)
 
+// ── Phase-map view ───────────────────────────────────────────────────────────
+// '3d'   — one scatter, three components on the axes, the 4th on a slider.
+// 'grid' — the same map repeated across the other two components. Two components
+//          on shared axes, the remaining one or two binned into columns and rows,
+//          so a whole four-component screen is on screen at once and a boundary
+//          that moves between panels reads as movement instead of memory.
+const mapView = ref('3d')
+const gridXKey = ref('salt')
+const gridYKey = ref('cation')
+const gridBins = ref(3)
+
+const activeComps = computed(() =>
+  config.value.enableCompD ? COMP_KEYS : COMP_KEYS.filter(k => k !== 'compD'))
+const facetKeys = computed(() =>
+  activeComps.value.filter(k => k !== gridXKey.value && k !== gridYKey.value))
+
+// Keep the two axis choices distinct and inside the active components.
+watch([() => config.value.enableCompD, gridXKey, gridYKey], () => {
+  const comps = activeComps.value
+  if (!comps.includes(gridXKey.value)) gridXKey.value = comps.find(k => k !== gridYKey.value) || comps[0]
+  if (!comps.includes(gridYKey.value) || gridYKey.value === gridXKey.value) {
+    gridYKey.value = comps.find(k => k !== gridXKey.value) || comps[0]
+  }
+})
+
 const plateRows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 
 // --- Helper Math ---
@@ -1674,6 +1735,7 @@ const exportSuggestionsToPlate = () => {
 }
 
 const renderPlot = () => {
+  if (mapView.value === 'grid') { nextTick(() => renderSliceGrid()); return }
 
   const plotDiv = document.getElementById('phase-ternary-plot')
   if (!plotDiv) return
@@ -1779,6 +1841,154 @@ const renderPlot = () => {
   nextTick(() => render2DPlot())
 }
 
+// ── Slice grid ───────────────────────────────────────────────────────────────
+// Bins for a facet component. When the screen only visits a handful of levels for
+// that component (a 3-level EDC sweep), each level becomes its own panel — binning
+// them into ranges would invent a spread the experiment never had.
+const buildBins = (key, data) => {
+  const lo = Number(config.value[key + 'Min'])
+  const hi = Number(config.value[key + 'Max'])
+  const unit = config.value[key + 'Unit'] || ''
+  const name = compLabel(key)
+  const n = Math.max(1, Math.min(4, gridBins.value))
+  const vals = [...new Set(data.map(d => Number(d[key] ?? 0)).filter(v => isFinite(v)))].sort((a, b) => a - b)
+
+  if (vals.length && vals.length <= n) {
+    return vals.map(v => ({ exact: true, lo: v, hi: v, label: `${name} ${store.formatNum ? store.formatNum(v) : v} ${unit}` }))
+  }
+  if (!isFinite(lo) || !isFinite(hi) || hi <= lo) {
+    return [{ exact: false, lo: -Infinity, hi: Infinity, label: name }]
+  }
+  const step = (hi - lo) / n
+  const round = v => +v.toFixed(3)
+  return Array.from({ length: n }, (_, i) => ({
+    exact: false,
+    lo: lo + i * step,
+    hi: i === n - 1 ? hi : lo + (i + 1) * step,
+    label: `${name} ${round(lo + i * step)}–${round(i === n - 1 ? hi : lo + (i + 1) * step)} ${unit}`
+  }))
+}
+
+// Half-open bins ([lo, hi) except the last, which closes) so a well sitting exactly
+// on a bin edge lands in one panel, never two.
+const inBin = (value, bin) => {
+  const v = Number(value ?? 0)
+  if (bin.exact) return Math.abs(v - bin.lo) < 1e-9
+  if (!isFinite(bin.lo) || !isFinite(bin.hi)) return true
+  const axisMax = Number(config.value[bin.key + 'Max'])
+  const isLast = isFinite(axisMax) && Math.abs(bin.hi - axisMax) < 1e-9
+  return v >= bin.lo - 1e-9 && (isLast ? v <= bin.hi + 1e-9 : v < bin.hi - 1e-9)
+}
+
+const renderSliceGrid = () => {
+  const div = document.getElementById('phase-slice-grid')
+  if (!div) return
+
+  const xKey = gridXKey.value, yKey = gridYKey.value
+  const data = [...experiments.value, ...suggestions.value]
+  const facets = facetKeys.value
+  const colBins = facets[0] ? buildBins(facets[0], data).map(b => ({ ...b, key: facets[0] })) : [null]
+  const rowBins = facets[1] ? buildBins(facets[1], data).map(b => ({ ...b, key: facets[1] })) : [null]
+
+  const xLabel = `${compLabel(xKey)} (${config.value[xKey + 'Unit'] || ''})`
+  const yLabel = `${compLabel(yKey)} (${config.value[yKey + 'Unit'] || ''})`
+  const xRange = [Number(config.value[xKey + 'Min']), Number(config.value[xKey + 'Max'])]
+  const yRange = [Number(config.value[yKey + 'Min']), Number(config.value[yKey + 'Max'])]
+
+  const C = colBins.length, R = rowBins.length
+  const gapX = C > 1 ? 0.035 : 0, gapY = R > 1 ? 0.075 : 0
+  const traces = []
+  const layout = {
+    paper_bgcolor: '#000000',
+    plot_bgcolor: '#0b0b0b',
+    margin: { l: 58, r: R > 1 ? 96 : 20, t: C > 1 ? 26 : 10, b: 66 },
+    showlegend: true,
+    legend: { orientation: 'h', y: -0.14, x: 0.5, xanchor: 'center', font: { color: '#ffffff', size: 10 } },
+    annotations: [],
+    hovermode: 'closest'
+  }
+
+  const legendSeen = new Set()
+  rowBins.forEach((rBin, ri) => {
+    colBins.forEach((cBin, ci) => {
+      const n = ri * C + ci + 1
+      const ax = n === 1 ? 'x' : 'x' + n
+      const ay = n === 1 ? 'y' : 'y' + n
+      const xDom = [ci / C + gapX / 2, (ci + 1) / C - gapX / 2]
+      const yTop = 1 - ri / R, yBot = 1 - (ri + 1) / R
+      const yDom = [yBot + gapY / 2, yTop - gapY / 2]
+      const bottomRow = ri === R - 1, leftCol = ci === 0
+
+      layout['xaxis' + (n === 1 ? '' : n)] = {
+        domain: xDom, anchor: ay, range: xRange, gridcolor: '#2a2a2a', zerolinecolor: '#444',
+        tickfont: { color: '#bbbbbb', size: 9 }, showticklabels: bottomRow,
+        title: bottomRow && ci === Math.floor((C - 1) / 2) ? { text: xLabel, font: { color: '#ffffff', size: 11 } } : undefined
+      }
+      layout['yaxis' + (n === 1 ? '' : n)] = {
+        domain: yDom, anchor: ax, range: yRange, gridcolor: '#2a2a2a', zerolinecolor: '#444',
+        tickfont: { color: '#bbbbbb', size: 9 }, showticklabels: leftCol,
+        title: leftCol && ri === Math.floor((R - 1) / 2) ? { text: yLabel, font: { color: '#ffffff', size: 11 } } : undefined
+      }
+
+      const cell = data.filter(d =>
+        (!cBin || inBin(d[cBin.key], cBin)) && (!rBin || inBin(d[rBin.key], rBin)))
+
+      const byPhase = {}
+      const targets = { x: [], y: [], text: [] }
+      cell.forEach(d => {
+        const label = `ID ${d.sampleId || 'manual'}<br>${compLabel(xKey)} ${d[xKey]} · ${compLabel(yKey)} ${d[yKey]}` +
+          facets.map(f => `<br>${compLabel(f)} ${d[f] ?? 0}`).join('')
+        if (d.phase >= 0 && d.phase <= 4) {
+          (byPhase[d.phase] = byPhase[d.phase] || { x: [], y: [], text: [] })
+          byPhase[d.phase].x.push(d[xKey]); byPhase[d.phase].y.push(d[yKey]); byPhase[d.phase].text.push(label)
+        } else {
+          targets.x.push(d[xKey]); targets.y.push(d[yKey]); targets.text.push(label)
+        }
+      })
+
+      Object.keys(byPhase).sort().forEach(p => {
+        const pid = Number(p)
+        const first = !legendSeen.has(pid)
+        legendSeen.add(pid)
+        traces.push({
+          type: 'scatter', mode: 'markers', xaxis: ax, yaxis: ay,
+          x: byPhase[p].x, y: byPhase[p].y, text: byPhase[p].text, hoverinfo: 'text',
+          name: phaseNames[pid] || `Phase ${pid}`, legendgroup: 'phase' + pid, showlegend: first,
+          marker: { color: getPhaseColor(pid), size: 7, line: { color: '#000', width: 0.5 } }
+        })
+      })
+      if (targets.x.length) {
+        const first = !legendSeen.has('target')
+        legendSeen.add('target')
+        traces.push({
+          type: 'scatter', mode: 'markers', xaxis: ax, yaxis: ay,
+          x: targets.x, y: targets.y, text: targets.text, hoverinfo: 'text',
+          name: 'AI Target', legendgroup: 'target', showlegend: first,
+          marker: { color: getPhaseColor(-1), size: 6, symbol: 'cross' }
+        })
+      }
+
+      if (ri === 0 && cBin) {
+        layout.annotations.push({ text: cBin.label, xref: 'paper', yref: 'paper',
+          x: (xDom[0] + xDom[1]) / 2, y: 1.012, xanchor: 'center', yanchor: 'bottom',
+          showarrow: false, font: { color: '#e2e8f0', size: 10 } })
+      }
+      if (ci === C - 1 && rBin) {
+        layout.annotations.push({ text: rBin.label, xref: 'paper', yref: 'paper',
+          x: 1.008, y: (yDom[0] + yDom[1]) / 2, xanchor: 'left', yanchor: 'middle',
+          showarrow: false, textangle: 90, font: { color: '#e2e8f0', size: 10 } })
+      }
+      if (!cell.length) {
+        layout.annotations.push({ text: 'no wells', xref: 'paper', yref: 'paper',
+          x: (xDom[0] + xDom[1]) / 2, y: (yDom[0] + yDom[1]) / 2, xanchor: 'center', yanchor: 'middle',
+          showarrow: false, font: { color: '#555555', size: 10 } })
+      }
+    })
+  })
+
+  Plotly.react('phase-slice-grid', traces, layout, { displayModeBar: false, responsive: true })
+}
+
 const render2DPlot = () => {
   const plotDiv = document.getElementById('phase-2d-plot')
   if (!plotDiv || !fixedAxis.value) return
@@ -1877,6 +2087,8 @@ const render2DPlot = () => {
 
 watch([experiments, suggestions, config, currentDSlice], () => { renderPlot() }, { deep: true })
 watch(colorMode, () => { renderPlot() })
+// Switching view swaps which plot divs exist, so redraw only once the DOM has them.
+watch([mapView, gridXKey, gridYKey, gridBins], () => { nextTick(() => renderPlot()) })
 
 // When the 4th component is toggled on, snap the D slice to the midpoint of its range.
 watch(() => config.value.enableCompD, (on) => {

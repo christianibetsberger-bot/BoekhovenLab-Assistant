@@ -65,25 +65,26 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      # A Pages deployment whose runner went away mid-flight — a cancelled job, a
-      # step that hit its timeout — is never finalised by anyone. It just stays
-      # pending on the Pages side, and because Pages allows one deployment at a
-      # time it blocks every later one: the next run gets a 400 telling it to
-      # "cancel <sha> first", and the runs after that sit in deploy-pages' poll
-      # loop until it gives up ten minutes later. Nothing clears it on its own,
-      # so a single orphan stops the site updating indefinitely.
+      # Pages serves one deployment at a time, so one that is still open blocks
+      # every later one — the next run gets a 400 telling it to "cancel <sha>
+      # first". A runner that goes away mid-deployment (a cancelled job) can
+      # leave one open with nobody left to finalise it, and nothing clears it on
+      # its own. This sweeps any that are still pending before deploying.
       #
-      # Cancelling it is the documented way out, and it is safe to do blind: we
-      # skip this run's own sha, and a deployment that already reached a terminal
-      # state is left alone. It is a tidy-up, never a gate — if the API is
-      # unreachable or answers with something unexpected, every branch below
-      # falls through to doing nothing and deploy-pages runs regardless.
+      # Kept as insurance, not as a diagnosis: the 06.08.2026 outage looked like
+      # this and was not. Every deployment since 11:33 that day was already
+      # terminal by the time the next run started, so this step had nothing to
+      # cancel and the site still did not update. See the deploy-pages step below.
+      #
+      # It is a tidy-up, never a gate — we skip this run's own sha, only touch
+      # deployments Pages has not finished with, and if the API is unreachable or
+      # answers oddly every branch falls through to doing nothing.
       - name: Cancel any Pages deployment left pending by an earlier run
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/deployments?environment=github-pages&per_page=30" \
+          gh api "repos/$GITHUB_REPOSITORY/deployments?environment=github-pages&per_page=10" \
             --jq '.[] | select(.sha != env.GITHUB_SHA) | "\(.id) \(.sha)"' 2>/dev/null |
           while read -r id sha; do
             # No status at all means it never even reported queued — still pending.
@@ -101,6 +102,22 @@ jobs:
             esac
           done
 
+      # Wait twenty minutes instead of ten. This is a probe, not a known fix.
+      #
+      # From 11:33 on 06.08.2026 every deployment ran waiting → queued →
+      # in_progress and then stopped there; deploy-pages polled its full ten
+      # minutes and wrote the 'failure' itself. Pages never reported an outcome
+      # either way. That the repo is not at fault is settled: 690d93c has source
+      # byte-identical to e349042, which published fine at 08:25 that morning,
+      # and 690d93c failed twice — same tree, same workflow, no publish.
+      #
+      # So either Pages is taking longer than ten minutes to process, in which
+      # case a longer wait finishes the job, or it is not processing at all, in
+      # which case this run fails at twenty minutes and the answer is in the repo
+      # settings (Settings → Pages → Source must be "GitHub Actions") or with
+      # GitHub support. One 20-minute run tells us which.
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+        with:
+          timeout: 1200000

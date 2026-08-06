@@ -43,7 +43,7 @@
 
           <div class="config-grid-complex">
             <div class="input-group">
-              <label>Component A <select :value="config.anionUnit" @change="changeUnit('anion', config.anionUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
+              <label>Component<select class="slot-select" :value="'anion'" @change="swapComponentTo('anion', $event.target.value)" title="Which letter this compound sits on. Pick another letter and the two swap places — ranges, stocks and every logged value move with them, so nothing changes meaning."><option v-for="k in COMP_KEYS" :key="k" :value="k">{{ SLOT_LETTER[k] }}</option></select> <select :value="config.anionUnit" @change="changeUnit('anion', config.anionUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
               <div style="display: flex; gap: 5px; align-items: flex-end;">
                 <div style="flex: 2; position: relative;" @click.stop>
                   <div @click="activeDropdown = activeDropdown === 'anion' ? null : 'anion'" class="inventory-select-box">
@@ -73,7 +73,7 @@
             </div>
             
             <div class="input-group">
-              <label>Component B <select :value="config.cationUnit" @change="changeUnit('cation', config.cationUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
+              <label>Component<select class="slot-select" :value="'cation'" @change="swapComponentTo('cation', $event.target.value)" title="Which letter this compound sits on. Pick another letter and the two swap places — ranges, stocks and every logged value move with them, so nothing changes meaning."><option v-for="k in COMP_KEYS" :key="k" :value="k">{{ SLOT_LETTER[k] }}</option></select> <select :value="config.cationUnit" @change="changeUnit('cation', config.cationUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
               <div style="display: flex; gap: 5px; align-items: flex-end;">
                 <div style="flex: 2; position: relative;" @click.stop>
                   <div @click="activeDropdown = activeDropdown === 'cation' ? null : 'cation'" class="inventory-select-box">
@@ -103,7 +103,7 @@
             </div>
             
             <div class="input-group">
-              <label>Component C <select :value="config.saltUnit" @change="changeUnit('salt', config.saltUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
+              <label>Component<select class="slot-select" :value="'salt'" @change="swapComponentTo('salt', $event.target.value)" title="Which letter this compound sits on. Pick another letter and the two swap places — ranges, stocks and every logged value move with them, so nothing changes meaning."><option v-for="k in COMP_KEYS" :key="k" :value="k">{{ SLOT_LETTER[k] }}</option></select> <select :value="config.saltUnit" @change="changeUnit('salt', config.saltUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
               <div style="display: flex; gap: 5px; align-items: flex-end;">
                 <div style="flex: 2; position: relative;" @click.stop>
                   <div @click="activeDropdown = activeDropdown === 'salt' ? null : 'salt'" class="inventory-select-box">
@@ -146,7 +146,7 @@
 
             <div v-if="config.enableCompD" style="margin-top:8px; padding:10px 12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px;">
               <div class="input-group" style="margin:0;">
-                <label>Component D <select :value="config.compDUnit" @change="changeUnit('compD', config.compDUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
+                <label>Component<select class="slot-select" :value="'compD'" @change="swapComponentTo('compD', $event.target.value)" title="Which letter this compound sits on. Pick another letter and the two swap places — ranges, stocks and every logged value move with them, so nothing changes meaning."><option v-for="k in COMP_KEYS" :key="k" :value="k">{{ SLOT_LETTER[k] }}</option></select> <select :value="config.compDUnit" @change="changeUnit('compD', config.compDUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
                 <div style="display: flex; gap: 5px; align-items: flex-end;">
                   <div style="flex: 2; position: relative;" @click.stop>
                     <div @click="activeDropdown = activeDropdown === 'compD' ? null : 'compD'" class="inventory-select-box">
@@ -663,14 +663,14 @@
                   <td><input type="number" v-model="exp.salt" @change="updateExperiment(exp)" class="small-input" /></td>
                   <td v-if="config.enableCompD"><input type="number" v-model="exp.compD" @change="updateExperiment(exp)" class="small-input" /></td>
                   <td>
-                    <select v-model="exp.phase" @change="updateExperiment(exp)" class="small-select" :style="{ backgroundColor: getPhaseColor(exp.phase, 0.2), borderColor: getPhaseColor(exp.phase, 1) }">
+                    <select v-model="exp.phase" @change="updateExperiment(exp)" class="small-select"
+                      :title="exp.kin ? kinReceiptText(exp.kin) : 'Set the observed phase — microscopy beats the plate reader, so a value set here wins.'"
+                      :style="{ backgroundColor: getPhaseColor(exp.phase, 0.2), borderColor: getPhaseColor(exp.phase, 1) }">
                       <option :value="-1">Untested</option>
-                      <option :value="0">Clear</option>
-                      <option :value="1">Phase 1</option>
-                      <option :value="2">Phase 2</option>
-                      <option :value="3">Phase 3</option>
-                      <option :value="4">Phase 4</option>
+                      <option v-for="p in PHASE_SLOTS" :key="p" :value="p">{{ phaseLabel(p) }}</option>
                     </select>
+                    <i v-if="exp.kin" class="fas fa-wave-square" :title="kinReceiptText(exp.kin)"
+                      style="font-size:0.62rem; opacity:0.45; margin-left:4px;"></i>
                   </td>
                   <td>
                     <button class="clear-btn" @click="removeRow(index, exp)" title="Remove Row"><i class="fas fa-trash"></i></button>
@@ -698,23 +698,54 @@
           <!-- Row 1: instrument + file + wellplate -->
           <div style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
             <select v-model="prReaderType" style="font-size:0.8rem; padding:4px 8px; font-weight:600; white-space:nowrap;" title="Select which plate reader was used">
-              <option value="reader2">Platereader 2</option>
-              <option value="reader1" disabled>Platereader 1 (template pending)</option>
+              <option value="reader2">Platereader 2 · endpoint CSV</option>
+              <option value="reader1">Platereader 1 · kinetic XML (SkanIt)</option>
             </select>
             <div style="display:flex; gap:6px; align-items:center; min-width:0;">
-              <button class="small" @click="prInputRef.click()"><i class="fas fa-upload"></i> Load CSV</button>
-              <input type="file" ref="prInputRef" accept=".csv,.CSV,.txt" style="display:none" @change="onPlatereaderCsvSelected" />
-              <span v-if="prODMap" style="font-size:0.75rem; color:var(--success-color,#10b981); white-space:nowrap;">
-                <i class="fas fa-check-circle"></i> {{ Object.keys(prODMap).length }} wells loaded
+              <button class="small" @click="prInputRef.click()">
+                <i class="fas fa-upload"></i> Load {{ prIsKinetic ? 'XML' : 'CSV' }}
+              </button>
+              <input type="file" ref="prInputRef" :accept="prIsKinetic ? '.xml,.XML' : '.csv,.CSV,.txt'" style="display:none" @change="onPlatereaderCsvSelected" />
+              <span v-if="prHasData" style="font-size:0.75rem; color:var(--success-color,#10b981); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                <i class="fas fa-check-circle"></i> {{ prWellCount }} wells loaded
               </span>
-              <button v-if="prODMap" class="small danger-btn" @click="prODMap = null" style="padding:2px 8px;"><i class="fas fa-times"></i></button>
+              <button v-if="prHasData" class="small danger-btn" @click="prODMap = null; clearKinetic()" style="padding:2px 8px;"><i class="fas fa-times"></i></button>
             </div>
-            <button class="small" @click="prShowSettings = !prShowSettings" :style="prShowSettings ? 'background:var(--primary);color:#fff;' : ''" style="white-space:nowrap; padding:4px 8px;">
+            <button v-if="!prIsKinetic" class="small" @click="prShowSettings = !prShowSettings" :style="prShowSettings ? 'background:var(--primary);color:#fff;' : ''" style="white-space:nowrap; padding:4px 8px;">
               <i class="fas fa-sliders"></i> Settings
             </button>
           </div>
 
-          <!-- Settings panel -->
+          <!-- Kinetic run header: what was actually measured -->
+          <div v-if="prIsKinetic && prKinetic" style="margin-bottom:8px; padding:7px 10px; border-radius:6px; background:var(--summary-bg,#f1f5f9); font-size:0.72rem; line-height:1.5;">
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <strong style="font-size:0.75rem;">{{ prKinFileName }}</strong>
+              <select v-if="prKinetic.channels.length > 1" v-model="prChannelKey" style="font-size:0.72rem; padding:2px 5px;">
+                <option v-for="c in prKinetic.channels" :key="c.key" :value="c.key">{{ c.label }}</option>
+              </select>
+              <span v-else style="opacity:.7;">{{ kinChannel?.label }}</span>
+            </div>
+            <div style="opacity:.7;">{{ kinRunSummary }}</div>
+            <div v-if="prKinetic.meta.description" style="opacity:.55;">{{ prKinetic.meta.description }}</div>
+          </div>
+
+          <!-- Kinetic classes: the counts, then the dialog that lets you argue with them -->
+          <div v-if="prIsKinetic && kinAnalysis" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+            <span v-for="c in KINETIC_CLASSES" :key="c.key"
+              :title="`${c.label} → ${phaseLabel(kinPhaseOf(c.key))}`"
+              :style="{ background: getPhaseColor(kinPhaseOf(c.key), 0.18), borderColor: getPhaseColor(kinPhaseOf(c.key), 1) }"
+              style="display:inline-flex; align-items:center; gap:5px; font-size:0.72rem; padding:3px 8px; border-radius:999px; border-width:1px; border-style:solid; font-weight:600;">
+              {{ kinCounts[c.key] }} {{ c.short }}
+            </span>
+            <span v-if="kinOverrideCount" style="font-size:0.7rem; opacity:.7;" title="Wells you classified by hand — thresholds no longer touch them.">
+              <i class="fas fa-hand-pointer"></i> {{ kinOverrideCount }} by hand
+            </span>
+            <button class="small" @click="openKinReview" style="margin-left:auto; padding:4px 10px;">
+              <i class="fas fa-chart-line"></i> Review curves &amp; thresholds
+            </button>
+          </div>
+
+          <!-- Settings panel (endpoint reader only — the kinetic thresholds live in the review dialog) -->
           <div v-if="prShowSettings" style="border:1px solid var(--border-color,#e2e8f0); border-radius:6px; padding:10px; margin-bottom:8px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
             <div style="font-weight:700; font-size:0.75rem; text-transform: none; letter-spacing:.4px; opacity:.7;">OD → Phase Thresholds</div>
             <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px;">
@@ -756,12 +787,48 @@
               <option :value="null">— none (positional fallback) —</option>
               <option v-for="p in prAvailablePlates" :key="p.id" :value="p.id">{{ p.name }}</option>
             </select>
-            <span v-if="prLinkedPlateId" style="color:var(--success-color,#10b981); white-space:nowrap;">
+            <span v-if="prLinkedPlateId && prMappedWellCount" style="color:var(--success-color,#10b981); white-space:nowrap;">
               <i class="fas fa-link"></i> {{ prMappedWellCount }} wells mapped
             </span>
           </div>
+          <p v-if="prMapHint" style="font-size:0.72rem; line-height:1.5; margin:-4px 0 8px; padding:6px 9px; border-radius:6px; border:1px solid rgba(217,119,6,0.4); background:rgba(217,119,6,0.08);">
+            <i class="fas fa-triangle-exclamation" style="opacity:.75;"></i> {{ prMapHint }}
+          </p>
 
-          <template v-if="prODMap">
+          <!-- What the plate turned out to be screening, when it had to be worked out -->
+          <div v-if="prInference" style="margin:-4px 0 8px; padding:7px 10px; border-radius:6px; background:var(--summary-bg,#f1f5f9); font-size:0.72rem; line-height:1.6;">
+            <div style="font-weight:700; opacity:.7;">Read from the plate — {{ prInference.wellCount }} wells</div>
+            <div v-for="s in prInference.screened" :key="s.slot">
+              <strong>{{ SLOT_LETTER[s.slot] }}</strong> = {{ s.name }}
+              <span style="opacity:.7;">{{ fmtRange(s) }}</span>
+              <span v-if="!s.inEveryWell" style="opacity:.55;">· absent from some wells</span>
+            </div>
+            <div v-if="prInference.constants.length" style="opacity:.65;">
+              Same in every well: {{ prInference.constants.map(c => `${c.name} ${fmtConc(c.value)} ${c.unit}${c.stock == null ? ' (no stock recorded)' : ''}`).join(' · ') }}
+            </div>
+            <div v-if="prInference.fillup || prInference.wellVolume" style="opacity:.65;">
+              <template v-if="prInference.fillup">Fill-up: {{ prInference.fillup.name }}<template v-if="!prInference.fillup.inEveryWell"> (missing from some wells)</template></template>
+              <template v-if="prInference.fillup && prInference.wellVolume"> · </template>
+              <template v-if="prInference.wellVolume">
+                <template v-if="prInference.wellVolume.uniform">every well {{ prInference.wellVolume.max.toFixed(1) }} µL</template>
+                <template v-else>well totals {{ prInference.wellVolume.min.toFixed(1) }}–{{ prInference.wellVolume.max.toFixed(1) }} µL</template>
+              </template>
+            </div>
+            <div v-if="prInference.unmapped.length" style="color:#d97706;">
+              <i class="fas fa-triangle-exclamation"></i>
+              {{ prInference.unmapped.map(c => c.name).join(', ') }} also varies but there is no free component slot — only four fit.
+            </div>
+            <div v-for="u in prInference.unitClashes" :key="u.slot" style="color:#d97706;">
+              <i class="fas fa-triangle-exclamation"></i>
+              {{ u.name }} is recorded in {{ u.from }}, which cannot be converted to {{ u.to }} — component {{ SLOT_LETTER[u.slot] }} is imported in {{ u.from }}. Set its unit to match.
+            </div>
+            <button class="small" @click="adoptInferredComponents" style="margin-top:4px; padding:2px 8px; font-size:0.7rem;"
+              title="Take the whole recipe from this plate: component names, inventory links, stocks and ranges, plus the constants, the fill-up and the well volume — so anything replated out of the phase map is pipetted the way this plate was.">
+              <i class="fas fa-arrow-up"></i> Use this plate as the search space
+            </button>
+          </div>
+
+          <template v-if="prHasData">
             <!-- Show/filter control -->
             <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; font-size:0.8rem;">
               <template v-if="!prLinkedPlateId">
@@ -782,14 +849,20 @@
               </template>
             </div>
 
-            <!-- OD → Phase legend (live thresholds) -->
-            <div style="display:flex; gap:6px; flex-wrap:wrap; font-size:0.7rem; margin-bottom:8px; padding:5px 8px; background:var(--summary-bg,#f1f5f9); border-radius:4px;">
+            <!-- Legend: OD bands for the endpoint reader, coacervation classes for the kinetic one -->
+            <div v-if="!prIsKinetic" style="display:flex; gap:6px; flex-wrap:wrap; font-size:0.7rem; margin-bottom:8px; padding:5px 8px; background:var(--summary-bg,#f1f5f9); border-radius:4px;">
               <span v-for="t in OD_THRESHOLDS_DISPLAY" :key="t.phase" style="display:flex; align-items:center; gap:3px;">
                 <span :style="{ display:'inline-block', width:'10px', height:'10px', borderRadius:'2px', background: getPhaseColor(t.phase, 0.35), border:`1px solid ${getPhaseColor(t.phase,1)}` }"></span>
                 {{ t.label }}: {{ t.range }}
               </span>
               <span v-if="prDissolutionEnabled" style="display:flex; align-items:center; gap:3px; opacity:.75;">
                 <i class="fas fa-arrow-down" style="font-size:0.65rem;"></i> Dissolved if OD&nbsp;≤&nbsp;{{ prDissolutionThreshold }} after peak
+              </span>
+            </div>
+            <div v-else style="display:flex; gap:8px; flex-wrap:wrap; font-size:0.7rem; margin-bottom:8px; padding:5px 8px; background:var(--summary-bg,#f1f5f9); border-radius:4px;">
+              <span v-for="c in KINETIC_CLASSES" :key="c.key" style="display:flex; align-items:center; gap:3px;">
+                <span :style="{ display:'inline-block', width:'10px', height:'10px', borderRadius:'2px', background: getPhaseColor(kinPhaseOf(c.key), 0.35), border:`1px solid ${getPhaseColor(kinPhaseOf(c.key),1)}` }"></span>
+                {{ c.label }} → {{ phaseLabel(kinPhaseOf(c.key)) }}
               </span>
             </div>
 
@@ -804,7 +877,8 @@
                   <div v-for="c in 12" :key="c"
                     :style="prWellStyle(row, c)"
                     :title="prWellTooltip(row, c)"
-                    style="flex:1; aspect-ratio:1; border-radius:50%; border-width:1px; border-style:solid; cursor:default; min-width:0;">
+                    @click="openWellCurve(`${row}${c}`)"
+                    style="flex:1; aspect-ratio:1; border-radius:50%; border-width:1px; border-style:solid; min-width:0;">
                   </div>
                 </div>
               </div>
@@ -819,9 +893,11 @@
             </div>
           </template>
 
-          <p v-if="!prODMap" style="font-size:0.75rem; opacity:0.6; margin:4px 0 0;"
-            title="Concentrations are read directly from each well cell and OD determines the phase, so this works even if the AI suggestions were never logged to the active learning.">
-            Select the wellplate that was used, then load the plate-reader CSV.
+          <p v-if="!prHasData" style="font-size:0.75rem; opacity:0.6; margin:4px 0 0;"
+            title="Concentrations are read directly from each well cell, so this works even if the AI suggestions were never logged to the active learning.">
+            Select the wellplate that was used, then load
+            <template v-if="prIsKinetic">the SkanIt <strong>.xml</strong> export — the whole kinetic run, one trace per well.</template>
+            <template v-else>the plate-reader CSV.</template>
           </p>
         </div>
       </div>
@@ -834,6 +910,11 @@
               <span v-if="boundaryData" style="font-size: 0.75rem; opacity: 0.7;">
                 {{ boundaryData.n_labeled }} pts · phases {{ boundaryData.phases_used?.join(', ') }}
               </span>
+              <button v-if="experiments.length" class="small" @click="fitSearchSpaceToData()"
+                title="Set each axis to the range the data actually covers, and the step to the spacing between the levels that were screened. The map only draws what is inside the search space."
+                style="padding:4px 9px; font-size:0.72rem;">
+                <i class="fas fa-compress-arrows-alt"></i> Fit to data
+              </button>
               <div class="color-mode-toggle" title="3D puts three components on the axes and the fourth on a slider — one condition at a time. Slice grid puts two on shared axes and repeats the map across the other two, so the whole screen is visible at once.">
                 <button type="button" :class="{ active: mapView === '3d' }" @click="mapView = '3d'">
                   <i class="fas fa-cube"></i> 3D
@@ -866,15 +947,15 @@
           <div v-if="mapView === 'grid'" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; padding:6px 10px; background:var(--summary-bg,#f1f5f9); border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.76rem;">
             <span style="font-weight:600;">Axes</span>
             <select v-model="gridXKey" @change="renderPlot" style="font-size:0.76rem; padding:3px 5px; max-width:150px;">
-              <option v-for="k in activeComps" :key="'gx'+k" :value="k" :disabled="k === gridYKey">{{ compLabel(k) }}</option>
+              <option v-for="k in activeComps" :key="'gx'+k" :value="k" :disabled="k === gridYKey">{{ compPickerLabel(k) }}</option>
             </select>
             <span style="opacity:0.5;">×</span>
             <select v-model="gridYKey" @change="renderPlot" style="font-size:0.76rem; padding:3px 5px; max-width:150px;">
-              <option v-for="k in activeComps" :key="'gy'+k" :value="k" :disabled="k === gridXKey">{{ compLabel(k) }}</option>
+              <option v-for="k in activeComps" :key="'gy'+k" :value="k" :disabled="k === gridXKey">{{ compPickerLabel(k) }}</option>
             </select>
             <span style="opacity:0.55; margin-left:4px;">
               panels:
-              <template v-if="facetKeys.length">{{ facetKeys.map(compLabel).join(' × ') }}</template>
+              <template v-if="facetKeys.length">{{ facetKeys.map(compPickerLabel).join(' × ') }}</template>
               <template v-else>none — every component is on an axis</template>
             </span>
             <label v-if="facetKeys.length" style="display:flex; align-items:center; gap:5px; margin-left:auto;">
@@ -894,6 +975,18 @@
             </template>
             <div v-show="mapView === 'grid'" id="phase-slice-grid" style="width:100%;"></div>
           </div>
+
+          <!-- The map draws the search space, so data that sits outside it — or in
+               a sliver of it — is data you cannot read. Say so rather than leaving
+               the map looking simply empty. -->
+          <p v-if="searchSpaceIssues.length" style="margin:8px 0 0; padding:7px 10px; font-size:0.74rem; line-height:1.5; border-radius:6px; border:1px solid rgba(217,119,6,0.4); background:rgba(217,119,6,0.08); display:flex; gap:8px; align-items:baseline; flex-wrap:wrap;">
+            <i class="fas fa-eye-slash" style="opacity:.75;"></i>
+            <span>
+              The axes are drawn over the search space, and the data does not fill it —
+              <template v-for="(o, i) in searchSpaceIssues" :key="o.key">{{ i ? '; ' : '' }}{{ searchSpaceIssueText(o) }}</template>.
+            </span>
+            <button class="small" @click="fitSearchSpaceToData()" style="padding:2px 8px; font-size:0.7rem;">Fit to data</button>
+          </p>
           <div v-if="config.enableCompD && mapView === '3d'" style="display:flex; align-items:center; gap:10px; margin-top:8px; padding:6px 10px; background:var(--summary-bg,#f1f5f9); border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.78rem;">
             <span style="font-weight:600; white-space:nowrap;">
               <i class="fas fa-sliders-h" style="opacity:0.6;"></i>
@@ -973,7 +1066,7 @@
     </div>
 
     <div class="internal-section full-width-section" v-if="existingPlateData.length > 0 || suggestions.length > 0">
-      <div class="flex-between" style="border-bottom: 1px solid var(--border-color, #e2e8f0); padding-bottom: 8px; margin-bottom: 15px;">
+      <div class="flex-between" style="border-bottom: 1px solid var(--border-color, #e2e8f0); padding-bottom: 8px; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
         <h3 style="margin: 0; border: none; padding: 0;">Wet Lab Mapping: 96-Well Plates</h3>
         <div v-if="suggestedPlateData.length > 0" class="export-controls">
             <span style="font-size: 0.85rem; font-weight: bold; opacity: 0.7;">Export AI Targets with Volumes:</span>
@@ -985,6 +1078,84 @@
             <button class="small" @click="exportSuggestionsToPlate" style="background: #8b5cf6; color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer;">
                 <i class="fas fa-arrow-down"></i> Send
             </button>
+        </div>
+      </div>
+
+      <!-- Replate one phase: take every condition that came out as, say, transient,
+           and lay it on a fresh plate with the volumes worked out for the new well
+           volume — the way you go from "which of these coacervated" to "let me look
+           at those properly". -->
+      <div v-if="experiments.length" class="export-controls" style="margin-bottom: 15px; flex-wrap: wrap; padding: 8px 10px; background: var(--summary-bg,#f1f5f9); border-radius: 6px;">
+        <span style="font-size: 0.85rem; font-weight: bold; opacity: 0.7;">
+          <i class="fas fa-flask" style="opacity:.6;"></i> Replate one phase:
+        </span>
+        <select v-model.number="phaseExportPhase" class="compact-select"
+          :style="{ borderColor: getPhaseColor(phaseExportPhase, 1), background: getPhaseColor(phaseExportPhase, 0.12) }">
+          <option v-for="p in PHASE_SLOTS" :key="p" :value="p">{{ phaseLabel(p) }} ({{ phaseCounts[p] || 0 }})</option>
+        </select>
+        <select v-model="phaseExportPlateId" class="compact-select">
+          <option value="" disabled>Select plate…</option>
+          <option v-for="p in store.wellPlates" :key="p.id" :value="p.id">{{ p.name }}</option>
+        </select>
+        <input type="text" v-model="phaseExportStartWell" placeholder="A1" class="compact-input" />
+        <label v-if="prKinFileName" class="checkbox-label" style="font-size:0.75rem;"
+          :title="`Only the wells that came from ${prKinFileName}, rather than everything in the ledger with this phase.`">
+          <input type="checkbox" v-model="phaseExportRunOnly" /> this run only
+        </label>
+        <span style="font-size:0.75rem; opacity:0.7;">
+          {{ phaseExportRows.length }} well{{ phaseExportRows.length === 1 ? '' : 's' }} · {{ config.targetVolume }} µL each
+        </span>
+        <button class="small" @click="addPhaseExtra" style="padding:4px 9px; font-size:0.72rem;"
+          title="Add a compound to every replated well — the same final concentration in each. It comes out of the fill-up, so the well total stays at the target volume.">
+          <i class="fas fa-plus"></i> Add component
+        </button>
+        <button class="small success-btn" @click="exportPhaseToPlate" :disabled="!phaseExportRows.length || !phaseExportPlateId">
+          <i class="fas fa-arrow-down"></i> Send
+        </button>
+      </div>
+
+      <!-- Added to every replated well. Dosed like a constant, taken out of the
+           fill-up, so the total volume is untouched and the water is recomputed. -->
+      <div v-if="phaseExtras.length" style="margin:-8px 0 15px; padding:10px 12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
+        <div style="display:grid; grid-template-columns:1.7fr 74px 66px 74px 66px 64px 24px; gap:6px; font-size:0.66rem; font-weight:700; opacity:0.5; padding:0 2px;">
+          <span>Added to every well</span><span>Final</span><span>unit</span><span>Stock</span><span>unit</span><span>µL/well</span><span></span>
+        </div>
+        <div v-for="(k, i) in phaseExtras" :key="k.id" style="display:grid; grid-template-columns:1.7fr 74px 66px 74px 66px 64px 24px; gap:6px; align-items:center;">
+          <div style="position:relative; display:flex; gap:4px; align-items:center; min-width:0;" @click.stop>
+            <div class="inventory-select-box" style="flex:1.2 1 0; min-width:0; font-size:0.78rem; padding:4px 8px; min-height:30px;"
+              :title="k.inv ? `[${k.inv.code}] ${k.inv.name} — chipped into every well` : 'Link an inventory item so this component reaches the wellplate, the lab journal and the usage log as a chip'"
+              @click="toggleConstantDropdown(k)">
+              <span class="truncate-text">{{ k.inv ? `[${k.inv.code}] ${k.inv.name}` : 'Link inventory…' }}</span>
+              <i class="fas" :class="k.inv ? 'fa-tag' : 'fa-search'" style="font-size:0.7rem; opacity:0.55;"></i>
+            </div>
+            <input v-if="!k.inv" type="text" v-model="k.name" placeholder="or free-text name…" style="flex:1 1 0; min-width:0; font-size:0.8rem; padding:5px;">
+            <button v-else @click="unlinkConstant(k)" title="Unlink from inventory (keeps the name)"
+              style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:0.75rem; padding:0 2px;">✕</button>
+            <div v-if="activeDropdown === 'const:' + k.id" class="inventory-dropdown">
+              <div class="dropdown-scope-selector">
+                <label class="checkbox-label"><input type="radio" value="Global" v-model="k.searchScope"> Global</label>
+                <label class="checkbox-label"><input type="radio" value="Personal" v-model="k.searchScope"> Personal</label>
+              </div>
+              <div class="dropdown-search">
+                <input type="text" v-model="k.searchQuery" placeholder="Filter inventory..." @click.stop>
+              </div>
+              <div class="dropdown-results">
+                <div v-for="inv in filterBlockInventory(k.searchQuery, k.searchScope)" :key="inv.id" class="dropdown-item" @mousedown.prevent="selectConstantInventory(k, inv)">
+                  [{{ inv.code }}] {{ inv.name }} ({{ inv.stock }} {{ inv.stockUnit || 'µM' }})
+                </div>
+              </div>
+            </div>
+          </div>
+          <input type="number" v-model.number="k.conc" min="0" step="any" style="font-size:0.8rem; padding:5px;" title="Final concentration in every replated well">
+          <select v-model="k.unit" style="font-size:0.76rem; padding:4px;"><option v-for="u in CONST_UNITS" :key="u" :value="u">{{ u }}</option></select>
+          <input type="number" v-model.number="k.stockConc" min="0" step="any" style="font-size:0.8rem; padding:5px;" title="Stock concentration">
+          <select v-model="k.stockUnit" style="font-size:0.76rem; padding:4px;"><option v-for="u in CONST_UNITS" :key="u" :value="u">{{ u }}</option></select>
+          <span style="font-size:0.75rem; opacity:0.75; font-variant-numeric:tabular-nums;">{{ phaseExtraVolume(k).toFixed(2) }}</span>
+          <button @click="removePhaseExtra(i)" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:0.9rem;" title="Remove">✕</button>
+        </div>
+        <div style="font-size:0.72rem; opacity:0.65;">
+          {{ phaseExtrasVolume.toFixed(2) }} µL of {{ config.targetVolume }} µL comes out of the fill-up — the well total does not change.
+          These are added to this export only, not to the search space.
         </div>
       </div>
 
@@ -1031,6 +1202,200 @@
       </div>
     </div>
 
+    <!-- ── Kinetics review: the curves, the thresholds that cut them, and the override ── -->
+    <Teleport to="body">
+    <div v-if="showKinReview" class="kin-modal" :class="{ 'dark-mode': store.isDarkMode }" @click.self="showKinReview = false">
+      <div class="kin-dialog">
+        <div class="kin-head">
+          <span><i class="fas fa-chart-line"></i> Coacervation kinetics — {{ prKinFileName }}</span>
+          <span class="kin-sub">{{ kinRunSummary }}</span>
+          <button class="cond-x" @click="showKinReview = false">✕</button>
+        </div>
+
+        <!-- Thresholds. Every field re-classifies the whole plate as it is typed. -->
+        <div class="kin-controls">
+          <div class="kin-ctl">
+            <label>Baseline</label>
+            <select v-model="kinSettings.baselineMode" title="Each well against its own first reading, or against a blank you measured. Use the blank when wells were already turbid before the run began — their own first reading is not a blank.">
+              <option value="first">the well's first reading</option>
+              <option value="manual">a blank I measured</option>
+            </select>
+            <input v-if="kinSettings.baselineMode === 'manual'" type="number" step="0.001" min="0" v-model.number="kinSettings.baselineValue" />
+            <span v-if="kinSettings.baselineMode === 'manual'" class="kin-unit">OD</span>
+            <span v-else class="kin-unit">≈ {{ kinAnalysis ? kinAnalysis.blank.toFixed(4) : '—' }} across the plate</span>
+          </div>
+
+          <div class="kin-ctl">
+            <label>Smoothing</label>
+            <input type="number" min="1" step="2" v-model.number="kinSettings.smoothPoints" title="Moving median width in readings. A single bubble crossing the beam should not become a peak." />
+            <span class="kin-unit">reads</span>
+          </div>
+
+          <div class="kin-ctl">
+            <label>Coacervation</label>
+            <select v-model="kinSettings.riseMode">
+              <option value="delta">rises above baseline by</option>
+              <option value="absolute">reaches OD</option>
+            </select>
+            <input v-if="kinSettings.riseMode === 'delta'" type="number" step="0.01" min="0" v-model.number="kinSettings.riseDelta" />
+            <input v-else type="number" step="0.01" min="0" v-model.number="kinSettings.riseAbs" />
+          </div>
+
+          <div class="kin-ctl">
+            <label>Dissolved</label>
+            <select v-model="kinSettings.dropMode">
+              <option value="delta">comes back to baseline +</option>
+              <option value="absolute">drops below OD</option>
+            </select>
+            <input v-if="kinSettings.dropMode === 'delta'" type="number" step="0.001" min="0" v-model.number="kinSettings.dropDelta" />
+            <input v-else type="number" step="0.001" min="0" v-model.number="kinSettings.dropAbs" />
+            <span class="kin-unit">held for</span>
+            <input type="number" min="1" step="1" v-model.number="kinSettings.sustainPoints" title="Consecutive readings below the level before the well counts as dissolved." />
+            <span class="kin-unit">reads</span>
+          </div>
+
+          <div class="kin-ctl">
+            <label>By</label>
+            <input type="number" min="0" step="10" v-model.number="kinSettings.timeLimitMin" title="A well that has not dissolved by this time is metastable. Defaults to the length of the run." />
+            <span class="kin-unit">min ({{ formatMinutes(kinSettings.timeLimitMin) }}) — later than this counts as metastable</span>
+          </div>
+        </div>
+
+        <div class="kin-body">
+          <!-- Plate -->
+          <div class="kin-plate-col">
+            <div class="kin-plate">
+              <div class="kin-prow">
+                <div class="kin-rlabel"></div>
+                <div v-for="c in kinGrid.cols" :key="'kc'+c" class="kin-clabel">{{ c }}</div>
+              </div>
+              <div v-for="r in kinGrid.rows" :key="'kr'+r" class="kin-prow">
+                <div class="kin-rlabel">{{ r }}</div>
+                <div v-for="c in kinGrid.cols" :key="'kw'+r+c" class="kin-well"
+                  :style="kinGridStyle(`${r}${c}`)" :title="kinWellTitle(`${r}${c}`)"
+                  @click="kinAnalysis?.wells[`${r}${c}`] ? (kinSelected = `${r}${c}`, kinOverlayAll = false) : null"></div>
+              </div>
+            </div>
+            <div class="kin-legend">
+              <span v-for="c in KINETIC_CLASSES" :key="c.key">
+                <span class="kin-dot" :style="{ background: getPhaseColor(kinPhaseOf(c.key), 0.5), borderColor: getPhaseColor(kinPhaseOf(c.key), 1) }"></span>
+                {{ kinCounts[c.key] }} {{ c.label }}
+              </span>
+              <span v-if="kinOverrideCount" class="kin-manual-note">
+                <i class="fas fa-hand-pointer"></i> {{ kinOverrideCount }} set by hand
+                <button class="kin-linkbtn" @click="clearKinOverrides">reset</button>
+              </span>
+            </div>
+          </div>
+
+          <!-- Curve -->
+          <div class="kin-plot-col">
+            <div class="kin-plot-head">
+              <div class="color-mode-toggle">
+                <button type="button" :class="{ active: !kinOverlayAll }" @click="kinOverlayAll = false">One well</button>
+                <button type="button" :class="{ active: kinOverlayAll }" @click="kinOverlayAll = true">All curves</button>
+              </div>
+              <span v-if="kinSelectedSummary?.wd" class="kin-sub">
+                Sample {{ kinSelectedSummary.wd.sampleId }} · A {{ kinSelectedSummary.wd.anion }} · B {{ kinSelectedSummary.wd.cation }} · C {{ kinSelectedSummary.wd.salt }} mM
+              </span>
+            </div>
+            <div :id="KIN_PLOT_ID" class="kin-plot"></div>
+
+            <div v-if="kinSelectedSummary" class="kin-metrics">
+              <div><span>Peak OD</span><strong>{{ kinSelectedSummary.w.peak.toFixed(4) }}</strong></div>
+              <div><span>Baseline</span><strong>{{ kinSelectedSummary.w.baseline.toFixed(4) }}</strong></div>
+              <div><span>Onset</span><strong>{{ formatMinutes(kinSelectedSummary.w.onsetMin) }}</strong></div>
+              <div><span>Dissolved</span><strong>{{ formatMinutes(kinSelectedSummary.w.dissolvedMin) }}</strong></div>
+              <div><span>Lifetime</span><strong>{{ formatMinutes(kinSelectedSummary.w.lifetimeMin) }}</strong></div>
+              <div><span>End OD</span><strong>{{ kinSelectedSummary.w.endOD.toFixed(4) }}</strong></div>
+            </div>
+
+            <p v-if="kinSelectedSummary?.w.startsHigh" class="kin-warn">
+              <i class="fas fa-triangle-exclamation"></i>
+              Already turbid at the first reading — it may have coacervated during pipetting, so the onset and lifetime are lower bounds.
+            </p>
+            <p v-if="kinSelectedSummary?.w.lateDissolution" class="kin-warn">
+              <i class="fas fa-clock"></i>
+              Dissolved at {{ formatMinutes(kinSelectedSummary.w.dissolvedMin) }}, after your {{ formatMinutes(kinSettings.timeLimitMin) }} limit — counted as metastable.
+            </p>
+
+            <div v-if="kinSelectedSummary" class="kin-override">
+              <span>{{ kinSelectedSummary.id }} is</span>
+              <button v-for="c in KINETIC_CLASSES" :key="c.key" type="button"
+                class="kin-cbtn" :class="{ active: kinSelectedSummary.cls === c.key }"
+                :style="kinSelectedSummary.cls === c.key ? { background: getPhaseColor(kinPhaseOf(c.key), 0.85), borderColor: getPhaseColor(kinPhaseOf(c.key), 1), color: '#fff' } : {}"
+                @click="setKinOverride(kinSelectedSummary.id, c.key)">{{ c.short }}</button>
+              <button v-if="kinSelectedSummary.manual" type="button" class="kin-linkbtn"
+                @click="setKinOverride(kinSelectedSummary.id, null)"
+                :title="`Back to what the thresholds say: ${classMeta(kinSelectedSummary.auto)?.label}`">
+                ↺ back to auto ({{ classMeta(kinSelectedSummary.auto)?.short }})
+              </button>
+              <span v-else class="kin-sub">from the thresholds — click a class to set it by hand (e.g. after microscopy)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Every well, sortable, with the same override in reach -->
+        <div class="kin-table-wrap">
+          <table class="kin-table">
+            <thead>
+              <tr>
+                <th class="kin-sortable" @click="kinSortBy = 'well'" :class="{ on: kinSortBy === 'well' }">Well</th>
+                <th>Sample</th>
+                <th>A · B · C (mM)</th>
+                <th class="kin-sortable" @click="kinSortBy = 'peak'" :class="{ on: kinSortBy === 'peak' }">Peak OD</th>
+                <th>Onset</th>
+                <th class="kin-sortable" @click="kinSortBy = 'lifetime'" :class="{ on: kinSortBy === 'lifetime' }">Lifetime</th>
+                <th class="kin-sortable" @click="kinSortBy = 'class'" :class="{ on: kinSortBy === 'class' }">Class</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in kinTableRows" :key="row.wellId"
+                :class="{ sel: row.wellId === kinSelected }" @click="kinSelected = row.wellId; kinOverlayAll = false">
+                <td>{{ row.wellId }}</td>
+                <td>{{ row.wd ? row.wd.sampleId : '—' }}</td>
+                <td>{{ row.wd ? `${row.wd.anion} · ${row.wd.cation} · ${row.wd.salt}` : '—' }}</td>
+                <td>{{ row.w.peak.toFixed(4) }}<i v-if="row.w.startsHigh" class="fas fa-triangle-exclamation kin-flag" title="Already turbid at the first reading"></i></td>
+                <td>{{ formatMinutes(row.w.onsetMin) }}</td>
+                <td>{{ formatMinutes(row.w.lifetimeMin) }}</td>
+                <td @click.stop>
+                  <select class="kin-cls-select" :value="row.manual ? row.cls : 'auto'"
+                    :style="{ borderColor: getPhaseColor(kinPhaseOf(row.cls), 1), background: getPhaseColor(kinPhaseOf(row.cls), 0.18) }"
+                    @change="setKinOverride(row.wellId, $event.target.value)">
+                    <option value="auto">{{ classMeta(row.auto)?.short }} (auto)</option>
+                    <option v-for="c in KINETIC_CLASSES" :key="c.key" :value="c.key">{{ c.short }} ✋</option>
+                  </select>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="kin-foot">
+          <div class="kin-map">
+            <span v-for="c in KINETIC_CLASSES" :key="c.key" class="kin-mapitem">
+              {{ c.short }} →
+              <select v-model.number="kinClassPhase[c.key]">
+                <option v-for="p in PHASE_SLOTS" :key="p" :value="p">{{ phaseLabel(p) }}</option>
+              </select>
+            </span>
+            <label class="checkbox-label" title="Renames the phase slots in the map, the legend and the ledger dropdown so they read as coacervation outcomes.">
+              <input type="checkbox" v-model="kinRenamePhases" /> name the phases after these classes
+            </label>
+          </div>
+          <span v-if="kinPhaseClash" class="kin-clash"><i class="fas fa-triangle-exclamation"></i> {{ kinPhaseClash }}</span>
+          <span class="kin-sub" style="margin-left:auto;">
+            {{ kinLinkedCount }} of {{ kinWellIds.length }} wells matched to the plate<template v-if="kinAlreadyLogged">, {{ kinAlreadyLogged }} already in the ledger — applying again updates them</template>
+          </span>
+          <button class="cond-btn ghost" @click="showKinReview = false">Close</button>
+          <button class="cond-btn" @click="importPlatereaderResults" :disabled="!prPreviewItems.length">
+            <i class="fas fa-check"></i> Apply {{ prPreviewItems.length }} wells
+          </button>
+        </div>
+      </div>
+    </div>
+    </Teleport>
+
     <!-- ── Save conditions dialog (teleported to centre on the viewport) ── -->
     <Teleport to="body">
     <div v-if="showSaveCond" class="cond-modal" :class="{ 'dark-mode': store.isDarkMode }" @click.self="showSaveCond = false">
@@ -1068,6 +1433,13 @@ import { esc } from '../utils/htmlSafe'
 import { invChip } from '../utils/invChip'
 import { useLabStore } from '../stores/labStore'
 import { filterInventory } from '../utils/inventoryFilter'
+import {
+  parseSkanItXml, analyzePlate, sortWellIds, formatMinutes,
+  KINETIC_CLASSES, DEFAULT_KINETIC_SETTINGS, normalizeKineticSettings,
+} from '../utils/plateReaderKinetics'
+import { readPlateWells, levelSpacing } from '../utils/phaseWellMapping'
+import { swapComponentSlots, COMPONENT_SLOTS as COMP_KEYS, SLOT_LETTERS as SLOT_LETTER } from '../utils/componentSlots'
+import { fmtConc } from '../utils/wellComposition'
 import PhaseBufferSelect from './PhaseBufferSelect.vue'
 import Plotly from 'plotly.js-dist-min'
 
@@ -1089,6 +1461,17 @@ const phaseColors = {
 const phaseNames = {
     0: 'Clear (0)', 1: 'Phase 1', 2: 'Phase 2', 3: 'Phase 3', 4: 'Phase 4'
 };
+
+// A phase index is just a slot; what the slot MEANS belongs to the screen. Once a
+// kinetic import has decided that phase 1 is "Transient coacervate", every legend,
+// tooltip and dropdown in the module says so — a map labelled "Phase 1 / Phase 2"
+// is unreadable a week later. Falls back to the generic names when unnamed.
+const phaseLabel = (phase) => {
+    if (phase === -1) return 'Untested'
+    const custom = config.value?.phaseLabels?.[phase]
+    return (typeof custom === 'string' && custom.trim()) || phaseNames[phase] || `Phase ${phase}`
+}
+const PHASE_SLOTS = [0, 1, 2, 3, 4]
 
 // Colour scheme for the data points.
 //  · 'categorical' — a distinct hue per phase (for independent phases: coacervates, aggregates…).
@@ -1143,6 +1526,9 @@ const config = ref({
   // { id, name, conc, unit, stockConc, stockUnit, inv, searchQuery, searchScope }.
   constants: [],
   showConstants: false,
+  // What each phase index means in THIS screen, e.g. { 1: 'Transient coacervate' }.
+  // Empty = the generic "Phase 1…4" names.
+  phaseLabels: {},
 })
 
 // ── Constant components (same in every well) ─────────────────────────────────
@@ -1463,7 +1849,11 @@ const filterBlockInventory = (query, scope) => filterInventory(store.inventory, 
 
 // Compute per-well volumes for a suggestion, accounting for background salt and pH.
 // Returns { vA, vB, vC, vFill, backgroundNa_mM, mixedPH, exceeds }
-const computeWellVolumes = (sug) => {
+// `extras` are components added for one export only — a compound stirred into the
+// replated wells that was not part of the original screen. They are dosed exactly
+// like constants (same final concentration in every well) and they come out of the
+// fill-up, so the well total is unchanged and the water is recomputed around them.
+const computeWellVolumes = (sug, extras = []) => {
   const V   = config.value.targetVolume
   const cfg = config.value
 
@@ -1492,7 +1882,7 @@ const computeWellVolumes = (sug) => {
   // Constant components — the same final concentration in every well. Each adds a
   // fixed volume that reduces the fill-up. (Treated as inert for the Na⁺ balance;
   // uniform Na⁺ buffers belong in the fill-up/medium fields above.)
-  const consts = Array.isArray(cfg.constants) ? cfg.constants : []
+  const consts = [...(Array.isArray(cfg.constants) ? cfg.constants : []), ...(extras || [])]
   const constVols = consts.map(k => {
     const stockMM = getMM(k.stockConc, k.stockUnit)
     const cMM = getMM(k.conc, k.unit)
@@ -1560,13 +1950,46 @@ const worstCaseFill = computed(() => {
   return { frac, uL: frac * (Number(cfg.targetVolume) || 0) }
 })
 
-const COMP_KEYS = ['anion', 'cation', 'salt', 'compD']
+
+// Move a compound onto another letter. Whoever was on that letter takes this one's
+// place, and everything either of them owned — range, step, stock, unit, inventory
+// link, solvent and every value already logged against them — goes with them, so
+// the dataset means exactly what it meant before, just under different letters.
+const swapComponentTo = (from, to) => {
+  if (!to || from === to) return
+  const other = compLabel(to)
+  if (experiments.value.length &&
+      !confirm(`Move ${compLabel(from)} onto ${SLOT_LETTER[to]} and ${other} onto ${SLOT_LETTER[from]}?\n\n`
+        + `Their ranges, stocks and all ${experiments.value.length} logged values swap with them, so nothing changes meaning.`)) return
+
+  swapComponentSlots(config.value, [...experiments.value, ...suggestions.value], from, to)
+
+  // D is where a swapped-in compound would go invisible: its axis is only drawn
+  // when the fourth component is switched on.
+  if (from === 'compD' || to === 'compD') {
+    config.value.enableCompD = true
+    currentDSlice.value = Number(config.value.compDMin) || 0
+  }
+  // The slice grid names its axes by slot, so keep it pointing at the same compounds.
+  for (const axis of [gridXKey, gridYKey]) {
+    if (axis.value === from) axis.value = to
+    else if (axis.value === to) axis.value = from
+  }
+  renderPlot()
+}
+
 const compLabel = (key) => ({
   anion: () => config.value.anionName || 'A',
   cation: () => config.value.cationName || 'B',
   salt: () => config.value.saltName || 'C',
   compD: () => config.value.compDName || 'D',
 }[key]?.() ?? key)
+
+// "A · K10 peptide (mM)" — the letter first, because that is what the pickers, the
+// ledger columns and the replate control all name, and the name second, because
+// that is what is in the tube.
+const compAxisTitle = (key) => `${SLOT_LETTER[key] || '?'} · ${compLabel(key)} (${config.value[key + 'Unit'] || ''})`
+const compPickerLabel = (key) => `${SLOT_LETTER[key] || '?'} · ${compLabel(key)}`
 
 // A component's own [min, max], ordered.
 const EPS = 1e-9
@@ -1685,91 +2108,172 @@ const getWellSample = (dataArray, rIndex, cIndex) => {
 const getWellTooltip = (dataArray, r, c) => {
   const s = getWellSample(dataArray, r, c)
   if (!s) return 'Empty Well'
-  const statusName = s.phase === -1 ? 'AI TARGET' : (phaseNames[s.phase] || `Phase ${s.phase}`);
+  const statusName = s.phase === -1 ? 'AI TARGET' : phaseLabel(s.phase);
   return `ID: ${s.sampleId} [${statusName}]\nA: ${s.anion} | B: ${s.cation} | C: ${s.salt}`
+}
+
+// One well's worth of HTML: the chips, the volumes each component needs to reach
+// its concentration in the target well volume, and the fill-up. Shared by the
+// suggestion export and the phase export so a re-plated condition is written in
+// exactly the same shape — which is what lets the robot exporters, the usage
+// tracker and this module's own plate reader read it back.
+const buildTargetWellHtml = (sample, { header, extras = [] }) => {
+    const getInventoryTag = (inv, vol, targetConc) => {
+        if (!inv) return `<strong>Unknown Component:</strong> ${esc(vol)} µL (${esc(targetConc)} mM)<br>`;
+        return `&nbsp;${invChip(inv, { unit: 'µM', fmt: store.formatNum })}&nbsp; ${esc(vol)} µL (${esc(targetConc)} mM)<br>`;
+    };
+    const fmt = n => Number(n).toFixed(2)
+    const { vA, vB, vC, vD, vFill, constVols, backgroundNa_mM, mixedPH, exceeds } = computeWellVolumes(sample, extras)
+
+    const warningHtml = exceeds ? `<br><span style="color:#ef4444; font-size:0.7rem;">⚠️ Vol Exceeds Limit</span>` : '';
+
+    let bgHtml = ''
+    if (backgroundNa_mM > 0.001) {
+      bgHtml += `<span style="font-size:0.68rem; color:#f59e0b;">⊕ Background Na⁺: ${fmt(backgroundNa_mM)} mM</span><br>`
+    }
+    if (mixedPH !== null) {
+      bgHtml += `<span style="font-size:0.68rem; color:#8b5cf6;">⊕ Est. pH: ${mixedPH}</span><br>`
+    }
+
+    const fillupInv = config.value.fillupMedium.inv
+    let fillupHtml
+    if (fillupInv) {
+      fillupHtml = `&nbsp;${invChip(fillupInv, { unit: 'mM', fmt: store.formatNum })}&nbsp; ${fmt(vFill)} µL<br>`
+    } else {
+      const fillupLabel = config.value.fillupMedium.type === 'buffer'
+        ? (config.value.fillupMedium.bufName || 'Buffer')
+        : 'MQ H₂O'
+      fillupHtml = `<strong>${esc(fillupLabel)}:</strong> ${fmt(vFill)} µL<br>`
+    }
+
+    const dRowHtml = config.value.enableCompD
+        ? getInventoryTag(config.value.compDInv, fmt(vD), sample.compD || 0)
+        : '';
+
+    // Constants are emitted in the same `chip → volume → (target conc)` shape as
+    // A–D, so the journal, the usage tracker and the robot exporters all read them
+    // the same way. A zero-volume constant gets the plain label instead: a chip
+    // would claim the compound was used in a well that never receives any.
+    // These lines stay AFTER the A/B/C(/D) rows — the platereader importer reads
+    // the first three "µL (x mM)" pairs back out as the component concentrations.
+    let constHtml = '';
+    [...(config.value.constants || []), ...extras].forEach((k, ci) => {
+        const v = (constVols && constVols[ci]) || 0;
+        const target = `(${esc(String(k.conc))} ${esc(k.unit)})`;
+        constHtml += (k.inv && v > 0)
+            ? `&nbsp;${invChip(k.inv, { unit: k.stockUnit || 'µM', fmt: store.formatNum })}&nbsp; ${fmt(v)} µL ${target}<br>`
+            : `<strong>${esc(k.name || 'Constant')}:</strong> ${fmt(v)} µL ${target}<br>`;
+    });
+
+    return `<strong style="color: var(--primary);">${header}</strong><br>
+            ${getInventoryTag(config.value.anionInv, fmt(vA), sample.anion)}
+            ${getInventoryTag(config.value.cationInv, fmt(vB), sample.cation)}
+            ${getInventoryTag(config.value.saltInv, fmt(vC), sample.salt)}
+            ${dRowHtml}${constHtml}${bgHtml}${fillupHtml}${warningHtml}`;
+}
+
+// Lay a list of conditions onto a plate from a starting well, reading across rows.
+// Returns how many were written and how many did not fit.
+const writeRowsToPlate = (rows, plate, startWell, headerOf, extras = []) => {
+    const match = String(startWell || '').toUpperCase().trim().match(/^([A-Z]+)(\d+)$/)
+    if (!match) return null
+    const startRow = match[1].charCodeAt(0) - 65
+    const startCol = parseInt(match[2]) - 1
+    let written = 0, overflow = 0
+    rows.forEach((row, i) => {
+        const targetR = startRow + Math.floor((startCol + i) / 12)
+        const targetC = (startCol + i) % 12
+        if (targetR >= 8 || targetC >= 12) { overflow++; return }
+        const wId = String.fromCharCode(65 + targetR) + (targetC + 1)
+        plate.wells[wId] = buildTargetWellHtml(row, { header: headerOf(row), extras })
+        written++
+    })
+    return { written, overflow }
+}
+
+// ── Replate one phase ────────────────────────────────────────────────────────
+// The point of classifying a plate is to go back into one of the classes. These
+// are conditions that were already measured, so nothing about them is recomputed:
+// the concentrations are the recorded ones, dependency links are NOT reapplied
+// (that would move a measured point onto the line it was supposed to sit on), and
+// only the volumes are worked out fresh — c · V / c_stock against whatever target
+// well volume the new plate is being made at.
+const phaseExportPhase = ref(1)
+const phaseExportPlateId = ref('')
+const phaseExportStartWell = ref('A1')
+const phaseExportRunOnly = ref(false)
+
+const phaseCounts = computed(() => {
+  const counts = {}
+  for (const exp of experiments.value) counts[exp.phase] = (counts[exp.phase] || 0) + 1
+  return counts
+})
+
+const phaseExportRows = computed(() =>
+  experiments.value
+    .filter(e => e.phase === phaseExportPhase.value)
+    .filter(e => !phaseExportRunOnly.value || (e.kin && e.kin.source && e.kin.source === prKinFileName.value))
+    .sort((a, b) => Number(a.sampleId) - Number(b.sampleId))
+)
+
+// Components added to the replated wells only — the reason to go back into a phase
+// is usually to do something new to it. Each is dosed to the same final
+// concentration in every well and comes out of the fill-up, so the well total stays
+// at the target volume and the water is recomputed around them. They belong to the
+// export, not to the search space, so they never touch the AI suggestions.
+const phaseExtras = ref([])
+const addPhaseExtra = () => {
+  phaseExtras.value.push({
+    id: 'x_' + (globalThis.crypto?.randomUUID?.() || Date.now().toString(36)),
+    name: '', conc: 0, unit: 'mM', stockConc: 100, stockUnit: 'mM',
+    inv: null, searchQuery: '', searchScope: 'Global',
+  })
+}
+const removePhaseExtra = (i) => phaseExtras.value.splice(i, 1)
+
+// What each addition costs the fill-up, so it is visible before anything is written.
+const phaseExtraVolume = (k) => {
+  const stockMM = getMM(k.stockConc, k.stockUnit)
+  const cMM = getMM(k.conc, k.unit)
+  return stockMM > 0 ? (cMM / stockMM) * (Number(config.value.targetVolume) || 0) : 0
+}
+const phaseExtrasVolume = computed(() => phaseExtras.value.reduce((s, k) => s + phaseExtraVolume(k), 0))
+
+const exportPhaseToPlate = () => {
+  const rows = phaseExportRows.value
+  if (!rows.length) { alert(`No wells are classified as ${phaseLabel(phaseExportPhase.value)}.`); return }
+  const plate = store.wellPlates.find(p => p.id === phaseExportPlateId.value)
+  if (!plate) { alert('Pick the plate to send them to.'); return }
+
+  // An addition with no name would reach the plate as an anonymous volume.
+  const extras = phaseExtras.value.filter(k => (k.inv || (k.name || '').trim()) && phaseExtraVolume(k) > 0)
+  const ignored = phaseExtras.value.length - extras.length
+
+  const result = writeRowsToPlate(rows, plate, phaseExportStartWell.value,
+    r => `Sample [${r.sampleId}] · ${phaseLabel(phaseExportPhase.value)}`, extras)
+  if (!result) { alert('Invalid well format. Use A1, B2, etc.'); return }
+
+  const overfilled = rows.filter(r => computeWellVolumes(r, extras).exceeds).length
+  alert(`${result.written} ${phaseLabel(phaseExportPhase.value)} condition${result.written === 1 ? '' : 's'} sent to "${plate.name}" from ${phaseExportStartWell.value.toUpperCase()},`
+    + ` at ${config.value.targetVolume} µL per well.`
+    + (extras.length ? `\n\nAdded to every well: ${extras.map(k => `${k.inv ? k.inv.name : k.name} ${k.conc} ${k.unit}`).join(', ')} — ${phaseExtrasVolume.value.toFixed(2)} µL taken out of the fill-up.` : '')
+    + (ignored ? `\n\n${ignored} addition${ignored === 1 ? '' : 's'} skipped: no compound named, or a concentration of zero.` : '')
+    + (result.overflow ? `\n\n${result.overflow} did not fit on the plate — send the rest from another starting well.` : '')
+    + (overfilled ? `\n\n⚠️ ${overfilled} need more volume than the well holds; they are marked on the plate.` : ''))
 }
 
 const exportSuggestionsToPlate = () => {
     if (!targetPlateId.value || !targetStartWell.value) { alert("Please select a target plate and starting well."); return; }
     const plate = store.wellPlates.find(p => p.id === targetPlateId.value);
     if (!plate) return;
-    
-    const startWell = targetStartWell.value.toUpperCase().trim();
-    const match = startWell.match(/^([A-Z]+)(\d+)$/);
-    if (!match) { alert("Invalid well format. Use A1, B2, etc."); return; }
-    
-    let startRow = match[1].charCodeAt(0) - 65; 
-    let startCol = parseInt(match[2]) - 1;
 
-    const getInventoryTag = (inv, vol, targetConc) => {
-        if (!inv) return `<strong>Unknown Component:</strong> ${esc(vol)} µL (${esc(targetConc)} mM)<br>`;
-        return `&nbsp;${invChip(inv, { unit: 'µM', fmt: store.formatNum })}&nbsp; ${esc(vol)} µL (${esc(targetConc)} mM)<br>`;
-    };
-    
-    const fmt = n => Number(n).toFixed(2)
-    suggestions.value.forEach((sug, i) => {
-        let rOffset = Math.floor((startCol + i) / 12);
-        let cOffset = (startCol + i) % 12;
-
-        let targetR = startRow + rOffset;
-        let targetC = cOffset;
-
-        if (targetR < 8 && targetC < 12) {
-            let wId = String.fromCharCode(65 + targetR) + (targetC + 1);
-
-            const effectiveSug = applyDependencies({ ...sug })
-            const { vA, vB, vC, vD, vFill, constVols, backgroundNa_mM, mixedPH, exceeds } = computeWellVolumes(effectiveSug)
-
-            let warningHtml = exceeds ? `<br><span style="color:#ef4444; font-size:0.7rem;">⚠️ Vol Exceeds Limit</span>` : '';
-
-            let bgHtml = ''
-            if (backgroundNa_mM > 0.001) {
-              bgHtml += `<span style="font-size:0.68rem; color:#f59e0b;">⊕ Background Na⁺: ${fmt(backgroundNa_mM)} mM</span><br>`
-            }
-            if (mixedPH !== null) {
-              bgHtml += `<span style="font-size:0.68rem; color:#8b5cf6;">⊕ Est. pH: ${mixedPH}</span><br>`
-            }
-
-            const fillupInv = config.value.fillupMedium.inv
-            let fillupHtml
-            if (fillupInv) {
-              fillupHtml = `&nbsp;${invChip(fillupInv, { unit: 'mM', fmt: store.formatNum })}&nbsp; ${fmt(vFill)} µL<br>`
-            } else {
-              const fillupLabel = config.value.fillupMedium.type === 'buffer'
-                ? (config.value.fillupMedium.bufName || 'Buffer')
-                : 'MQ H₂O'
-              fillupHtml = `<strong>${esc(fillupLabel)}:</strong> ${fmt(vFill)} µL<br>`
-            }
-
-            const dRowHtml = config.value.enableCompD
-                ? getInventoryTag(config.value.compDInv, fmt(vD), effectiveSug.compD || 0)
-                : '';
-
-            // Constants are emitted in the same `chip → volume → (target conc)` shape as
-            // A–D, so the journal, the usage tracker and the robot exporters all read them
-            // the same way. A zero-volume constant gets the plain label instead: a chip
-            // would claim the compound was used in a well that never receives any.
-            // These lines stay AFTER the A/B/C(/D) rows — the platereader importer reads
-            // the first three "µL (x mM)" pairs back out as the component concentrations.
-            let constHtml = '';
-            (config.value.constants || []).forEach((k, ci) => {
-                const v = (constVols && constVols[ci]) || 0;
-                const target = `(${esc(String(k.conc))} ${esc(k.unit)})`;
-                constHtml += (k.inv && v > 0)
-                    ? `&nbsp;${invChip(k.inv, { unit: k.stockUnit || 'µM', fmt: store.formatNum })}&nbsp; ${fmt(v)} µL ${target}<br>`
-                    : `<strong>${esc(k.name || 'Constant')}:</strong> ${fmt(v)} µL ${target}<br>`;
-            });
-
-            let cellHtml = `<strong style="color: var(--primary);">AI Target [${sug.sampleId}]</strong><br>
-                            ${getInventoryTag(config.value.anionInv, fmt(vA), effectiveSug.anion)}
-                            ${getInventoryTag(config.value.cationInv, fmt(vB), effectiveSug.cation)}
-                            ${getInventoryTag(config.value.saltInv, fmt(vC), effectiveSug.salt)}
-                            ${dRowHtml}${constHtml}${bgHtml}${fillupHtml}${warningHtml}`;
-
-            plate.wells[wId] = cellHtml;
-        }
-    });
-    alert(`Successfully sent pipetting volumes to Plate: ${plate.name} starting at ${startWell}`);
+    // Suggestions are proposals, so the dependency links are applied on the way out;
+    // a measured condition is not touched — see exportPhaseToPlate.
+    const rows = suggestions.value.map(sug => ({ ...applyDependencies({ ...sug }), sampleId: sug.sampleId }))
+    const result = writeRowsToPlate(rows, plate, targetStartWell.value, r => `AI Target [${r.sampleId}]`)
+    if (!result) { alert("Invalid well format. Use A1, B2, etc."); return; }
+    alert(`Successfully sent pipetting volumes to Plate: ${plate.name} starting at ${targetStartWell.value.toUpperCase().trim()}`
+        + (result.overflow ? `\n\n${result.overflow} did not fit on the plate.` : ''));
 }
 
 const renderPlot = () => {
@@ -1780,7 +2284,7 @@ const renderPlot = () => {
 
   const classTraces = {};
   for(let i=0; i<=4; i++) {
-      classTraces[i] = { type: 'scatter3d', mode: 'markers', x:[], y:[], z:[], text:[], name: phaseNames[i], marker: {color: getPhaseColor(i), size: 5, symbol: 'circle', line: {color: '#000', width: 1}} };
+      classTraces[i] = { type: 'scatter3d', mode: 'markers', x:[], y:[], z:[], text:[], name: phaseLabel(i), marker: {color: getPhaseColor(i), size: 5, symbol: 'circle', line: {color: '#000', width: 1}} };
   }
   
   const traceUnknown = { type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], name: 'Untested', marker: { color: '#94a3b8', size: 2, symbol: 'circle' } };
@@ -1800,7 +2304,7 @@ const renderPlot = () => {
     : allData
 
   dataForPlot.forEach(exp => {
-    const statusName = exp.phase === -1 ? 'AI Target' : (phaseNames[exp.phase] || `Phase ${exp.phase}`);
+    const statusName = exp.phase === -1 ? 'AI Target' : phaseLabel(exp.phase);
     const dTxt = dEnabled ? ` | D: ${exp.compD ?? 0}` : '';
     const label = `ID: ${exp.sampleId || 'Manual'} | ${statusName} | A: ${exp.anion} | B: ${exp.cation} | C: ${exp.salt}${dTxt}`;
 
@@ -1853,7 +2357,7 @@ const renderPlot = () => {
               opacity: 0.45,
               colorscale: cScale,
               caps: { x: {show: false}, y: {show: false}, z: {show: false} },
-              name: `${phaseNames[pId] || 'Phase ' + pId} Boundary`,
+              name: `${phaseLabel(pId)} Boundary`,
               showscale: false,
               hoverinfo: 'none'
           };
@@ -1863,9 +2367,9 @@ const renderPlot = () => {
 
   const layout = {
     scene: {
-      xaxis: { range: [config.value.anionMin, config.value.anionMax], title: { text: `${config.value.anionName} (${config.value.anionUnit})`, font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } },
-      yaxis: { range: [config.value.cationMin, config.value.cationMax], title: { text: `${config.value.cationName} (${config.value.cationUnit})`, font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } },
-      zaxis: { range: [config.value.saltMin, config.value.saltMax], title: { text: `${config.value.saltName} (${config.value.saltUnit})`, font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } }
+      xaxis: { range: [config.value.anionMin, config.value.anionMax], title: { text: compAxisTitle('anion'), font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } },
+      yaxis: { range: [config.value.cationMin, config.value.cationMax], title: { text: compAxisTitle('cation'), font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } },
+      zaxis: { range: [config.value.saltMin, config.value.saltMax], title: { text: compAxisTitle('salt'), font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } }
     },
     paper_bgcolor: '#000000',
     margin: { l: 0, r: fixedAxis.value ? 110 : 0, b: 0, t: 0 },
@@ -1934,8 +2438,11 @@ const renderSliceGrid = () => {
   const colBins = facets[0] ? buildBins(facets[0], data).map(b => ({ ...b, key: facets[0] })) : [null]
   const rowBins = facets[1] ? buildBins(facets[1], data).map(b => ({ ...b, key: facets[1] })) : [null]
 
-  const xLabel = `${compLabel(xKey)} (${config.value[xKey + 'Unit'] || ''})`
-  const yLabel = `${compLabel(yKey)} (${config.value[yKey + 'Unit'] || ''})`
+  // Titled by letter AND name. The rest of the module talks in A/B/C/D — the
+  // component pickers, the replate control, the fit-to-data summary — so an axis
+  // labelled only "K10 peptide" makes the reader do the lookup themselves.
+  const xLabel = compAxisTitle(xKey)
+  const yLabel = compAxisTitle(yKey)
 
   // Ticks sit on the values the screen actually visited, not on Plotly's round
   // numbers — so the axis itself tells you which concentrations were pipetted.
@@ -1965,6 +2472,14 @@ const renderSliceGrid = () => {
     const m = (dHi - dLo) * 0.06 || 1
     return [dLo - m, dHi + m]
   }
+  // "C = 30 mM" for a single level, "C 30–60 mM" for a binned range.
+  const facetStripLabel = (bin) => {
+    const unit = config.value[bin.key + 'Unit'] || ''
+    const letter = SLOT_LETTER[bin.key] || '?'
+    const value = String(bin.value)
+    return /[–\-—]/.test(value) ? `${letter} ${value} ${unit}` : `${letter} = ${value} ${unit}`
+  }
+
   const xTicks = screenedTicks(xKey, 4)
   const yTicks = screenedTicks(yKey, 4)
   const xRange = pad(xKey, xTicks?.tickvals)
@@ -1993,7 +2508,7 @@ const renderSliceGrid = () => {
     height: H,
     paper_bgcolor: '#000000',
     plot_bgcolor: '#0b0b0b',
-    margin: { l: 74, r: R > 1 ? 86 : 26, t: C > 1 ? 52 : 18, b: 84 },
+    margin: { l: 74, r: R > 1 ? 112 : 26, t: C > 1 ? 56 : 18, b: 84 },
     showlegend: true,
     legend: { orientation: 'h', y: -0.13, yanchor: 'top', x: 0.5, xanchor: 'center',
               font: { color: '#ffffff', size: 10 } },
@@ -2040,8 +2555,8 @@ const renderSliceGrid = () => {
       const byPhase = {}
       const targets = { x: [], y: [], text: [] }
       cell.forEach(d => {
-        const label = `ID ${d.sampleId || 'manual'}<br>${compLabel(xKey)} ${d[xKey]} · ${compLabel(yKey)} ${d[yKey]}` +
-          facets.map(f => `<br>${compLabel(f)} ${d[f] ?? 0}`).join('')
+        const label = `ID ${d.sampleId || 'manual'}<br>${compPickerLabel(xKey)} ${d[xKey]} · ${compPickerLabel(yKey)} ${d[yKey]}` +
+          facets.map(f => `<br>${compPickerLabel(f)} ${d[f] ?? 0}`).join('')
         if (d.phase >= 0 && d.phase <= 4) {
           (byPhase[d.phase] = byPhase[d.phase] || { x: [], y: [], text: [] })
           byPhase[d.phase].x.push(d[xKey]); byPhase[d.phase].y.push(d[yKey]); byPhase[d.phase].text.push(label)
@@ -2057,7 +2572,7 @@ const renderSliceGrid = () => {
         traces.push({
           type: 'scatter', mode: 'markers', xaxis: ax, yaxis: ay,
           x: byPhase[p].x, y: byPhase[p].y, text: byPhase[p].text, hoverinfo: 'text',
-          name: phaseNames[pid] || `Phase ${pid}`, legendgroup: 'phase' + pid, showlegend: first, legendrank: pid + 1,
+          name: phaseLabel(pid), legendgroup: 'phase' + pid, showlegend: first, legendrank: pid + 1,
           marker: { color: getPhaseColor(pid), size: dotSize, line: { color: '#000', width: 0.4 } }
         })
       })
@@ -2072,15 +2587,16 @@ const renderSliceGrid = () => {
         })
       }
 
-      // Panel labels carry the value only — the component's name is stated once
-      // for the whole row of panels, so nine panels don't repeat it nine times.
+      // Each strip names its own component: "C = 30 mM", not a bare "30". A number
+      // on top of a panel and another down its side is two numbers with nothing
+      // saying which compound either belongs to.
       if (ri === 0 && cBin) {
-        layout.annotations.push({ text: cBin.value, xref: 'paper', yref: 'paper',
+        layout.annotations.push({ text: facetStripLabel(cBin), xref: 'paper', yref: 'paper',
           x: (xDom[0] + xDom[1]) / 2, y: 1.008, xanchor: 'center', yanchor: 'bottom',
           showarrow: false, font: { color: '#e2e8f0', size: 10 } })
       }
       if (ci === C - 1 && rBin) {
-        layout.annotations.push({ text: rBin.value, xref: 'paper', yref: 'paper',
+        layout.annotations.push({ text: facetStripLabel(rBin), xref: 'paper', yref: 'paper',
           x: 1.006, y: (yDom[0] + yDom[1]) / 2, xanchor: 'left', yanchor: 'middle',
           showarrow: false, font: { color: '#e2e8f0', size: 10 } })
       }
@@ -2096,21 +2612,21 @@ const renderSliceGrid = () => {
   // margins, where nothing else is competing for the space.
   layout.annotations.push(
     { text: xLabel, xref: 'paper', yref: 'paper', x: 0.5, y: -0.055, xanchor: 'center', yanchor: 'top',
-      showarrow: false, font: { color: '#ffffff', size: 11 } },
+      showarrow: false, font: { color: '#ffffff', size: 12 } },
     { text: yLabel, xref: 'paper', yref: 'paper', x: -0.055, y: 0.5, xanchor: 'right', yanchor: 'middle',
-      showarrow: false, textangle: -90, font: { color: '#ffffff', size: 11 } }
+      showarrow: false, textangle: -90, font: { color: '#ffffff', size: 12 } }
   )
   if (facets[0]) {
     layout.annotations.push({
-      text: `${compLabel(facets[0])} (${config.value[facets[0] + 'Unit'] || ''}) →`,
+      text: `columns: ${compAxisTitle(facets[0])}`,
       xref: 'paper', yref: 'paper', x: 0.5, y: 1.055, xanchor: 'center', yanchor: 'bottom',
-      showarrow: false, font: { color: '#8ea0b5', size: 10 } })
+      showarrow: false, font: { color: '#cbd5e1', size: 10.5 } })
   }
   if (facets[1]) {
     layout.annotations.push({
-      text: `${compLabel(facets[1])} (${config.value[facets[1] + 'Unit'] || ''}) ↓`,
+      text: `rows: ${compAxisTitle(facets[1])}`,
       xref: 'paper', yref: 'paper', x: 1.052, y: 0.5, xanchor: 'left', yanchor: 'middle',
-      showarrow: false, textangle: 90, font: { color: '#8ea0b5', size: 10 } })
+      showarrow: false, textangle: 90, font: { color: '#cbd5e1', size: 10.5 } })
   }
 
   Plotly.react('phase-slice-grid', traces, layout, { displayModeBar: false, responsive: true })
@@ -2122,13 +2638,13 @@ const render2DPlot = () => {
 
   const fixed = fixedAxis.value
   const [xKey, yKey] = ['anion', 'cation', 'salt'].filter(a => a !== fixed)
-  const xLabel = `${config.value[xKey + 'Name']} (${config.value[xKey + 'Unit']})`
-  const yLabel = `${config.value[yKey + 'Name']} (${config.value[yKey + 'Unit']})`
-  const fixedLabel = `${config.value[fixed + 'Name']} = ${config.value[fixed + 'Min']} ${config.value[fixed + 'Unit']}`
+  const xLabel = compAxisTitle(xKey)
+  const yLabel = compAxisTitle(yKey)
+  const fixedLabel = `${SLOT_LETTER[fixed] || '?'} · ${compLabel(fixed)} = ${config.value[fixed + 'Min']} ${config.value[fixed + 'Unit']}`
 
   const classTraces = {}
   for (let i = 0; i <= 4; i++) {
-    classTraces[i] = { type: 'scatter', mode: 'markers', x: [], y: [], text: [], name: phaseNames[i],
+    classTraces[i] = { type: 'scatter', mode: 'markers', x: [], y: [], text: [], name: phaseLabel(i),
       marker: { color: getPhaseColor(i), size: 8, symbol: 'circle', line: { color: '#fff', width: 0.5 } } }
   }
   const traceUnknown = { type: 'scatter', mode: 'markers', x: [], y: [], text: [], name: 'Untested',
@@ -2138,7 +2654,7 @@ const render2DPlot = () => {
 
   const allData = [...experiments.value, ...suggestions.value]
   allData.forEach(exp => {
-    const statusName = exp.phase === -1 ? 'AI Target' : (phaseNames[exp.phase] || `Phase ${exp.phase}`)
+    const statusName = exp.phase === -1 ? 'AI Target' : phaseLabel(exp.phase)
     const xVal = exp[xKey], yVal = exp[yKey]
     const label = `ID: ${exp.sampleId || 'Manual'} | ${statusName} | ${xLabel}: ${xVal} | ${yLabel}: ${yVal}`
     if (exp.phase >= 0 && exp.phase <= 4) {
@@ -2343,7 +2859,15 @@ const bootstrapLegacy = async () => {
   datasetNameInput.value = 'Legacy Data'
 }
 
-const updateExperiment = () => { renderPlot() }
+// Changing a phase by hand outranks whatever the plate reader said — microscopy
+// usually is the reason. Keep the measurements on the point, but stop the receipt
+// claiming a class the point no longer carries.
+const updateExperiment = (exp) => {
+  if (exp && exp.kin && exp.kin.phase !== undefined && exp.kin.phase !== exp.phase) {
+    exp.kin = { ...exp.kin, cls: null, manual: true, phase: exp.phase }
+  }
+  renderPlot()
+}
 
 const addManualRow = () => {
   experiments.value.push({ sampleId: Math.floor(Math.random() * 9000), anion: 0, cation: 0, salt: 0, compD: 0, phase: -1 })
@@ -2377,6 +2901,10 @@ const importAllSuggestions = () => {
 }
 
 // Build a serializable snapshot of the current workspace.
+//
+// The kinetic thresholds and any hand-set classifications travel with the dataset;
+// the traces themselves do not — a 16-hour run is ~1 MB of readings per plate, and
+// the XML is the archive for that. Reload the file and the same thresholds apply.
 const buildSnapshot = (id, name) => ({
   id,
   name,
@@ -2384,6 +2912,12 @@ const buildSnapshot = (id, name) => ({
   config: JSON.parse(JSON.stringify(config.value)),
   experiments: JSON.parse(JSON.stringify(experiments.value)),
   suggestions: JSON.parse(JSON.stringify(suggestions.value)),
+  kinetics: {
+    settings: { ...kinSettings },
+    classPhase: { ...kinClassPhase },
+    overrides: { ...kinOverrides.value },
+    plateId: prLinkedPlateId.value || null,
+  },
 })
 
 const persistDataset = async (snapshot, scope) => {
@@ -2430,8 +2964,15 @@ const loadDataset = (id) => {
   if (!ds) return
   // Merge saved config into current config so any new fields keep defaults.
   config.value = { ...config.value, ...(ds.config || {}) }
+  if (!config.value.phaseLabels) config.value.phaseLabels = {}
   experiments.value = (ds.experiments || []).map(e => ({ ...e }))
   suggestions.value = (ds.suggestions || []).map(s => ({ ...s }))
+  // Thresholds saved before a field existed fall back to its default rather than
+  // to undefined, which would classify every well as none.
+  Object.assign(kinSettings, normalizeKineticSettings(ds.kinetics?.settings))
+  Object.assign(kinClassPhase, { none: 0, transient: 1, metastable: 2 }, ds.kinetics?.classPhase || {})
+  kinOverrides.value = { ...(ds.kinetics?.overrides || {}) }
+  if (ds.kinetics?.plateId) prLinkedPlateId.value = ds.kinetics.plateId
   activeDatasetId.value = id
   datasetNameInput.value = ds.name || ''
   datasetScope.value = ds.scope || 'Personal'
@@ -2449,6 +2990,9 @@ const newDataset = () => {
   activeDatasetId.value = null
   datasetNameInput.value = ''
   datasetScope.value = 'Personal'
+  // Hand-set classifications describe another screen's wells; loadDataset brings
+  // each dataset's own back.
+  kinOverrides.value = {}
   renderPlot()
 }
 
@@ -2500,11 +3044,11 @@ const prDissolutionThreshold = ref(0.10)
 const prPhaseBoundaries = reactive({ phase0max: 0.15, phase1max: 0.30, phase2max: 0.60, phase3max: 0.90 })
 
 const OD_THRESHOLDS_DISPLAY = computed(() => [
-  { phase: 0, label: 'Clear',   range: `0 – ${prPhaseBoundaries.phase0max}` },
-  { phase: 1, label: 'Phase 1', range: `${prPhaseBoundaries.phase0max} – ${prPhaseBoundaries.phase1max}` },
-  { phase: 2, label: 'Phase 2', range: `${prPhaseBoundaries.phase1max} – ${prPhaseBoundaries.phase2max}` },
-  { phase: 3, label: 'Phase 3', range: `${prPhaseBoundaries.phase2max} – ${prPhaseBoundaries.phase3max}` },
-  { phase: 4, label: 'Phase 4', range: `> ${prPhaseBoundaries.phase3max}` },
+  { phase: 0, label: phaseLabel(0), range: `0 – ${prPhaseBoundaries.phase0max}` },
+  { phase: 1, label: phaseLabel(1), range: `${prPhaseBoundaries.phase0max} – ${prPhaseBoundaries.phase1max}` },
+  { phase: 2, label: phaseLabel(2), range: `${prPhaseBoundaries.phase1max} – ${prPhaseBoundaries.phase2max}` },
+  { phase: 3, label: phaseLabel(3), range: `${prPhaseBoundaries.phase2max} – ${prPhaseBoundaries.phase3max}` },
+  { phase: 4, label: phaseLabel(4), range: `> ${prPhaseBoundaries.phase3max}` },
 ])
 
 // All plates available for linking (workspace + cloud, deduplicated).
@@ -2518,32 +3062,204 @@ const prLinkedPlate = computed(() =>
   prAvailablePlates.value.find(p => p.id === prLinkedPlateId.value) || null
 )
 
-// Parse each well's HTML for sampleId AND concentrations written by exportSuggestionsToPlate.
-// Format per well: "AI Target [9001]" … "5.50 µL (5.5 mM)" × 3 compounds
-const prWellData = computed(() => {
-  if (!prLinkedPlate.value) return {}
-  const map = {}
-  for (const [wellId, html] of Object.entries(prLinkedPlate.value.wells || {})) {
-    if (!html) continue
-    const sidMatch = html.match(/\[(\d+)\]/)
-    if (!sidMatch) continue
-    const sampleId = parseInt(sidMatch[1])
-    // Match "X.XX µL (Y.YY mM)" — the target concentration after each inv-ref span.
-    const concMatches = [...html.matchAll(/[\d.]+\s*µL\s*\(([\d.]+)\s*mM\)/g)]
-    if (concMatches.length < 3) continue
-    const [anion, cation, salt] = concMatches.slice(0, 3).map(m => parseFloat(m[1]))
-    map[wellId] = { sampleId, anion, cation, salt }
-  }
-  return map
+// The screen's components, as the well reader needs to recognise them: the
+// inventory link when one was chosen, the typed name otherwise.
+const prComponents = computed(() => {
+  const c = config.value
+  return [
+    { key: 'anion',  invId: c.anionInv?.id  || '', name: c.anionInv?.name  || c.anionName,  unit: c.anionUnit },
+    { key: 'cation', invId: c.cationInv?.id || '', name: c.cationInv?.name || c.cationName, unit: c.cationUnit },
+    { key: 'salt',   invId: c.saltInv?.id   || '', name: c.saltInv?.name   || c.saltName,   unit: c.saltUnit },
+    { key: 'compD',  invId: c.compDInv?.id  || '', name: c.compDInv?.name  || c.compDName,  unit: c.compDUnit },
+  ]
 })
 
+// Wells that say something about this screen. Plates written by "Send to plate"
+// are read from their sample id and target concentrations; any other plate —
+// hand-built, or rebuilt from an .onp — has its design inferred from what is in
+// it: whatever was pipetted at the same volume into every well is a constant, and
+// whatever changes between wells is an axis. See phaseWellMapping.js.
+const prPlateRead = computed(() => {
+  if (!prLinkedPlate.value) return { wells: {}, inference: null }
+  return readPlateWells(prLinkedPlate.value.wells, {
+    components: prComponents.value,
+    plateId: prLinkedPlate.value.id,
+    hasD: !!config.value.enableCompD,
+  })
+})
+
+const prWellData = computed(() => prPlateRead.value.wells)
+const prInference = computed(() => prPlateRead.value.inference)
 const prMappedWellCount = computed(() => Object.keys(prWellData.value).length)
+
+// fmtConc, not the global fixed-decimals formatter: an axis running 0.008–0.064 mM
+// is real, and two decimals would print it as "0.01–0.06".
+const fmtRange = (s) => (Math.abs(s.max - s.min) < 1e-12
+  ? `${fmtConc(s.max)} ${s.unit}`
+  : `${fmtConc(s.min)}–${fmtConc(s.max)} ${s.unit}`)
+
+// A plate that maps nothing has nothing that varies, or nothing readable at all.
+const prMapHint = computed(() => {
+  if (!prLinkedPlate.value || prMappedWellCount.value) return ''
+  const filled = Object.values(prLinkedPlate.value.wells || {}).filter(Boolean).length
+  if (!filled) return 'That plate has no filled wells.'
+  return `Nothing in those ${filled} wells varies between them — every compound was pipetted at the same volume from the same stock, so there is no axis to map. Check you picked the right plate.`
+})
 
 const prSampleIdToExp = computed(() => {
   const map = {}
   for (const exp of experiments.value) map[String(exp.sampleId)] = exp
   return map
 })
+
+// Take the plate's word for what the components are: their names, their units and
+// their inventory links, so the phase map's axes say "K10 peptide" rather than
+// "Compound A". Ranges and stocks are left alone — those drive the suggestion
+// engine and are the user's design decision, not the plate's.
+const NAME_KEY  = { anion: 'anionName',  cation: 'cationName',  salt: 'saltName',  compD: 'compDName' }
+const UNIT_KEY  = { anion: 'anionUnit',  cation: 'cationUnit',  salt: 'saltUnit',  compD: 'compDUnit' }
+const INV_KEY   = { anion: 'anionInv',   cation: 'cationInv',   salt: 'saltInv',   compD: 'compDInv' }
+const STOCK_KEY = { anion: 'stockAnion', cation: 'stockCation', salt: 'stockSalt', compD: 'stockCompD' }
+const MIN_KEY   = { anion: 'anionMin',   cation: 'cationMin',   salt: 'saltMin',   compD: 'compDMin' }
+const MAX_KEY   = { anion: 'anionMax',   cation: 'cationMax',   salt: 'saltMax',   compD: 'compDMax' }
+const STEP_KEY  = { anion: 'anionStep',  cation: 'cationStep',  salt: 'saltStep',  compD: 'compDStep' }
+
+// Every axis is drawn over the configured range and nothing else, which loses data
+// two ways. A point outside the range is drawn nowhere at all. A screen whose
+// concentrations are far smaller than the range — the usual case when the ranges
+// are still on their defaults and the plate was dosed from µM stocks — is drawn
+// inside it, but squeezed into a corner a few percent wide, which reads as an
+// empty map. Both are the same fix, so both are reported.
+const CRAMPED_FRACTION = 0.15
+
+const searchSpaceIssues = computed(() => {
+  const issues = []
+  for (const key of COMP_KEYS) {
+    if (key === 'compD' && !config.value.enableCompD) continue
+    const lo = Number(config.value[MIN_KEY[key]]), hi = Number(config.value[MAX_KEY[key]])
+    if (!isFinite(lo) || !isFinite(hi)) continue
+    const values = experiments.value.map(e => Number(e[key] ?? 0)).filter(v => isFinite(v))
+    if (!values.length) continue
+    const outside = values.filter(v => v < lo - 1e-9 || v > hi + 1e-9).length
+    const min = Math.min(...values), max = Math.max(...values)
+    const axisSpan = hi - lo, dataSpan = max - min
+    const cramped = !outside && dataSpan > 0 && axisSpan > 0 && dataSpan / axisSpan < CRAMPED_FRACTION
+    if (outside || cramped) issues.push({ key, outside, cramped, lo, hi, min, max })
+  }
+  return issues
+})
+
+const searchSpaceIssueText = (o) => {
+  const unit = config.value[UNIT_KEY[o.key]]
+  return o.outside
+    ? `${o.outside} point${o.outside === 1 ? '' : 's'} outside ${SLOT_LETTER[o.key]} ${fmtConc(o.lo)}–${fmtConc(o.hi)} ${unit}`
+    : `${SLOT_LETTER[o.key]} only covers ${fmtConc(o.min)}–${fmtConc(o.max)} of a ${fmtConc(o.lo)}–${fmtConc(o.hi)} ${unit} axis`
+}
+
+// Set each axis to the ground the data actually covers. An axis the data never
+// varied on keeps its range — there is no extent to read off a single value —
+// but is widened if that value sits outside it, because a point off the axis is
+// a point that was measured and cannot be seen.
+const fitSearchSpaceToData = ({ silent = false } = {}) => {
+  if (!experiments.value.length) return false
+  const changed = []
+  for (const key of COMP_KEYS) {
+    if (key === 'compD' && !config.value.enableCompD) continue
+    const values = experiments.value.map(e => Number(e[key] ?? 0)).filter(v => isFinite(v))
+    const spacing = levelSpacing(values)
+    if (!spacing) continue
+    const unit = config.value[UNIT_KEY[key]]
+    if (spacing.levels.length < 2) {
+      const v = spacing.min
+      const lo = Math.min(Number(config.value[MIN_KEY[key]]), v)
+      const hi = Math.max(Number(config.value[MAX_KEY[key]]), v)
+      if (lo !== Number(config.value[MIN_KEY[key]]) || hi !== Number(config.value[MAX_KEY[key]])) {
+        config.value[MIN_KEY[key]] = lo
+        config.value[MAX_KEY[key]] = hi
+        changed.push(`${SLOT_LETTER[key]} widened to ${fmtConc(lo)}–${fmtConc(hi)} ${unit} (every point sits at ${fmtConc(v)})`)
+      }
+      continue
+    }
+    config.value[MIN_KEY[key]] = spacing.min
+    config.value[MAX_KEY[key]] = spacing.max
+    if (spacing.step > 0) config.value[STEP_KEY[key]] = spacing.step
+    changed.push(`${SLOT_LETTER[key]} ${fmtConc(spacing.min)}–${fmtConc(spacing.max)} ${unit}, step ${fmtConc(spacing.step)}`
+      + ` (${spacing.levels.length} level${spacing.levels.length === 1 ? '' : 's'} measured`
+      + `${spacing.capped ? ', step kept coarser to keep the suggestion grid workable' : ''})`)
+  }
+  renderPlot()
+  if (!silent && changed.length) alert(`Search space fitted to the data:\n\n${changed.map(c => '· ' + c).join('\n')}`)
+  return changed.length > 0
+}
+
+// Take the plate's word for the whole recipe, not just the axes: what varied and
+// over what ground, what was the same in every well, what made the volume up, and
+// how big a well was. Everything a replated condition needs to be pipetted the
+// way the original was.
+//
+// Units are left alone on purpose — changing an axis unit does not restate the
+// points already in the ledger, so switching it here would silently rescale the
+// whole dataset.
+const adoptInferredComponents = () => {
+  const inf = prInference.value
+  if (!inf || !inf.screened.length) return
+
+  const lines = inf.screened.map(s =>
+    `${SLOT_LETTER[s.slot]} = ${s.name}  ${fmtConc(s.min)}–${fmtConc(s.max)} ${s.unit}` +
+    (s.levels.length > 1 ? ` (${s.levels.length} levels)` : ''))
+
+  // A constant with no stock recorded cannot be reproduced: the volume that gets
+  // it to its concentration is unknowable. Those are named, not invented.
+  const usable = (inf.constants || []).filter(c => c.stock != null && isFinite(c.stock) && c.stock > 0)
+  const unusable = (inf.constants || []).filter(c => !usable.includes(c))
+  if (usable.length) lines.push('', `Constants in every well: ${usable.map(c => `${c.name} ${fmtConc(c.value)} ${c.unit}`).join(', ')}`)
+  if (inf.fillup) lines.push(`Fill-up: ${inf.fillup.name}`)
+  if (inf.wellVolume?.uniform) lines.push(`Well volume: ${inf.wellVolume.max.toFixed(1)} µL`)
+
+  const warn = unusable.length
+    ? `\n\n${unusable.map(c => c.name).join(', ')} ${unusable.length === 1 ? 'is' : 'are'} the same in every well but ${unusable.length === 1 ? 'has' : 'have'} no stock recorded, so ${unusable.length === 1 ? 'it' : 'they'} cannot be added as a constant — set the stock on the plate first.`
+    : ''
+
+  if (!confirm(`Set up the search space from this plate?\n\n${lines.join('\n')}\n\nNames, inventory links, stocks and ranges are taken from the plate. Units are not changed.${warn}`)) return
+
+  for (const s of inf.screened) {
+    config.value[NAME_KEY[s.slot]] = s.name
+    if (s.stock != null && isFinite(s.stock)) config.value[STOCK_KEY[s.slot]] = s.stock
+    if (isFinite(s.min) && isFinite(s.max) && s.max > s.min) {
+      config.value[MIN_KEY[s.slot]] = s.min
+      config.value[MAX_KEY[s.slot]] = s.max
+      if (s.step > 0) config.value[STEP_KEY[s.slot]] = s.step
+    }
+    const inv = s.invId ? (store.inventory || []).find(i => String(i.id) === String(s.invId)) : null
+    if (inv) config.value[INV_KEY[s.slot]] = inv
+  }
+  if (inf.screened.some(s => s.slot === 'compD')) config.value.enableCompD = true
+
+  // Constants: replace rather than merge. They describe one recipe, and half of
+  // this plate's constants beside half of the last one's is not a recipe.
+  config.value.constants = usable.map(c => ({
+    id: 'k_' + (globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + Math.round(c.value * 1e6)),
+    name: c.name,
+    conc: Number(Number(c.value).toPrecision(6)),
+    unit: c.unit || 'mM',
+    stockConc: c.stock,
+    stockUnit: c.unit || 'mM',
+    inv: c.invId ? (store.inventory || []).find(i => String(i.id) === String(c.invId)) || null : null,
+    searchQuery: '', searchScope: 'Global',
+  }))
+  if (usable.length) config.value.showConstants = true
+
+  if (inf.fillup?.kind === 'water') {
+    config.value.fillupMedium = { ...config.value.fillupMedium, type: 'water', bufName: '', inv: null, bufferId: null }
+  }
+  // Only when every well was made up to the same volume — a plate with mixed
+  // totals has no single well volume to adopt.
+  if (inf.wellVolume?.uniform && inf.wellVolume.max > 0) {
+    config.value.targetVolume = Number(inf.wellVolume.max.toFixed(2))
+  }
+
+  renderPlot()
+}
 
 // Classify an OD reading using the current reactive boundaries + dissolution check.
 // maxOD = peak OD (first 5 min); minAfterPeak = minimum OD recorded after the peak time.
@@ -2556,6 +3272,306 @@ function odToPhase(maxOD, minAfterPeak = Infinity) {
   if (maxOD < b.phase2max) return 2
   if (maxOD < b.phase3max) return 3
   return 4
+}
+
+// ─── Platereader 1 · kinetic runs (SkanIt XML) ─────────────────────────────
+// Reader 2 hands over one number per well. Reader 1 hands over a 16-hour trace,
+// which is a different question: not "how turbid was it" but "did it coacervate,
+// and did the coacervate survive". The verdict is therefore a class — none /
+// transient / metastable — and the class is what becomes a phase.
+//
+// Thresholds live here rather than in the parser because they are the
+// experimenter's call; microscopy overrides live here too, and they outrank the
+// thresholds, because a picture of the well beats a number from it.
+const prKinetic     = ref(null)   // { channels, meta } straight from the XML
+const prKinFileName = ref('')
+const prChannelKey  = ref('')
+const kinSettings   = reactive({ ...DEFAULT_KINETIC_SETTINGS })
+const kinClassPhase = reactive({ none: 0, transient: 1, metastable: 2 })
+const kinOverrides  = ref({})     // wellId → class key, set by hand after microscopy
+const kinRenamePhases = ref(true)
+const showKinReview = ref(false)
+const kinSelected   = ref(null)
+const kinOverlayAll = ref(false)
+const kinSortBy     = ref('well')
+
+const prIsKinetic = computed(() => prReaderType.value === 'reader1')
+
+const kinChannel = computed(() => {
+  const chs = prKinetic.value?.channels || []
+  return chs.find(c => c.key === prChannelKey.value) || chs[0] || null
+})
+
+// Re-runs on every threshold keystroke: a 96 × 481 plate takes ~15 ms, so the
+// grid, the counts and the traces all move as the number is typed.
+const kinAnalysis = computed(() => kinChannel.value ? analyzePlate(kinChannel.value.wells, kinSettings) : null)
+
+const kinWellIds = computed(() => kinAnalysis.value ? sortWellIds(Object.keys(kinAnalysis.value.wells)) : [])
+
+const kinClassOf = (wellId) => kinOverrides.value[wellId] || kinAnalysis.value?.wells[wellId]?.cls || null
+
+const kinCounts = computed(() => {
+  const counts = { none: 0, transient: 0, metastable: 0 }
+  for (const id of kinWellIds.value) { const c = kinClassOf(id); if (c) counts[c]++ }
+  return counts
+})
+const kinOverrideCount = computed(() => Object.keys(kinOverrides.value).length)
+
+const classMeta = (key) => KINETIC_CLASSES.find(c => c.key === key) || null
+const kinPhaseOf = (key) => (key && kinClassPhase[key] !== undefined ? kinClassPhase[key] : 0)
+
+// Two classes pointing at the same phase index would land on the same colour and
+// the same label — say so rather than quietly merging them in the map.
+const kinPhaseClash = computed(() => {
+  const used = {}
+  for (const c of KINETIC_CLASSES) {
+    const p = kinPhaseOf(c.key)
+    if (used[p]) return `${classMeta(used[p]).short} and ${c.short} both map to ${phaseLabel(p)} — they will be indistinguishable in the map.`
+    used[p] = c.key
+  }
+  return ''
+})
+
+const setKinOverride = (wellId, cls) => {
+  const next = { ...kinOverrides.value }
+  if (!cls || cls === 'auto') delete next[wellId]
+  else next[wellId] = cls
+  kinOverrides.value = next
+}
+const clearKinOverrides = () => {
+  if (!kinOverrideCount.value) return
+  if (!confirm(`Drop all ${kinOverrideCount.value} manual classifications and go back to the thresholds?`)) return
+  kinOverrides.value = {}
+}
+
+const onKineticXmlSelected = async (file) => {
+  const parsed = parseSkanItXml(await file.text())
+  if (!parsed) {
+    alert('That does not look like a SkanIt result export. Expected a .xml with <ResultStep> blocks holding one <Coordinate> per well.')
+    return
+  }
+  prKinetic.value = parsed
+  prKinFileName.value = file.name
+  prChannelKey.value = parsed.channels[0].key
+  kinOverrides.value = {}
+  kinSelected.value = null
+  // The deadline for dissolution defaults to the run the user actually did —
+  // a limit longer than the measurement would promise an answer nobody has.
+  if (!kinSettings.timeLimitMin) kinSettings.timeLimitMin = Math.round(parsed.channels[0].durationMin)
+  prODMap.value = null
+}
+
+// Dropping the file drops the hand-set classifications with it — they belong to
+// that plate. Only the ✕ does this; applying leaves the run loaded so the traces
+// stay available for a second look.
+const clearKinetic = () => {
+  prKinetic.value = null
+  prKinFileName.value = ''
+  prChannelKey.value = ''
+  kinOverrides.value = {}
+  kinSelected.value = null
+}
+
+const kinRunSummary = computed(() => {
+  const ch = kinChannel.value
+  if (!ch) return ''
+  const m = prKinetic.value?.meta || {}
+  return [
+    `${ch.wellCount} wells`,
+    `${ch.readings} reads`,
+    formatMinutes(ch.durationMin),
+    ch.intervalMin ? `every ${formatMinutes(ch.intervalMin)}` : '',
+    m.instrument,
+  ].filter(Boolean).join(' · ')
+})
+
+// The well table in the review dialog. Sorting by lifetime is the point of the
+// whole run, so it is one of the sort keys.
+const kinTableRows = computed(() => {
+  const a = kinAnalysis.value
+  if (!a) return []
+  const wellData = prWellData.value
+  const rows = kinWellIds.value.map(id => {
+    const w = a.wells[id]
+    const cls = kinClassOf(id)
+    return {
+      wellId: id, w, cls,
+      manual: !!kinOverrides.value[id],
+      wd: wellData[id] || null,
+      auto: w.cls,
+    }
+  })
+  const by = kinSortBy.value
+  if (by === 'lifetime') rows.sort((x, y) => (y.w.lifetimeMin ?? -1) - (x.w.lifetimeMin ?? -1))
+  else if (by === 'peak') rows.sort((x, y) => y.w.peak - x.w.peak)
+  else if (by === 'class') rows.sort((x, y) => KINETIC_CLASSES.findIndex(c => c.key === x.cls) - KINETIC_CLASSES.findIndex(c => c.key === y.cls))
+  return rows
+})
+
+const kinLinkedCount = computed(() => {
+  const wd = prWellData.value
+  return kinWellIds.value.filter(id => wd[id]).length
+})
+
+// How much of this run is already a point in the ledger — the difference between
+// "apply" meaning import and "apply" meaning revise.
+const kinAlreadyLogged = computed(() => {
+  const wd = prWellData.value
+  const sidToExp = prSampleIdToExp.value
+  return kinWellIds.value.filter(id => wd[id] && sidToExp[String(wd[id].sampleId)]).length
+})
+
+// ── Trace plot ──────────────────────────────────────────────────────────────
+const KIN_PLOT_ID = 'kin-trace-plot'
+
+const kinTraceLayout = (title) => ({
+  paper_bgcolor: '#000000',
+  plot_bgcolor: '#000000',
+  margin: { l: 52, r: 12, b: 40, t: 22 },
+  title: { text: title, font: { color: '#e2e8f0', size: 11 }, x: 0.01, xanchor: 'left' },
+  xaxis: { title: { text: 'Time (min)', font: { color: '#cbd5e1', size: 10 } }, gridcolor: '#1f2937', zerolinecolor: '#334155', tickfont: { color: '#94a3b8', size: 9 } },
+  yaxis: { title: { text: 'OD', font: { color: '#cbd5e1', size: 10 } }, gridcolor: '#1f2937', zerolinecolor: '#334155', tickfont: { color: '#94a3b8', size: 9 } },
+  showlegend: false,
+  hovermode: 'closest',
+})
+
+const renderKinTrace = () => {
+  const el = document.getElementById(KIN_PLOT_ID)
+  const ch = kinChannel.value, a = kinAnalysis.value
+  if (!el || !ch || !a) return
+
+  const shapes = [], traces = []
+  const limit = kinSettings.timeLimitMin
+
+  if (kinOverlayAll.value) {
+    // One trace per class rather than per well — 96 separate WebGL traces is a lot
+    // of context for a picture whose only job is to show where the classes split.
+    // A null between wells breaks the line so the runs do not join up.
+    const byClass = {}
+    for (const id of kinWellIds.value) {
+      const cls = kinClassOf(id)
+      if (id === kinSelected.value) continue
+      const bucket = byClass[cls] || (byClass[cls] = { x: [], y: [] })
+      bucket.x.push(...ch.wells[id].t, null)
+      bucket.y.push(...ch.wells[id].v, null)
+    }
+    for (const [cls, pts] of Object.entries(byClass)) {
+      traces.push({
+        type: 'scattergl', mode: 'lines', name: classMeta(cls)?.short || cls,
+        x: pts.x, y: pts.y, hoverinfo: 'skip',
+        line: { color: getPhaseColor(kinPhaseOf(cls), 0.45), width: 1 },
+      })
+    }
+    const sel = kinSelected.value
+    if (sel && ch.wells[sel]) {
+      traces.push({
+        type: 'scattergl', mode: 'lines', x: ch.wells[sel].t, y: ch.wells[sel].v,
+        line: { color: getPhaseColor(kinPhaseOf(kinClassOf(sel)), 1), width: 2.4 },
+        hovertemplate: `${sel} · %{y:.4f} @ %{x:.0f} min<extra></extra>`,
+      })
+    }
+  } else if (kinSelected.value && ch.wells[kinSelected.value]) {
+    const id = kinSelected.value, w = a.wells[id], trace = ch.wells[id]
+    const colour = getPhaseColor(kinPhaseOf(kinClassOf(id)), 1)
+    traces.push({ type: 'scattergl', mode: 'lines', x: trace.t, y: trace.v, line: { color: 'rgba(148,163,184,0.5)', width: 1 }, hoverinfo: 'skip' })
+    traces.push({
+      type: 'scattergl', mode: 'lines', x: trace.t, y: w.smoothed,
+      line: { color: colour, width: 2.2 },
+      hovertemplate: '%{y:.4f} @ %{x:.0f} min<extra></extra>',
+    })
+    const hline = (y, color, dash, label) => shapes.push({
+      type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: y, y1: y,
+      line: { color, width: 1, dash }, label: { text: label, font: { color, size: 9 }, textposition: 'end', yanchor: 'bottom' },
+    })
+    hline(w.baseline, '#64748b', 'dot', 'baseline')
+    hline(w.riseLevel, '#f59e0b', 'dash', 'coacervation')
+    if (w.dropLevel !== null) hline(w.dropLevel, '#38bdf8', 'dash', 'dissolution')
+    const vline = (x, color, label) => shapes.push({
+      type: 'line', yref: 'paper', y0: 0, y1: 1, xref: 'x', x0: x, x1: x,
+      line: { color, width: 1, dash: 'dot' }, label: { text: label, font: { color, size: 9 }, textposition: 'top center' },
+    })
+    if (w.onsetMin !== null) vline(w.onsetMin, '#f59e0b', 'onset')
+    if (w.dissolvedMin !== null) vline(w.dissolvedMin, '#38bdf8', 'dissolved')
+  }
+
+  if (limit && limit > 0 && limit < ch.durationMin) {
+    shapes.push({
+      type: 'rect', xref: 'x', yref: 'paper', x0: limit, x1: ch.durationMin, y0: 0, y1: 1,
+      fillcolor: 'rgba(148,163,184,0.10)', line: { width: 0 }, layer: 'below',
+    })
+  }
+
+  const title = kinOverlayAll.value
+    ? `All ${kinWellIds.value.length} wells · coloured by class`
+    : kinSelected.value ? `${kinSelected.value} · ${classMeta(kinClassOf(kinSelected.value))?.label || ''}` : 'Pick a well'
+  Plotly.react(KIN_PLOT_ID, traces, { ...kinTraceLayout(title), shapes }, { displayModeBar: false, responsive: true })
+}
+
+watch([kinSelected, kinOverlayAll, kinAnalysis, showKinReview], () => {
+  if (showKinReview.value) nextTick(renderKinTrace)
+})
+
+// v-if takes the div away with the WebGL context still attached to it; hand it
+// back to Plotly first so reopening the dialog does not leak a context each time.
+watch(showKinReview, (open, wasOpen) => {
+  if (!open && wasOpen) { try { Plotly.purge(KIN_PLOT_ID) } catch { /* never rendered */ } }
+})
+
+// The grid in the review dialog follows the plate that was actually read, so a
+// 384-well run is not squeezed into an 8 × 12 picture of itself.
+const kinGrid = computed(() => {
+  const ids = kinWellIds.value
+  const rows = [], cols = []
+  for (const id of ids) {
+    const m = /^([A-Z]+)(\d+)$/.exec(id)
+    if (!m) continue
+    if (!rows.includes(m[1])) rows.push(m[1])
+    const c = parseInt(m[2], 10)
+    if (!cols.includes(c)) cols.push(c)
+  }
+  cols.sort((a, b) => a - b)
+  return { rows, cols }
+})
+
+const kinGridStyle = (wellId) => {
+  const cls = kinClassOf(wellId)
+  if (!cls) return { background: 'transparent', borderColor: 'var(--border-color,#334155)', cursor: 'default' }
+  const phase = kinPhaseOf(cls)
+  const style = {
+    background: getPhaseColor(phase, wellId === kinSelected.value ? 0.85 : 0.45),
+    borderColor: getPhaseColor(phase, 1),
+    cursor: 'pointer',
+  }
+  if (kinOverrides.value[wellId]) style.borderWidth = '2.5px'
+  if (wellId === kinSelected.value) style.boxShadow = '0 0 0 2px rgba(255,255,255,0.8)'
+  return style
+}
+
+const kinWellTitle = (wellId) => {
+  const w = kinAnalysis.value?.wells[wellId]
+  if (!w) return `${wellId} — not read`
+  const wd = prWellData.value[wellId]
+  const lines = [`${wellId} · ${classMeta(kinClassOf(wellId))?.label || ''}${kinOverrides.value[wellId] ? ' (by hand)' : ''}`]
+  if (wd) lines.push(`Sample ${wd.sampleId} · A ${wd.anion} · B ${wd.cation} · C ${wd.salt} mM`)
+  lines.push(`Peak OD ${w.peak.toFixed(4)} · baseline ${w.baseline.toFixed(4)}`)
+  if (w.lifetimeMin !== null) lines.push(`Lifetime ${formatMinutes(w.lifetimeMin)}`)
+  return lines.join('\n')
+}
+
+const kinSelectedSummary = computed(() => {
+  const id = kinSelected.value
+  const w = id ? kinAnalysis.value?.wells[id] : null
+  if (!w) return null
+  return { id, w, cls: kinClassOf(id), auto: w.cls, manual: !!kinOverrides.value[id], wd: prWellData.value[id] || null }
+})
+
+const openKinReview = () => {
+  if (!kinSelected.value && kinWellIds.value.length) {
+    // Open on something worth looking at rather than on A1's buffer blank.
+    kinSelected.value = kinWellIds.value.find(id => kinClassOf(id) !== 'none') || kinWellIds.value[0]
+  }
+  showKinReview.value = true
+  nextTick(renderKinTrace)
 }
 
 function parsePlatereaderReader2(text) {
@@ -2599,38 +3615,54 @@ function parsePlatereaderReader2(text) {
   return Object.keys(result).length ? result : null
 }
 
-function parsePlatereaderCsv(text) {
-  if (prReaderType.value === 'reader2') return parsePlatereaderReader2(text)
-  // reader1 parser will be added when the template is provided.
-  alert('Platereader 1 format is not yet configured.')
-  return null
-}
-
 const onPlatereaderCsvSelected = async (event) => {
   const file = event.target.files[0]; event.target.value = ''
   if (!file) return
-  const result = parsePlatereaderCsv(await file.text())
+  if (prIsKinetic.value) { await onKineticXmlSelected(file); return }
+  const result = parsePlatereaderReader2(await file.text())
   if (!result) { alert('Could not parse platereader CSV. Expected semicolon- or comma-delimited file with well columns (A1–H12) and time in HH:MM:SS format.'); return }
+  prKinetic.value = null
   prODMap.value = result
 }
 
+// Whatever the reader was, the result is one verdict per well: a phase plus the
+// evidence behind it. Everything downstream — the preview grid, the tooltips, the
+// import — reads this and no longer cares which instrument produced the file.
+const prPhaseByWell = computed(() => {
+  const map = {}
+  if (prIsKinetic.value) {
+    const a = kinAnalysis.value
+    if (!a) return map
+    for (const wellId of kinWellIds.value) {
+      const cls = kinClassOf(wellId)
+      map[wellId] = { phase: kinPhaseOf(cls), cls, kin: a.wells[wellId], manual: !!kinOverrides.value[wellId] }
+    }
+    return map
+  }
+  for (const [wellId, odData] of Object.entries(prODMap.value || {})) {
+    map[wellId] = { phase: odToPhase(odData.maxOD, odData.minAfterPeak), odData }
+  }
+  return map
+})
+
+const prHasData = computed(() => Object.keys(prPhaseByWell.value).length > 0)
+const prWellCount = computed(() => Object.keys(prPhaseByWell.value).length)
+
 const prPreviewItems = computed(() => {
-  if (!prODMap.value) return []
+  const byWell = prPhaseByWell.value
+  if (!prHasData.value) return []
 
-  const getOD = wellId => prODMap.value[wellId]   // returns {maxOD, minAfterPeak} or undefined
-
-  // ── Plate-based mapping: concentrations come from wellplate HTML, OD from CSV ──
+  // ── Plate-based mapping: concentrations come from the wellplate, phase from the run ──
   if (prLinkedPlate.value) {
     const wellData = prWellData.value
     const sidToExp = prSampleIdToExp.value
-    return Object.entries(prODMap.value)
-      .map(([wellId, odData]) => {
+    return Object.entries(byWell)
+      .map(([wellId, res]) => {
         const wd = wellData[wellId]
         if (!wd) return null
         const exp = sidToExp[String(wd.sampleId)]
         if (prMapSource.value === 'untested' && exp && exp.phase !== -1) return null
-        const newPhase = odToPhase(odData.maxOD, odData.minAfterPeak)
-        return { wellId, wd, exp: exp || null, odData, newPhase }
+        return { wellId, wd, exp: exp || null, ...res, newPhase: res.phase }
       })
       .filter(Boolean)
       .sort((a, b) => ALL_WELLS_96.indexOf(a.wellId) - ALL_WELLS_96.indexOf(b.wellId))
@@ -2649,9 +3681,9 @@ const prPreviewItems = computed(() => {
     const idx = startOffset + i
     if (idx >= 96) return null
     const wellId = ALL_WELLS_96[idx]
-    const odData = getOD(wellId)
-    if (!odData) return null
-    return { wellId, exp, odData, newPhase: odToPhase(odData.maxOD, odData.minAfterPeak) }
+    const res = byWell[wellId]
+    if (!res) return null
+    return { wellId, exp, ...res, newPhase: res.phase }
   }).filter(Boolean)
 })
 
@@ -2660,23 +3692,50 @@ const prWellLookup = computed(() => {
 })
 
 const prWellStyle = (row, col) => {
-  const item = prWellLookup.value[`${row}${col}`]
-  return item
+  const wellId = `${row}${col}`
+  const item = prWellLookup.value[wellId]
+  const clickable = prIsKinetic.value && !!kinAnalysis.value?.wells[wellId]
+  const base = item
     ? { background: getPhaseColor(item.newPhase, 0.4), borderColor: getPhaseColor(item.newPhase, 1) }
     : { background: 'transparent', borderColor: 'var(--border-color,#e2e8f0)' }
+  // A hand-set well wears a heavier ring: the thresholds no longer speak for it.
+  if (item?.manual) { base.borderWidth = '2px'; base.boxShadow = '0 0 0 1px rgba(15,23,42,0.35)' }
+  base.cursor = clickable ? 'pointer' : 'default'
+  return base
+}
+
+// Clicking a well in the compact preview jumps straight to its curve.
+const openWellCurve = (wellId) => {
+  if (!prIsKinetic.value || !kinAnalysis.value?.wells[wellId]) return
+  kinSelected.value = wellId
+  kinOverlayAll.value = false
+  openKinReview()
 }
 
 const prWellTooltip = (row, col) => {
   const item = prWellLookup.value[`${row}${col}`]
   if (!item) return `${row}${col} — no data`
-  const name = item.newPhase === 0 ? 'Clear' : `Phase ${item.newPhase}`
   const sid = item.wd?.sampleId ?? item.exp?.sampleId ?? '?'
   const conc = item.wd ? `A: ${item.wd.anion} · B: ${item.wd.cation} · C: ${item.wd.salt} mM` : ''
-  const status = item.exp ? (item.exp.phase === -1 ? 'untested' : `phase ${item.exp.phase}`) : 'new'
-  const od = item.odData
-  const dissolvedNote = (prDissolutionEnabled.value && od && od.minAfterPeak <= prDissolutionThreshold.value)
-    ? `\n⬇ Dissolved (min after peak: ${od.minAfterPeak.toFixed(4)})`  : ''
-  return `${row}${col} · Sample ${sid} (${status})\n${conc}\nMax OD = ${od?.maxOD?.toFixed(4) ?? '?'}${dissolvedNote}\n→ ${name}`
+  const status = item.exp ? (item.exp.phase === -1 ? 'untested' : phaseLabel(item.exp.phase)) : 'new'
+  const lines = [`${row}${col} · Sample ${sid} (${status})`, conc]
+  if (item.kin) {
+    const k = item.kin
+    lines.push(`Peak OD ${k.peak.toFixed(4)} over a ${k.baseline.toFixed(4)} baseline`)
+    if (k.onsetMin !== null) lines.push(`Onset ${formatMinutes(k.onsetMin)}`)
+    if (k.dissolvedMin !== null) lines.push(`${k.lateDissolution ? 'Dissolved (past the limit)' : 'Dissolved'} ${formatMinutes(k.dissolvedMin)}`)
+    if (k.lifetimeMin !== null) lines.push(`Lifetime ${formatMinutes(k.lifetimeMin)}`)
+    if (k.startsHigh) lines.push('⚠ already turbid at the first reading')
+    if (item.manual) lines.push('✋ set by hand')
+  } else if (item.odData) {
+    const od = item.odData
+    lines.push(`Max OD = ${od.maxOD?.toFixed(4) ?? '?'}`)
+    if (prDissolutionEnabled.value && od.minAfterPeak <= prDissolutionThreshold.value) {
+      lines.push(`⬇ Dissolved (min after peak: ${od.minAfterPeak.toFixed(4)})`)
+    }
+  }
+  lines.push(`→ ${phaseLabel(item.newPhase)}`)
+  return lines.filter(Boolean).join('\n')
 }
 
 const prStatsText = computed(() => {
@@ -2686,7 +3745,7 @@ const prStatsText = computed(() => {
   const updateCount = items.length - newCount
   const phaseCounts = {}
   for (const { newPhase } of items) {
-    const n = newPhase === 0 ? 'Clear' : `Phase ${newPhase}`
+    const n = phaseLabel(newPhase)
     phaseCounts[n] = (phaseCounts[n] || 0) + 1
   }
   const phaseStr = Object.entries(phaseCounts).map(([n, c]) => `${c}× ${n}`).join(' · ')
@@ -2694,31 +3753,95 @@ const prStatsText = computed(() => {
   return `${phaseStr}  ·  ${actionStr}`
 })
 
+// Round-trip the evidence, not the raw trace: a phase point in the ledger should
+// still be able to say why it is that phase months later, but 96 × 481 readings
+// do not belong in every saved dataset.
+// Why this point is the phase it is, for the hover in the ledger.
+const kinReceiptText = (k) => {
+  if (!k) return ''
+  const cls = classMeta(k.cls)
+  const lines = [cls ? `${cls.label}${k.manual ? ' — set by hand' : ''}` : 'Set by hand, over the plate-reader call']
+  if (k.peak != null) lines.push(`Peak OD ${k.peak} over ${k.baseline} baseline`)
+  if (k.onsetMin != null) lines.push(`Onset ${formatMinutes(k.onsetMin)}`)
+  if (k.dissolvedMin != null) lines.push(`Dissolved ${formatMinutes(k.dissolvedMin)}`)
+  if (k.lifetimeMin != null) lines.push(`Lifetime ${formatMinutes(k.lifetimeMin)}`)
+  if (k.startsHigh) lines.push('⚠ already turbid at the first reading')
+  if (k.source) lines.push(`${k.source}${k.channel ? ` · ${k.channel}` : ''}`)
+  return lines.join('\n')
+}
+
+const kinReceipt = (item) => {
+  if (!item.kin) return null
+  const k = item.kin
+  const r = (v, d = 4) => (v === null || v === undefined || !isFinite(v) ? null : Number(v.toFixed(d)))
+  return {
+    cls: item.cls,
+    manual: !!item.manual,
+    phase: item.newPhase,
+    peak: r(k.peak), baseline: r(k.baseline),
+    onsetMin: r(k.onsetMin, 1), dissolvedMin: r(k.dissolvedMin, 1), lifetimeMin: r(k.lifetimeMin, 1),
+    startsHigh: !!k.startsHigh,
+    source: prKinFileName.value || null,
+    channel: kinChannel.value?.label || null,
+  }
+}
+
 const importPlatereaderResults = () => {
   const items = prPreviewItems.value
   if (!items.length) return
   let updated = 0, created = 0
 
-  for (const { exp, wd, newPhase } of items) {
+  for (const item of items) {
+    const { exp, wd, newPhase } = item
+    const kin = kinReceipt(item)
     if (exp) {
       // Experiment already in the workspace — update its phase in-place.
       const target = experiments.value.find(e => e === exp || e.sampleId === exp.sampleId)
-      if (target) { target.phase = newPhase; updated++ }
+      if (target) { target.phase = newPhase; if (kin) target.kin = kin; updated++ }
     } else if (wd) {
       // Experiment was never logged — create it now from wellplate concentrations.
       experiments.value.push({
         sampleId: wd.sampleId,
         anion: wd.anion, cation: wd.cation, salt: wd.salt,
-        compD: 0, phase: newPhase,
+        compD: wd.compD || 0, phase: newPhase,
+        ...(kin ? { kin } : {}),
       })
       created++
     }
   }
 
+  // Name the phase slots after the classes that just filled them, so the map,
+  // the legend and the ledger dropdown all read as coacervation outcomes.
+  if (prIsKinetic.value && kinRenamePhases.value) {
+    const labels = { ...(config.value.phaseLabels || {}) }
+    for (const c of KINETIC_CLASSES) labels[kinPhaseOf(c.key)] = c.label
+    config.value.phaseLabels = labels
+  }
+
   renderPlot()
-  prODMap.value = null
+
+  // The run stays loaded. Applying is not the end of looking at a plate: a class
+  // is worth arguing with after the map has been seen, and the traces are the
+  // argument. Re-applying with different thresholds updates the same points, so
+  // the filter moves off "skip already-classified" once there is something to
+  // update — otherwise the second apply would silently do nothing.
+  if ((updated || created) && prMapSource.value === 'untested') prMapSource.value = 'all'
+
   const msg = [updated && `${updated} updated`, created && `${created} created`].filter(Boolean).join(', ') || 'no changes'
-  alert(`Platereader import complete: ${msg}. Click Save to persist to the active dataset.`)
+
+  // Landing the data in the ledger and nowhere visible on the map reads as a
+  // failed import, so offer the fix at the moment it matters rather than leaving
+  // the user to find the ranges themselves.
+  const issues = searchSpaceIssues.value
+  if (issues.length) {
+    const detail = issues.map(o => '· ' + searchSpaceIssueText(o)).join('\n')
+    if (confirm(`Platereader import complete: ${msg}.\n\nThe phase map draws the search space, and this data does not sit in it:\n\n${detail}\n\nFit the search space to the data now?`)) {
+      fitSearchSpaceToData({ silent: true })
+    }
+    return
+  }
+  alert(`Platereader import complete: ${msg}. Click Save to persist to the active dataset.`
+    + `\n\nThe run stays loaded — reopen "Review curves & thresholds" any time, and apply again to push a changed classification to these same points.`)
 }
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -2992,6 +4115,11 @@ onMounted(async () => {
 .target-vol-input input { width: 80px; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; }
 .config-grid-complex { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .input-group label { display: block; font-size: 0.8rem; margin-bottom: 4px; font-weight: bold; opacity: 0.8; }
+/* The letter a component sits on — a picker, because the allocation is a choice
+   and an imported plate does not always guess it right. */
+.slot-select { display: inline-block; font-size: 0.78rem; font-weight: 700; text-transform: none; letter-spacing: 0; background: rgba(139, 92, 246, 0.14); color: #8b5cf6; border: 1px solid rgba(139, 92, 246, 0.35); border-radius: 3px; padding: 1px 2px 1px 4px; margin-left: 4px; cursor: pointer; width: auto; outline: none; vertical-align: middle; }
+.slot-select option { text-transform: none; color: var(--text); background: var(--surface); font-weight: 600; }
+
 .unit-select { display: inline-block; font-size: 0.7rem; font-weight: normal; text-transform: none; letter-spacing: 0; background: rgba(59, 130, 246, 0.15); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 3px; padding: 1px 3px; margin-left: 4px; cursor: pointer; width: auto; max-width: 80px; outline: none; vertical-align: middle; }
 .unit-select option { text-transform: none; color: var(--text); background: var(--surface); }
 .unit-text { text-transform: none; }
@@ -3070,4 +4198,65 @@ onMounted(async () => {
 .cond-dfoot { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .cond-msg { font-size: 0.76rem; color: var(--wr, #dc2626); }
 .cond-note { font-size: 0.72rem; opacity: 0.7; margin: 0 0 12px; display: flex; gap: 6px; align-items: baseline; }
+
+/* Kinetics review dialog */
+.kin-modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 16px; }
+.kin-dialog { background: var(--modal, #fff); border: 1px solid var(--cdl, #e2e8f0); border-radius: var(--r, 14px); box-shadow: var(--sh, 0 10px 40px rgba(0,0,0,.25)); width: 100%; max-width: 1120px; max-height: 92vh; padding: 14px 16px; color: var(--tx, inherit); display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+.kin-head { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 0.92rem; }
+.kin-head .cond-x { margin-left: auto; }
+.kin-sub { font-size: 0.72rem; opacity: 0.6; font-weight: 400; }
+
+.kin-controls { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 8px 10px; border: 1px solid var(--cdl, #e2e8f0); border-radius: 8px; font-size: 0.75rem; }
+.kin-ctl { display: flex; align-items: center; gap: 5px; }
+.kin-ctl > label { font-weight: 700; opacity: 0.75; }
+.kin-ctl select { font-size: 0.75rem; padding: 2px 4px; border: 1px solid var(--cdl, #cbd5e1); border-radius: 4px; background: transparent; color: inherit; }
+.kin-ctl input[type=number] { width: 62px; font-size: 0.75rem; padding: 2px 4px; border: 1px solid var(--cdl, #cbd5e1); border-radius: 4px; background: transparent; color: inherit; }
+.kin-unit { opacity: 0.6; }
+
+.kin-body { display: grid; grid-template-columns: minmax(260px, 0.9fr) 1.35fr; gap: 14px; align-items: start; }
+@media (max-width: 900px) { .kin-body { grid-template-columns: 1fr; } }
+
+.kin-plate-col { display: flex; flex-direction: column; gap: 8px; }
+.kin-plate { background: #0f172a; border-radius: 10px; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; }
+.kin-prow { display: flex; gap: 2px; align-items: center; }
+.kin-rlabel { width: 14px; color: #94a3b8; font-size: 0.6rem; font-weight: 800; text-align: center; flex: none; }
+.kin-clabel { flex: 1; text-align: center; color: #94a3b8; font-size: 0.55rem; font-weight: 700; min-width: 0; }
+.kin-well { flex: 1; aspect-ratio: 1; min-width: 0; border-radius: 50%; border: 1px solid #334155; transition: transform .1s; }
+.kin-well:hover { transform: scale(1.18); }
+.kin-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.72rem; }
+.kin-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.kin-dot { width: 10px; height: 10px; border-radius: 3px; border-width: 1px; border-style: solid; display: inline-block; }
+.kin-manual-note { opacity: 0.75; }
+.kin-linkbtn { background: none; border: none; color: var(--acc, #2563eb); font-size: 0.72rem; cursor: pointer; padding: 0 2px; text-decoration: underline; box-shadow: none; }
+
+.kin-plot-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.kin-plot-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.kin-plot { height: 250px; background: #000; border-radius: 8px; border: 1px solid var(--cdl, #e2e8f0); }
+.kin-metrics { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+@media (max-width: 700px) { .kin-metrics { grid-template-columns: repeat(3, 1fr); } }
+.kin-metrics > div { display: flex; flex-direction: column; gap: 1px; padding: 5px 7px; background: var(--fl, #f1f5f9); border-radius: 6px; }
+.kin-metrics span { font-size: 0.62rem; opacity: 0.6; text-transform: none; }
+.kin-metrics strong { font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.kin-warn { margin: 0; font-size: 0.72rem; line-height: 1.45; padding: 6px 9px; border-radius: 6px; border: 1px solid rgba(217,119,6,0.4); background: rgba(217,119,6,0.08); display: flex; gap: 7px; align-items: baseline; }
+.kin-override { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 0.75rem; }
+.kin-cbtn { font-size: 0.72rem; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--cdl, #cbd5e1); background: transparent; color: inherit; cursor: pointer; box-shadow: none; }
+.kin-cbtn.active { font-weight: 700; }
+
+.kin-table-wrap { max-height: 210px; overflow-y: auto; border: 1px solid var(--cdl, #e2e8f0); border-radius: 8px; }
+.kin-table { width: 100%; border-collapse: collapse; font-size: 0.74rem; }
+.kin-table th, .kin-table td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--ln, #f1f5f9); white-space: nowrap; }
+.kin-table th { position: sticky; top: 0; background: var(--surface-solid, #f8fafc); font-weight: 700; z-index: 2; }
+.kin-table tbody tr { cursor: pointer; }
+.kin-table tbody tr:hover { background: rgba(59,130,246,0.08); }
+.kin-table tbody tr.sel { background: rgba(59,130,246,0.16); }
+.kin-sortable { cursor: pointer; }
+.kin-sortable.on { color: var(--acc, #2563eb); }
+.kin-flag { color: #d97706; font-size: 0.6rem; margin-left: 4px; }
+.kin-cls-select { font-size: 0.7rem; padding: 1px 3px; border-width: 1px; border-style: solid; border-radius: 4px; color: inherit; }
+
+.kin-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.kin-map { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.73rem; }
+.kin-mapitem { display: inline-flex; align-items: center; gap: 4px; }
+.kin-mapitem select { font-size: 0.72rem; padding: 1px 3px; border: 1px solid var(--cdl, #cbd5e1); border-radius: 4px; background: transparent; color: inherit; }
+.kin-clash { font-size: 0.72rem; color: #d97706; }
 </style>

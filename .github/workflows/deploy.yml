@@ -11,11 +11,18 @@ permissions:
   pages: write
   id-token: write
 
-# Only one Pages deployment at a time; cancel superseded runs so they can't queue up
-# and jam (which is what stalled the old branch-push deployments).
+# Only one Pages deployment at a time — but never cancel one that is already running.
+# A Pages deployment needs a few uninterrupted minutes to be served, and cancelling
+# it half-way is how a retry kills the attempt before it: push, re-run, push again,
+# and nothing ever finishes. GitHub's own Pages workflow sets this to false for
+# exactly that reason.
+#
+# This does not queue up and jam. GitHub keeps at most one PENDING run per group and
+# a newer pending run supersedes the older pending one, so at most one deployment
+# waits behind the one in flight.
 concurrency:
   group: 'pages'
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:

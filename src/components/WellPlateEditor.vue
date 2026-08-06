@@ -932,16 +932,16 @@ const exportAndrewPlusMulti = () => {
 
     <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between;">
         <h2 style="border: none; padding: 0; margin: 0;"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3.5" width="12" height="9" rx="1.5"/><circle cx="5" cy="6.5" r="0.9"/><circle cx="8" cy="6.5" r="0.9"/><circle cx="11" cy="6.5" r="0.9"/><circle cx="5" cy="9.5" r="0.9"/><circle cx="8" cy="9.5" r="0.9"/><circle cx="11" cy="9.5" r="0.9"/></svg> Well Plate</h2>
-        <div class="plate-toolbar">
-            <button @click="showOnpSettings = !showOnpSettings" class="pt-btn" :class="{ on: showOnpSettings }" title="Robot Protocol Export Settings"><i class="fas fa-cog"></i> ONP</button>
-            <button @click="openGroupExport" class="pt-btn" title="Combine multiple plates into one .onp (shared stocks merged)"><i class="fas fa-layer-group"></i> Group .onp</button>
-            <button @click="onpInputRef.click()" class="pt-btn" :disabled="onpImportBusy"
+        <div style="display: flex; gap: 10px;">
+            <button @click="showOnpSettings = !showOnpSettings" class="secondary small" title="Robot Protocol Export Settings"><i class="fas fa-cog"></i> ONP</button>
+            <button @click="openGroupExport" class="secondary small" title="Combine multiple plates into one .onp (shared stocks merged)"><i class="fas fa-layer-group"></i> Group .onp</button>
+            <button @click="onpInputRef.click()" class="secondary small" :disabled="onpImportBusy"
                 title="Read an Andrew+ .onp back into plates — every pipetting step replayed, with the concentration each well actually reached">
                 <i class="fas" :class="onpImportBusy ? 'fa-spinner fa-spin' : 'fa-file-import'"></i> Import .onp
             </button>
             <input type="file" ref="onpInputRef" accept=".onp,.json,application/json" style="display:none" @change="importOnpFile" />
-            <button @click="showCloudLibrary = true" class="pt-btn"><i class="fas fa-cloud"></i> Library</button>
-            <button @click="addWellPlate" class="pt-btn primary"><i class="fas fa-plus"></i> New plate</button>
+            <button @click="showCloudLibrary = true" class="secondary small"><i class="fas fa-cloud"></i> Library</button>
+            <button @click="addWellPlate" class="small"><i class="fas fa-plus"></i> New Plate</button>
         </div>
     </div>
 
@@ -970,7 +970,7 @@ const exportAndrewPlusMulti = () => {
         <div class="flex-between" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end;">
             <div style="width: 35%; display: flex; gap: 15px; align-items: center;">
                 <input type="text" v-model="plate.name" style="font-size: 1.2rem; font-weight: bold; flex-grow: 1; background: transparent; border: none; border-bottom: 2px solid var(--primary); padding-left: 0; color: var(--primary);">
-                <select v-model="plate.format" @change="updateDefaultLabware(plate)" class="pt-select" style="width: 120px;">
+                <select v-model="plate.format" @change="updateDefaultLabware(plate)" style="width: 120px; height: 32px; padding: 4px 8px; font-size: 0.85rem;">
                     <option :value="24">24-Well</option>
                     <option :value="48">48-Well</option>
                     <option :value="96">96-Well</option>
@@ -980,41 +980,34 @@ const exportAndrewPlusMulti = () => {
                 </select>
             </div>
 
-            <!-- One control height, one shape, one filled button. What the plate IS
-                 sits on the left, what you can DO with it in the middle, and the
-                 four icon-only tools square off the end so the row stops ragged. -->
-            <div class="plate-toolbar">
-                <span class="scope-badge" :class="plate.scope === 'Global' ? 'lab' : 'private'">{{ plate.scope === 'Global' ? 'Lab' : 'Private' }}</span>
+            <div style="display: flex; gap: 5px; align-items: center;">
+                <span class="scope-badge" :class="plate.scope === 'Global' ? 'lab' : 'private'" style="margin-right: 5px;">{{ plate.scope === 'Global' ? 'Lab' : 'Private' }}</span>
                 <ExpStatusPicker :modelValue="plate.status || 'in_progress'" @update:modelValue="v => setPlanStatus(plate, v)" />
 
-                <span class="pt-sep"></span>
-
-                <button class="pt-btn primary" @click="store.saveToCloud('plates', plate); store.toast('Saved')" title="Save to cloud"><i class="fas fa-cloud-arrow-up"></i> Save</button>
+                <button class="success small" @click="store.saveToCloud('plates', plate); store.toast('Saved')" title="Save to cloud"><i class="fas fa-cloud-arrow-up"></i> Save</button>
 
                 <template v-if="plate.owner_id === store.user.id">
-                    <button class="pt-btn" v-if="plate.scope === 'Global'" @click="plate.scope = 'Personal'; store.saveToCloud('plates', plate); store.toast('Moved to Private')" title="Make private">
+                    <button class="secondary small" @click="plate.scope = 'Personal'; store.saveToCloud('plates', plate); store.toast('Moved to Private')" v-if="plate.scope === 'Global'" title="Make private">
                         <i class="fas fa-user-lock"></i> Make private
                     </button>
-                    <button class="pt-btn" v-else @click="plate.scope = 'Global'; store.saveToCloud('plates', plate); store.toast('Published to the lab')" title="Publish to the shared Lab space">
-                        <i class="fas fa-bullhorn"></i> Publish
+                    <button class="small" @click="plate.scope = 'Global'; store.saveToCloud('plates', plate); store.toast('Published to the lab')" v-if="plate.scope !== 'Global'" title="Publish to the shared Lab space">
+                        <i class="fas fa-bullhorn"></i> Publish to Lab
                     </button>
                 </template>
 
-                <span class="pt-sep"></span>
+                <button class="secondary small" :style="plate.colorByCondition ? 'background: var(--acs); color: var(--acc); border-color: var(--acc);' : ''" @click="plate.colorByCondition = !plate.colorByCondition" title="Colour wells by condition (Okabe-Ito)"><i class="fas fa-palette"></i></button>
+                
+                <div style="width: 1px; height: 24px; background: var(--border); margin: 0 5px;"></div>
 
-                <select v-model="plate.targetLabware" class="pt-select" title="Target labware for the robot protocol">
-                    <option value="">Default target plate</option>
+                <select v-model="plate.targetLabware" style="width: 150px; height: 32px; padding: 4px 8px; font-size: 0.8rem;">
+                    <option value="">Default Target Plate</option>
                     <option v-for="lw in store.targetLabwares.filter(l => l.format === plate.format)" :value="lw.uuid" :key="lw.uuid">{{ lw.name }}</option>
                 </select>
-                <button class="pt-btn" @click="savePlateToJournal(plate)" title="Log to Journal"><i class="fas fa-file-import"></i> Log</button>
-                <button class="pt-btn" @click="exportAndrewPlus(plate)" title="Export Robot Protocol (.onp) — Requires a valid Andrew+ license. Not affiliated with or endorsed by Waters Corporation."><i class="fas fa-robot"></i> .onp</button>
-
-                <span class="pt-sep"></span>
-
-                <button class="pt-btn pt-icon" :class="{ on: plate.colorByCondition }" @click="plate.colorByCondition = !plate.colorByCondition" title="Colour wells by condition (Okabe-Ito)"><i class="fas fa-palette"></i></button>
-                <button class="pt-btn pt-icon" @click="duplicatePlan(pIndex)" title="Duplicate"><i class="fas fa-copy"></i></button>
-                <button class="pt-btn pt-icon" @click="archivePlan(pIndex)" title="Archive"><i class="fas fa-box-archive"></i></button>
-                <button class="pt-btn pt-icon danger" @click="closeInWorkspace(pIndex)" title="Close from workspace"><i class="fas fa-times"></i></button>
+                <button class="small" @click="savePlateToJournal(plate)" title="Log to Journal"><i class="fas fa-file-import"></i> Log</button>
+                <button class="small" @click="exportAndrewPlus(plate)" title="Export Robot Protocol (.onp) — Requires a valid Andrew+ license. Not affiliated with or endorsed by Waters Corporation."><i class="fas fa-robot"></i> .onp</button>
+                <button class="secondary small" @click="duplicatePlan(pIndex)" title="Duplicate"><i class="fas fa-copy"></i></button>
+                <button class="secondary small" @click="archivePlan(pIndex)" title="Archive"><i class="fas fa-box-archive"></i></button>
+                <button class="danger small" @click="closeInWorkspace(pIndex)" title="Close from workspace"><i class="fas fa-times"></i></button>
             </div>
         </div>
 
@@ -1224,40 +1217,4 @@ const exportAndrewPlusMulti = () => {
 }
 .plate-legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .plate-legend-dot { width: 12px; height: 12px; border-radius: 3px; flex: none; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
-
-/* Plate toolbar ------------------------------------------------------------
-   Every control on one row is the same height and the same radius, and only the
-   action you came for is filled. The icon-only tools are square, so the row ends
-   on a straight edge instead of on three buttons of three widths. */
-.plate-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; min-width: 0; }
-
-.pt-btn {
-  height: 30px; padding: 0 11px; border-radius: 8px;
-  font-size: 0.74rem; font-weight: 600; line-height: 1; white-space: nowrap;
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  background: var(--btn2, rgba(0,0,0,.05)); color: var(--tx, inherit);
-  border: 1px solid var(--ln2, rgba(0,0,0,.12));
-  box-shadow: none; cursor: pointer; transition: filter .15s, background .15s, color .15s, border-color .15s;
-}
-.pt-btn:hover:not(:disabled) { filter: brightness(1.06); }
-.pt-btn:disabled { opacity: .55; cursor: default; }
-.pt-btn i { font-size: 0.78rem; }
-
-/* One filled button per row — the action you came to this row for. */
-.pt-btn.primary { background: var(--acc, #2563eb); border-color: transparent; color: #fff; }
-/* A toggle that is currently on. */
-.pt-btn.on { background: var(--acs, rgba(37,99,235,.14)); border-color: var(--acc, #2563eb); color: var(--acc, #2563eb); }
-/* Destructive: quiet until you reach for it. */
-.pt-btn.danger:hover { background: var(--danger-color, #ef4444); border-color: transparent; color: #fff; filter: none; }
-
-.pt-icon { width: 30px; padding: 0; }
-.pt-icon i { font-size: 0.8rem; }
-
-.pt-select {
-  height: 30px; max-width: 170px; padding: 0 8px; border-radius: 8px;
-  font-size: 0.74rem; color: inherit;
-  background: var(--fl, transparent); border: 1px solid var(--ln2, rgba(0,0,0,.12));
-}
-
-.pt-sep { width: 1px; height: 18px; background: var(--ln2, rgba(0,0,0,.12)); margin: 0 2px; flex: none; }
 </style>

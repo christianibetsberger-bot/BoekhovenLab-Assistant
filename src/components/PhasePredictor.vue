@@ -938,7 +938,13 @@
                 <i class="fas" :class="isCalculatingBoundary ? 'fa-spinner fa-spin' : 'fa-cube'"></i>
                 {{ isCalculatingBoundary ? 'Modeling...' : 'Map Phase Boundaries' }}
               </button>
-              <button class="small" @click="exportPlot" title="Export interactive 3D phase map as HTML (open in browser to rotate)" style="background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid #10b981; margin: 0;">
+              <button class="small" @click="exportPlot"
+                :title="mapView === 'grid'
+                  ? 'Save the slice grid as a standalone interactive HTML file — every panel as shown, hover included.'
+                  : (config.enableCompD
+                    ? `Save the map as a standalone interactive HTML file. The ${config.compDName || 'Component D'} slider comes with it, so you can rotate and step through the levels later without the app.`
+                    : 'Save the map as a standalone interactive HTML file — open it in a browser to rotate.')"
+                style="background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid #10b981; margin: 0;">
                 <i class="fas fa-cube"></i> Export HTML
               </button>
             </div>
@@ -1430,6 +1436,8 @@
 import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import { db } from '../services/supabase'
 import { esc } from '../utils/htmlSafe'
+import { sliceLevels } from '../utils/sliceLevels'
+import { buildExportHtml } from '../utils/phaseMapExport'
 import { invChip } from '../utils/invChip'
 import { useLabStore } from '../stores/labStore'
 import { filterInventory } from '../utils/inventoryFilter'
@@ -2276,17 +2284,19 @@ const exportSuggestionsToPlate = () => {
         + (result.overflow ? `\n\n${result.overflow} did not fit on the plate.` : ''));
 }
 
-const renderPlot = () => {
-  if (mapView.value === 'grid') { nextTick(() => renderSliceGrid()); return }
-
-  const plotDiv = document.getElementById('phase-ternary-plot')
-  if (!plotDiv) return
-
+// The scene's point traces at one Component-D level. Pulled out of renderPlot so
+// the HTML export can rebuild the same scene at every level without keeping a
+// second copy of the rules that sort a point into result, proposal or untested.
+//
+// `keepEmpty` holds on to phases that have no points in this slice. The exported
+// slider redraws on every step, and a legend that gains and loses rows as you
+// drag it is not one you can read a boundary off.
+const buildSceneTraces = (dSlice, { keepEmpty = false } = {}) => {
   const classTraces = {};
   for(let i=0; i<=4; i++) {
       classTraces[i] = { type: 'scatter3d', mode: 'markers', x:[], y:[], z:[], text:[], name: phaseLabel(i), marker: {color: getPhaseColor(i), size: 5, symbol: 'circle', line: {color: '#000', width: 1}} };
   }
-  
+
   const traceUnknown = { type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], name: 'Untested', marker: { color: '#94a3b8', size: 2, symbol: 'circle' } };
   const traceTarget = { type: 'scatter3d', mode: 'markers', x: [], y: [], z: [], text: [], name: 'AI Target', marker: { color: getPhaseColor(-1), size: 4, symbol: 'cross', line: { color: '#fff', width: 1 } } };
 
@@ -2294,7 +2304,6 @@ const renderPlot = () => {
 
   // When 4D is active, filter to points whose compD is within ±step/2 of the current D slice.
   const dEnabled = config.value.enableCompD
-  const dSlice = currentDSlice.value
   const dHalf = (config.value.compDStep || 0.1) / 2
   const dataForPlot = dEnabled
     ? allData.filter(e => {
@@ -2317,9 +2326,17 @@ const renderPlot = () => {
     }
   })
 
-  const traces = [...Object.values(classTraces).filter(t => t.x.length > 0), traceUnknown, traceTarget];
+  return [...Object.values(classTraces).filter(t => keepEmpty || t.x.length > 0), traceUnknown, traceTarget];
+}
 
-  // MATHEMATICALLY ROBUST DYNAMIC ISOSURFACE RENDERING
+// MATHEMATICALLY ROBUST DYNAMIC ISOSURFACE RENDERING
+//
+// The fitted boundaries are modelled over A/B/C only, so the same surfaces stand
+// whichever D slice is on screen. That is what lets the export serialise them
+// once and concatenate them onto every frame, instead of repeating a voxel grid
+// per phase per slice and producing a file nobody can open.
+const buildBoundaryTraces = () => {
+  const traces = []
   if (boundaryData.value && showBoundary.value && boundaryData.value.probs) {
       const rawX = [...boundaryData.value.x];
       const rawY = [...boundaryData.value.y];
@@ -2364,22 +2381,31 @@ const renderPlot = () => {
           traces.push(traceSurface);
       });
   }
+  return traces
+}
 
-  const layout = {
-    scene: {
-      xaxis: { range: [config.value.anionMin, config.value.anionMax], title: { text: compAxisTitle('anion'), font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } },
-      yaxis: { range: [config.value.cationMin, config.value.cationMax], title: { text: compAxisTitle('cation'), font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } },
-      zaxis: { range: [config.value.saltMin, config.value.saltMax], title: { text: compAxisTitle('salt'), font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } }
-    },
-    paper_bgcolor: '#000000',
-    margin: { l: 0, r: fixedAxis.value ? 110 : 0, b: 0, t: 0 },
-    showlegend: true,
-    legend: fixedAxis.value
-      ? { orientation: 'v', x: 1.02, xanchor: 'left', y: 0.5, yanchor: 'middle', font: { color: '#ffffff', size: 9 } }
-      : { orientation: 'h', y: 0.05, x: 0.5, xanchor: 'center', font: { color: '#ffffff', size: 10 } }
-  }
+const buildSceneLayout = () => ({
+  scene: {
+    xaxis: { range: [config.value.anionMin, config.value.anionMax], title: { text: compAxisTitle('anion'), font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } },
+    yaxis: { range: [config.value.cationMin, config.value.cationMax], title: { text: compAxisTitle('cation'), font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } },
+    zaxis: { range: [config.value.saltMin, config.value.saltMax], title: { text: compAxisTitle('salt'), font: { color: '#ffffff', size: 12 } }, backgroundcolor: "#000000", gridcolor: "#444444", showbackground: true, zerolinecolor: "#888888", tickfont: { color: '#dddddd', size: 10 } }
+  },
+  paper_bgcolor: '#000000',
+  margin: { l: 0, r: fixedAxis.value ? 110 : 0, b: 0, t: 0 },
+  showlegend: true,
+  legend: fixedAxis.value
+    ? { orientation: 'v', x: 1.02, xanchor: 'left', y: 0.5, yanchor: 'middle', font: { color: '#ffffff', size: 9 } }
+    : { orientation: 'h', y: 0.05, x: 0.5, xanchor: 'center', font: { color: '#ffffff', size: 10 } }
+})
 
-  Plotly.react('phase-ternary-plot', traces, layout, { displayModeBar: false, responsive: true })
+const renderPlot = () => {
+  if (mapView.value === 'grid') { nextTick(() => renderSliceGrid()); return }
+
+  const plotDiv = document.getElementById('phase-ternary-plot')
+  if (!plotDiv) return
+
+  const traces = [...buildSceneTraces(currentDSlice.value), ...buildBoundaryTraces()]
+  Plotly.react('phase-ternary-plot', traces, buildSceneLayout(), { displayModeBar: false, responsive: true })
   nextTick(() => render2DPlot())
 }
 
@@ -3967,34 +3993,55 @@ const calculateBoundary = async () => {
   }
 }
 
+// The D levels the exported slider steps through — see sliceLevels for why the
+// screened values win over an even sweep whenever there are few enough of them.
+const exportDLevels = () => sliceLevels(
+  [...experiments.value, ...suggestions.value].map(e => e.compD ?? 0),
+  { min: config.value.compDMin, max: config.value.compDMax, fallback: currentDSlice.value }
+)
+
 const exportPlot = () => {
-  const plotDiv = document.getElementById('phase-ternary-plot')
-  if (!plotDiv || !plotDiv.data) { alert('Nothing to export — generate the phase map first.'); return; }
+  const gridView = mapView.value === 'grid'
+  const liveDiv = document.getElementById(gridView ? 'phase-slice-grid' : 'phase-ternary-plot')
+  if (!liveDiv || !liveDiv.data) { alert('Nothing to export — generate the phase map first.'); return; }
 
   const date = new Date().toISOString().split('T')[0];
   const filename = `PhaseMap_${date}`;
 
-  // Serialize live traces and layout into a standalone interactive HTML file.
-  // Plotly 3D is rendered in WebGL so downloadImage only captures the SVG legend —
-  // exporting as HTML preserves the full interactive 3D scene.
-  const html = `<!DOCTYPE html>
-<html><head>
-  <meta charset="utf-8">
-  <title>${filename}</title>
-  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"><\/script>
-  <style>body{margin:0;background:#000;}#plot{width:100vw;height:100vh;}</style>
-</head>
-<body>
-  <div id="plot"></div>
-  <script>
-    Plotly.newPlot('plot',
-      ${JSON.stringify(plotDiv.data)},
-      ${JSON.stringify(plotDiv.layout)},
-      {responsive:true}
-    );
-  <\/script>
-</body>
-</html>`;
+  // A slider only earns its place in the 3D export. The slice grid already has
+  // every D level side by side on one screen — that is the whole point of it —
+  // so there it exports exactly what is being looked at.
+  const sliced = !gridView && config.value.enableCompD
+  const levels = sliced ? exportDLevels() : []
+  const frames = sliced
+    ? levels.map(v => buildSceneTraces(v, { keepEmpty: true }))
+    : [liveDiv.data]
+  const staticTraces = sliced ? buildBoundaryTraces() : []
+  const layout = sliced ? buildSceneLayout() : liveDiv.layout
+
+  // Open on the slice that is on screen, so the file starts where the export was
+  // asked for rather than at whichever level happens to sort first.
+  let startIndex = 0
+  if (sliced && levels.length) {
+    let best = Infinity
+    levels.forEach((v, i) => {
+      const d = Math.abs(v - Number(currentDSlice.value))
+      if (d < best) { best = d; startIndex = i }
+    })
+  }
+
+  const html = buildExportHtml({
+    title: filename,
+    frames,
+    staticTraces,
+    layout,
+    levels,
+    startIndex,
+    unit: config.value.compDUnit || '',
+    tolerance: sliced ? (Number(config.value.compDStep) || 0) / 2 : 0,
+    sliderLabel: config.value.compDName || 'Component D',
+    gridView,
+  })
 
   const blob = new Blob([html], { type: 'text/html' });
   const url = URL.createObjectURL(blob);

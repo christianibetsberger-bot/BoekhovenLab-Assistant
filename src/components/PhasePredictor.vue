@@ -28,7 +28,19 @@
               <input type="number" v-model="config.targetVolume" @change="renderPlot" title="Total Volume per well in µL" />
             </div>
           </div>
-          
+
+          <!-- Shown while the ranges can still be fixed: the corner of the search space
+               where every component sits at its maximum. Combinations past the well
+               volume are excluded from the search, never suggested and never pipetted. -->
+          <div v-if="worstCaseFill.frac > 1" style="margin-bottom:10px; padding:7px 10px; border-radius:6px; border:1px solid rgba(217,119,6,0.4); background:rgba(217,119,6,0.08); font-size:0.75rem; line-height:1.5;">
+            <i class="fas fa-flask" style="opacity:0.7;"></i>
+            At the top of every range a well needs <strong>{{ worstCaseFill.uL.toFixed(1) }} µL</strong>
+            of {{ config.targetVolume }} µL. Those combinations can't be mixed, so the engine leaves them
+            out of the search — use more concentrated stocks, lower the maxima, or raise the well volume
+            to make them available.
+          </div>
+
+
           <div class="config-grid-complex">
             <div class="input-group">
               <label>Component A <select :value="config.anionUnit" @change="changeUnit('anion', config.anionUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
@@ -1522,6 +1534,32 @@ const computeWellVolumes = (sug) => {
 // Stored-unit arithmetic, two modes:
 //   fixed — target  = source * factor + offset
 //   range — target ∈ [source * factor + offset, source * factorMax + offsetMax]
+// Share of the well a composition needs: Σ(target/stock) + the constants' fixed share.
+// Reuses computeWellVolumes so there is one definition of the volume maths; the target
+// volume cancels out, which is why the engine can filter on it without knowing V.
+// > 1 means the components alone overflow the tube — the concentrations in that well
+// would be wrong whatever you do, so it is not a well the engine is allowed to propose.
+const wellVolumeFraction = (exp) => {
+  const V = Number(config.value.targetVolume)
+  if (!isFinite(V) || V <= 0) return 0
+  const { vA, vB, vC, vD, vConst } = computeWellVolumes(exp)
+  return (vA + vB + vC + vD + vConst) / V
+}
+
+// The worst case the current ranges allow — the corner where every component is at its
+// maximum. Shown before anything is generated, so an impossible search space is visible
+// while it can still be fixed rather than after a plate is pipetted.
+const worstCaseFill = computed(() => {
+  const cfg = config.value
+  const frac = wellVolumeFraction({
+    anion: Number(cfg.anionMax) || 0,
+    cation: Number(cfg.cationMax) || 0,
+    salt: Number(cfg.saltMax) || 0,
+    compD: cfg.enableCompD ? (Number(cfg.compDMax) || 0) : 0,
+  })
+  return { frac, uL: frac * (Number(cfg.targetVolume) || 0) }
+})
+
 const COMP_KEYS = ['anion', 'cation', 'salt', 'compD']
 const compLabel = (key) => ({
   anion: () => config.value.anionName || 'A',
@@ -2889,14 +2927,20 @@ const calculateNextExperiments = async () => {
       if (seen.has(key)) return false
       seen.add(key); return true
     })
-    unique.forEach((s, i) => { s.sampleId = nextStartId + i })
-    suggestions.value = unique
+    // Safety net: the engine already excludes wells that cannot be mixed in the target
+    // volume, but a link applied here could push one over. An overfilled well has the
+    // wrong concentrations in it, so it is dropped rather than suggested.
+    const fits = unique.filter(s => wellVolumeFraction(s) <= 1 + 1e-9)
+    const overfilled = unique.length - fits.length
+    fits.forEach((s, i) => { s.sampleId = nextStartId + i })
+    suggestions.value = fits
 
     const notes = (data.warnings || []).map(w => w.message)
     if (linked.length - unique.length > 0) notes.push(`${linked.length - unique.length} duplicate well(s) removed after applying the links`)
+    if (overfilled > 0) notes.push(`${overfilled} well(s) dropped: a link pushed them past the ${config.value.targetVolume} µL well volume`)
     if (stats.clamped > 0) notes.push(`${stats.clamped} linked value(s) pulled back into their component's min/max`)
-    if (unique.length < asked && !(data.warnings || []).some(w => w.axis === 'count')) {
-      notes.push(`${unique.length} of ${asked} requested wells available`)
+    if (fits.length < asked && !(data.warnings || []).some(w => w.axis === 'count')) {
+      notes.push(`${fits.length} of ${asked} requested wells available`)
     }
     suggestionNotes.value = notes
 

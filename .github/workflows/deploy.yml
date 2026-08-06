@@ -6,8 +6,10 @@ on:
   workflow_dispatch:
 
 # Grant the workflow permission to publish to GitHub Pages via the deploy-pages action.
+# `deployments: read` is for the stale-deployment sweep in the deploy job below.
 permissions:
   contents: read
+  deployments: read
   pages: write
   id-token: write
 
@@ -63,6 +65,42 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # A Pages deployment whose runner went away mid-flight — a cancelled job, a
+      # step that hit its timeout — is never finalised by anyone. It just stays
+      # pending on the Pages side, and because Pages allows one deployment at a
+      # time it blocks every later one: the next run gets a 400 telling it to
+      # "cancel <sha> first", and the runs after that sit in deploy-pages' poll
+      # loop until it gives up ten minutes later. Nothing clears it on its own,
+      # so a single orphan stops the site updating indefinitely.
+      #
+      # Cancelling it is the documented way out, and it is safe to do blind: we
+      # skip this run's own sha, and a deployment that already reached a terminal
+      # state is left alone. It is a tidy-up, never a gate — if the API is
+      # unreachable or answers with something unexpected, every branch below
+      # falls through to doing nothing and deploy-pages runs regardless.
+      - name: Cancel any Pages deployment left pending by an earlier run
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/deployments?environment=github-pages&per_page=30" \
+            --jq '.[] | select(.sha != env.GITHUB_SHA) | "\(.id) \(.sha)"' 2>/dev/null |
+          while read -r id sha; do
+            # No status at all means it never even reported queued — still pending.
+            # 'unknown' is the read-failed case, and matches nothing below.
+            state=$(gh api "repos/$GITHUB_REPOSITORY/deployments/$id/statuses?per_page=1" \
+              --jq '.[0].state // "pending"' 2>/dev/null || echo unknown)
+            case "$state" in
+              pending|queued|in_progress|waiting)
+                echo "Cancelling $sha, left '$state' by an earlier run"
+                if gh api -X POST "repos/$GITHUB_REPOSITORY/pages/deployments/$sha/cancel" >/dev/null 2>&1
+                then echo "  cancelled"
+                else echo "  nothing to cancel (already resolved)"
+                fi
+                ;;
+            esac
+          done
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5

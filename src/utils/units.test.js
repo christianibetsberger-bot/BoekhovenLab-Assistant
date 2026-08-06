@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   concentrationRatio,
-  convertConcentration,
   dimsCompatible,
   unitDimension,
   compatibleUnits,
@@ -85,27 +84,5 @@ describe('defaultUnitForDim', () => {
 
   it('falls back to the input unit for an unknown dimension', () => {
     expect(defaultUnitForDim('bogus')).toBe('bogus')
-  })
-})
-
-describe('convertConcentration', () => {
-  it('rescales within a dimension', () => {
-    expect(convertConcentration(1000, 'µM', 'mM')).toBeCloseTo(1, 9)
-    expect(convertConcentration(0.5, 'mM', 'µM')).toBeCloseTo(500, 9)
-    expect(convertConcentration(2, 'M', 'mM')).toBeCloseTo(2000, 9)
-  })
-
-  it('returns the value untouched when the units already match', () => {
-    expect(convertConcentration(3.25, 'mM', 'mM')).toBe(3.25)
-  })
-
-  it('refuses a conversion that would need a molar mass', () => {
-    expect(convertConcentration(1, 'mg/mL', 'mM')).toBeNull()
-    expect(convertConcentration(1, 'mM', 'X')).toBeNull()
-  })
-
-  it('is null for a value that is not a number', () => {
-    expect(convertConcentration('', 'mM', 'µM')).toBeNull()
-    expect(convertConcentration(null, 'mM', 'µM')).toBeNull()
   })
 })

@@ -43,20 +43,6 @@ export function concentrationRatio(targetVal, targetUnit, stockVal, stockUnit) {
   return _toBase(targetVal, targetUnit) / stockBase
 }
 
-// The same concentration expressed in another unit, or null when the two units
-// measure different things (µM → mg/mL needs a molar mass nobody supplied here).
-export function convertConcentration(value, fromUnit, toUnit) {
-  // '' and null coerce to 0 through Number(), and "no value recorded" is not zero.
-  if (value === null || value === undefined || value === '') return null
-  const v = Number(value)
-  if (!isFinite(v)) return null
-  if (fromUnit === toUnit) return v
-  if (!dimsCompatible(fromUnit, toUnit)) return null
-  const toBase = _toBase(1, toUnit)
-  if (!toBase) return null
-  return _toBase(v, fromUnit) / toBase
-}
-
 const DIM_DEFAULT = {
   molar:    'µM',
   mass_vol: 'mg/mL',

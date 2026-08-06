@@ -17,9 +17,13 @@ export const LWCS = {
   // code to fill its ObjectLayout box, so it can't clip, imports as Automatisch, and
   // matches the box the preview draws. (Verified from native saved files: 503 →
   // AutoFit. Valid fixed tiers if ever needed: Small / SmallMedium / Medium / Large.)
-  '506': { label: '0.5 mL Eppendorf', tube: 'eppi', cap: true, W: 33.4, H: 12.7, wrapW: 23.9, circ: 9.5, qr: 6.5, ecc: 'L', qrSize: 'AutoFit', fName: 2.6, fCas: 1.6, fCode: 2.6, fMin: 1.7, useShort: true, rule: false, labelName: 'LWCS506', rect: { x: 0.012187534, y: 0.0075000003, w: 1.2833055, h: 0.43402776 } },
-  '507': { label: '1.5 mL Eppendorf', tube: 'eppi', cap: true, W: 39.7, H: 15.9, wrapW: 28.6, circ: 11.1, qr: 7.6, ecc: 'L', qrSize: 'AutoFit', fName: 2.7, fCas: 1.8, fCode: 2.7, fMin: 1.6, rule: true, labelName: 'LWCS507', rect: { x: 0.14513889, y: 0.045138888, w: 1.5, h: 0.5509028 } },
-  '503': { label: 'Falcon 15 & 50 mL', tube: 'falcon', cap: false, W: 38.1, H: 19.1, qr: 14, ecc: 'M', qrSize: 'AutoFit', fName: 3.2, fCas: 2.1, fCode: 3.0, fMin: 1.8, rule: true, labelName: 'LWCS503', rect: { x: 0.060000032, y: 0.045, w: 1.38, h: 0.675 } },
+  // cond = how much of the solution's identity fits: 'full' = concentration ·
+  // buffer · pH, 'conc' = the concentration alone (all the 0.5 mL cap can hold
+  // and still stay legible — it already prints the short name for the same
+  // reason), 'none' = omit. fCond = that line's font (mm).
+  '506': { label: '0.5 mL Eppendorf', tube: 'eppi', cap: true, W: 33.4, H: 12.7, wrapW: 23.9, circ: 9.5, qr: 6.5, ecc: 'L', qrSize: 'AutoFit', fName: 2.6, fCas: 1.6, fCode: 2.6, fMin: 1.7, fCond: 1.5, cond: 'conc', useShort: true, rule: false, labelName: 'LWCS506', rect: { x: 0.012187534, y: 0.0075000003, w: 1.2833055, h: 0.43402776 } },
+  '507': { label: '1.5 mL Eppendorf', tube: 'eppi', cap: true, W: 39.7, H: 15.9, wrapW: 28.6, circ: 11.1, qr: 7.6, ecc: 'L', qrSize: 'AutoFit', fName: 2.7, fCas: 1.8, fCode: 2.7, fMin: 1.6, fCond: 1.6, cond: 'full', rule: true, labelName: 'LWCS507', rect: { x: 0.14513889, y: 0.045138888, w: 1.5, h: 0.5509028 } },
+  '503': { label: 'Falcon 15 & 50 mL', tube: 'falcon', cap: false, W: 38.1, H: 19.1, qr: 14, ecc: 'M', qrSize: 'AutoFit', fName: 3.2, fCas: 2.1, fCode: 3.0, fMin: 1.8, fCond: 1.9, cond: 'full', rule: true, labelName: 'LWCS503', rect: { x: 0.060000032, y: 0.045, w: 1.38, h: 0.675 } },
 }
 
 // HERMA 4363 — A4 sheet, 105 × 48 mm cells. Eppis tile inside a cell (cut apart);
@@ -28,10 +32,10 @@ export const HERMA = {
   cell: { w: 105, h: 48 },
   // tileH chosen so rows*tileH + (rows-1)*gutter + 2*cellPad (1mm) <= cell.h (48) with margin,
   // else the bottom row overflows and prints clipped. e05: 3*14+2*1.5+2 = 47; e15: 2*21.5+1.5+2 = 46.5.
-  e05: { kind: 'eppi', label: '0.5 mL Eppendorf', tileW: 33, tileH: 14, cols: 3, rows: 3, gutter: 1.5, qr: 11.5, ecc: 'L', fName: 2.1, fCas: 1.6, fCode: 2.2 },
-  e15: { kind: 'eppi', label: '1.5 mL Eppendorf', tileW: 33, tileH: 21.5, cols: 3, rows: 2, gutter: 1.5, qr: 13.5, ecc: 'L', fName: 2.6, fCas: 1.9, fCode: 2.6 },
-  f15: { kind: 'wrap', label: '15 mL Falcon', repeat: 2, qr: 20, ecc: 'M', fName: 4, fCas: 2.6, fCode: 3.6 },
-  f50: { kind: 'wrap', label: '50 mL Falcon', repeat: 1, qr: 34, ecc: 'M', fName: 7, fCas: 3.4, fCode: 5 },
+  e05: { kind: 'eppi', label: '0.5 mL Eppendorf', tileW: 33, tileH: 14, cols: 3, rows: 3, gutter: 1.5, qr: 11.5, ecc: 'L', fName: 2.1, fCas: 1.6, fCode: 2.2, fCond: 1.5, cond: 'full' },
+  e15: { kind: 'eppi', label: '1.5 mL Eppendorf', tileW: 33, tileH: 21.5, cols: 3, rows: 2, gutter: 1.5, qr: 13.5, ecc: 'L', fName: 2.6, fCas: 1.9, fCode: 2.6, fCond: 1.7, cond: 'full' },
+  f15: { kind: 'wrap', label: '15 mL Falcon', repeat: 2, qr: 20, ecc: 'M', fName: 4, fCas: 2.6, fCode: 3.6, fCond: 2.4, cond: 'full' },
+  f50: { kind: 'wrap', label: '50 mL Falcon', repeat: 1, qr: 34, ecc: 'M', fName: 7, fCas: 3.4, fCode: 5, fCond: 3.2, cond: 'full' },
 }
 
 // The value encoded in the QR. 'full' = the inventory deep link (a phone camera
@@ -138,6 +142,35 @@ export function labelMeta(rec) {
   if (rec && rec.oligo && seq) return { seq: true, tag: '', value: seq }
   return { seq: false, tag: 'CAS ', value: (rec && rec.cas) || '' }
 }
+// What the tube actually contains: concentration, the buffer it is dissolved in,
+// and the pH — printed only where the inventory record carries them. Same rules as
+// the inventory PDF labels so the two never disagree: the buffer is the free-text
+// field as entered (it normally carries the buffer's own concentration, e.g.
+// "50 mM Tris, pH 7.5"), and a measured pH outranks the nominal one.
+// Water is left unsaid — it is the default assumption and the millimetres are scarce.
+export function labelCond(rec, sp) {
+  const mode = (sp && sp.cond) || 'none'
+  if (!rec || mode === 'none') return ''
+  // The concentration is read straight from the inventory and nothing is inferred:
+  // no stock recorded (blank, zero or non-numeric) prints no concentration at all,
+  // and a stock with no unit prints the bare number rather than an assumed "µM".
+  // A label asserting a concentration the inventory never recorded is worse than a
+  // label that stays quiet about it — someone pipettes from what it says.
+  const stockRaw = rec.stock == null ? '' : String(rec.stock).trim()
+  const stockNum = Number(stockRaw)
+  const unit = String(rec.stockUnit || '').trim()
+  const conc = (stockRaw !== '' && isFinite(stockNum) && stockNum > 0)
+    ? (unit ? `${stockRaw} ${unit}` : stockRaw) : ''
+  if (mode === 'conc') return conc
+  const buffer = String(rec.buffer || '').trim()
+  const solvent = buffer || (rec.diluent === 'buffer' ? 'buffer' : '')
+  const ph = (rec.measuredPH != null && String(rec.measuredPH).trim() !== '')
+    ? Number(rec.measuredPH).toFixed(2)
+    : (rec.pH != null && String(rec.pH).trim() !== '') ? String(rec.pH).trim() : ''
+  // The buffer text usually ends in its own "pH 7.5" — don't print it twice.
+  const phPart = (ph && !/ph\s*\d/i.test(solvent)) ? `pH ${ph}` : ''
+  return [conc, solvent, phPart].filter(Boolean).join(' · ')
+}
 export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
   const sp = LWCS[key], r = sp.rect, esc = escXml, f = (n) => (+n).toFixed(4)
   const pad = 0.03
@@ -152,23 +185,72 @@ export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
   const dieR = sp.W / 25.4
   const tw = Math.max(0.3, Math.min(r.x + r.w, dieR) - pad - tx)
   const meta = labelMeta(rec)
-  // DNA/RNA: the sequence replaces the CAS and takes extra height (it wraps to lines).
-  const nH = r.h * (meta.seq ? 0.34 : 0.46), cH = r.h * (meta.seq ? 0.42 : 0.20), kH = r.h * (meta.seq ? 0.18 : 0.26)
-  const nY = r.y + pad, cY = nY + nH, kY = cY + cH
-  const url = labelPayload(rec.code, resolveQrMode(mode, sp, shortHost), shortHost)
+  const cond = labelCond(rec, sp)
+  // Height shares of the label, summing to ~0.92 so the top pad still fits. The
+  // conditions line only claims height when the record actually has conditions —
+  // a compound with no concentration or buffer keeps the old proportions exactly.
+  // Height shares, summing to ~0.92 so the top pad still fits. The conditions box is
+  // sized for TWO lines, because "10 mM · 50 mM Tris, pH 7.5" does not fit one on a
+  // 38 mm die; the CAS gives up the room, being a single short line that never needed
+  // a fifth of the label.
+  //
+  // The name outranks the conditions: a long name in a shrunken box would be scaled
+  // below its legibility floor by DYMO's AlwaysFit, which is a worse label than one
+  // without the conditions. So the layouts are tried widest-name-last and the first
+  // one where the name fits its box unshrunk wins.
+  const noCond  = meta.seq ? { n: 0.34, c: 0.42, d: 0,    k: 0.18 } : { n: 0.46, c: 0.20, d: 0,    k: 0.26 }
+  const layouts = cond
+    ? [ meta.seq ? { n: 0.24, c: 0.32, d: 0.20, k: 0.16 } : { n: 0.34, c: 0.14, d: 0.22, k: 0.22 },
+        meta.seq ? { n: 0.30, c: 0.34, d: 0.12, k: 0.16 } : { n: 0.42, c: 0.14, d: 0.12, k: 0.24 },
+        noCond ]
+    : [ noCond ]
+  const minPt = (sp.fMin || 1.4) * 2.835   // mm → pt
+  const condMin = Math.min(minPt, 1.25 * 2.835)
   const title = labelTitle(sp, rec)
+  const fitName = (hShare) => fitWrap(title, tw, r.h * hShare, (sp.fName || 3) * 2.835, 0.56, minPt, meta.seq ? 2 : 3)
+  const fitsBox = (fit, hIn) => fit.lines.length * fit.pt * 1.16 <= hIn * 72 * 0.94 + 1e-9
+  // The size a box will actually PRINT at: DYMO's AlwaysFit scales overset text down,
+  // so a long name is already shrunk before the conditions take any room. Comparing
+  // printed sizes — not requested ones — is what keeps a 37-character IUPAC name from
+  // vetoing a "10 mM" that costs it nothing.
+  const effPt = (fit, hIn) => fit.pt * Math.min(1, (hIn * 72 * 0.94) / (fit.lines.length * fit.pt * 1.16))
+  // fitWrap truncates to maxLines as a last resort; a label saying "10 mM · 50 mM"
+  // with the "pH 7.5" cut off is worse than one saying nothing, so those are rejected.
+  const isWhole = (fit, text) =>
+    fit.lines.join(' ').replace(/\s+/g, ' ').trim() === String(text).replace(/\s+/g, ' ').trim()
+
+  const refFit = fitName(noCond.n)
+  const refEff = effPt(refFit, r.h * noCond.n)
+  let share = noCond, nameFit = refFit, condFit = null
+  for (const cand of layouts) {
+    if (!cand.d) break
+    const dFit = fitWrap(cond, tw, r.h * cand.d, (sp.fCond || 1.6) * 2.835, 0.5, condMin, cand.d >= 0.16 ? 2 : 1)
+    if (!isWhole(dFit, cond) || !fitsBox(dFit, r.h * cand.d)) continue
+    const nFit = fitName(cand.n)
+    if (effPt(nFit, r.h * cand.n) < 0.8 * refEff) continue   // the name keeps ≥80% of its printed size
+    share = cand; nameFit = nFit; condFit = dFit
+    break
+  }
+  const nH = r.h * share.n, cH = r.h * share.c, dH = r.h * share.d, kH = r.h * share.k
+  const nY = r.y + pad, cY = nY + nH, dY = cY + cH, kY = dY + dH
+  const showCond = !!(cond && share.d)
+  const url = labelPayload(rec.code, resolveQrMode(mode, sp, shortHost), shortHost)
   // Fit each line to its box so long names/codes don't overflow on import; the
   // per-label fMin (mm → pt) keeps the name legible on the tiny caps.
-  const minPt = (sp.fMin || 1.4) * 2.835   // mm → pt
-  const { pt: nSz, lines: nameLines } = fitWrap(title, tw, nH, (sp.fName || 3) * 2.835, 0.56, minPt, meta.seq ? 2 : 3)
+  const nSz = nameFit.pt, nameLines = nameFit.lines
   let casPayload, cSz
   if (meta.seq) {   // wrap the sequence across the taller box instead of shrinking to one line
     const fw = fitWrap(meta.value, tw, cH, (sp.fCas || 1.8) * 2.835, 0.5, minPt, 4)
     cSz = fw.pt; casPayload = fw.lines
   } else {
-    cSz = fitPt('CAS ' + rec.cas, tw, cH, (sp.fCas || 1.8) * 2.835, 0.52)
-    casPayload = 'CAS ' + rec.cas
+    // Uses labelMeta's normalised value, so a compound with no CAS prints nothing
+    // at all — the raw `'CAS ' + rec.cas` put a bare "CAS" tag with no number on
+    // every die, asserting a field the inventory never had.
+    const casText = meta.value ? meta.tag + meta.value : ''
+    cSz = fitPt(casText || ' ', tw, cH, (sp.fCas || 1.8) * 2.835, 0.52)
+    casPayload = casText
   }
+  const showMeta = Array.isArray(casPayload) ? casPayload.length > 0 : !!casPayload
   const kSz = fitPt(rec.code, tw, kH, (sp.fCode || 3) * 2.835, 0.6)
   const brT = `<Brushes><BackgroundBrush><SolidColorBrush><Color A="0" R="1" G="1" B="1"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes>`
   const brQ = `<Brushes><BackgroundBrush><SolidColorBrush><Color A="1" R="1" G="1" B="1"></Color></SolidColorBrush></BackgroundBrush><BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush><StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush><FillBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush></Brushes>`
@@ -193,7 +275,7 @@ export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
     <Show_Border>False</Show_Border>
     <HasFixedLength>False</HasFixedLength>
     <FixedLengthValue>0</FixedLengthValue>
-    <DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${Q}${T('NAME', nameLines, tx, nY, tw, nH, 'Arial Narrow', nSz, 'True', 'Top')}${T('CAS', casPayload, tx, cY, tw, cH, 'Consolas', cSz, 'False', meta.seq ? 'Top' : 'Middle')}${T('CODE', rec.code, tx, kY, tw, kH, 'Consolas', kSz, 'True', 'Middle')}</LabelObjects></DynamicLayoutManager>
+    <DynamicLayoutManager><RotationBehavior>ClearObjects</RotationBehavior><LabelObjects>${Q}${T('NAME', nameLines, tx, nY, tw, nH, 'Arial Narrow', nSz, 'True', 'Top')}${showMeta ? T('CAS', casPayload, tx, cY, tw, cH, 'Consolas', cSz, 'False', meta.seq ? 'Top' : 'Middle') : ''}${showCond ? T('COND', condFit.lines, tx, dY, tw, dH, 'Arial Narrow', condFit.pt, 'False', 'Middle') : ''}${T('CODE', rec.code, tx, kY, tw, kH, 'Consolas', kSz, 'True', 'Middle')}</LabelObjects></DynamicLayoutManager>
   </DYMOLabel>
   <LabelApplication>Blank</LabelApplication>
   <DataTable><Columns></Columns><Rows></Rows></DataTable>

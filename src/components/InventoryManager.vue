@@ -38,7 +38,9 @@ const resolvePendingQr = () => {
         inventoryMode.value = (found.scope || 'Global') === 'Personal' ? 'Personal' : 'Global'
         viewingItem.value = found
     } else if (confirm(`No inventory item with code "${code}".\n\nAdd it as a new compound?`)) {
-        const newItem = { id: 'inv_' + crypto.randomUUID(), code, cas: '', itemClass: 'Other', name: 'Scanned compound', stock: 100, stockUnit: 'µM', location: '', sequence: '', oligoType: 'DNA', manualMw: null, tm: 0, scope: writeScope.value }
+        // No concentration is invented for a scanned compound — this flow never asks
+        // for one, and a fabricated stock prints on the tube label as though measured.
+        const newItem = { id: 'inv_' + crypto.randomUUID(), code, cas: '', itemClass: 'Other', name: 'Scanned compound', stock: null, stockUnit: '', location: '', sequence: '', oligoType: 'DNA', manualMw: null, tm: 0, scope: writeScope.value }
         store.inventory.unshift(newItem)
         store.saveItemToCloud(newItem)
         viewingItem.value = newItem
@@ -340,6 +342,12 @@ const processImports = (importedItems, sourceName) => {
             duplicates.forEach(dup => {
                 let existingItem = store.inventory[dup.existingIdx];
                 dup.new.id = existingItem.id;
+                // Replacing must not silently destroy a concentration that was measured:
+                // an import row with no concentration keeps whatever the record already had.
+                if (dup.new.stock == null && existingItem.stock != null) {
+                    dup.new.stock = existingItem.stock;
+                    dup.new.stockUnit = existingItem.stockUnit || '';
+                }
                 store.inventory.splice(dup.existingIdx, 1, dup.new);
                 store.saveItemToCloud(dup.new);
                 replacedCount++;
@@ -386,7 +394,10 @@ const importInventory = (event) => {
                         let parsedMw = !isNaN(mass) ? mass : null;
                         importedItems.push({
                             id: 'inv_txt_' + crypto.randomUUID(), code: 'TXT', cas: '', itemClass: 'DNA', name: name,
-                            stock: !isNaN(conc) ? conc : 100, stockUnit: 'µM', location: '', sequence: formattedSeq,
+                            // An unreadable concentration column stays empty rather than
+                            // becoming 100 µM — vendor sheets often end in a purification
+                            // grade ("HPLC", "Standard Desalting"), not a concentration.
+                            stock: !isNaN(conc) ? conc : null, stockUnit: !isNaN(conc) ? 'µM' : '', location: '', sequence: formattedSeq,
                             length: parsedLength, gc: calcSeqGc(seq), tm: calcSeqTm(seq),
                             mw: parsedMw !== null ? parsedMw : calcSeqMw(seq, oligoType), oligoType: oligoType,
                             extinction: calcSeqExtinction(seq, oligoType), manualMw: parsedMw
@@ -445,15 +456,21 @@ const importInventory = (event) => {
                     let concUnitQuartzy = getCol(row, ['amount in stock units']);
                     if (!name && !code && !seq) return;
                     if (!name && code) name = code;
-                    let stock = 100; let unit = 'µM';
+                    // Nothing is assumed: a sheet with no concentration column, or a cell
+                    // that isn't a number ("n/a", "see vial"), imports with no concentration
+                    // at all. `parseFloat(s) || 100` also turned a genuine 0 into 100.
+                    let stock = null; let unit = '';
                     if (concStr) {
                         let s = concStr.toString().trim();
                         const numMatch = s.match(/^[\d\.,]+/);
                         if (numMatch) {
                             stock = parseFloat(numMatch[0].replace(',', '.'));
                             let u = s.substring(numMatch[0].length).trim();
-                            if (u) unit = u;
-                        } else stock = parseFloat(s) || 100;
+                            unit = u || 'µM';
+                        } else {
+                            const n = parseFloat(s);
+                            if (isFinite(n)) { stock = n; unit = 'µM'; }
+                        }
                     }
                     if (concUnitQuartzy) unit = concUnitQuartzy.toString().trim();
                     let isRna = dnaType && typeof dnaType === 'string' && dnaType.toUpperCase().includes('RNA');
@@ -539,11 +556,13 @@ const importBulk = () => {
         const seq  = row.seq
         const formattedSeq = seq && !seq.startsWith("5'") ? `5'-${seq}-3'` : seq
         const oligoType = seq.toUpperCase().includes('U') ? 'RNA' : 'DNA'
-        const conc = !isNaN(row.concBase) ? row.concBase : 100
+        // A missing or malformed Conc_baseline column imports as no concentration,
+        // not as a batch of oligos all claiming 100 µM.
+        const conc = !isNaN(row.concBase) ? row.concBase : null
         return {
             id: 'inv_bulk_' + crypto.randomUUID(),
             code, cas: '', itemClass: 'DNA', name: row.name,
-            stock: conc, stockUnit: 'µM', location: '',
+            stock: conc, stockUnit: conc == null ? '' : 'µM', location: '',
             sequence: formattedSeq,
             length: seq.replace(/\[.*?\]/g, '').replace(/[^a-zA-Z]/g, '').length,
             gc: calcSeqGc(seq), tm: calcSeqTm(seq),
@@ -686,7 +705,9 @@ const renderDnaLabel = (doc, item, x, y, w, h) => {
     cy += 0.3 * s
 
     const mwDisplay = item.mw ? Math.round(item.mw) : ''
-    const concBase  = `${item.stock ?? ''} ${item.stockUnit || 'µM'}`.trim()
+    // No assumed unit, and no concentration at all when the inventory has none.
+    const concBase  = (item.stock != null && String(item.stock).trim() !== '')
+        ? `${item.stock} ${item.stockUnit || ''}`.trim() : ''
     const concStr   = mwDisplay ? `${concBase}  |  ${mwDisplay} Da` : concBase
     if (concStr && cy + lineMM(4 * s) <= bottomTop) {
         doc.setFont('helvetica', 'normal'); doc.setFontSize(4 * s); doc.setTextColor(20, 20, 20)
@@ -785,7 +806,7 @@ const renderChemLabel = (doc, item, x, y, w, h) => {
         cy += rowH
     }
 
-    const conc = (item.stock != null && item.stock !== '') ? `${item.stock} ${item.stockUnit || 'µM'}` : ''
+    const conc = (item.stock != null && item.stock !== '') ? `${item.stock} ${item.stockUnit || ''}`.trim() : ''
     const mw   = (item.mw || item.manualMw) ? `${store.formatNum ? store.formatNum(item.mw || item.manualMw) : Math.round(item.mw || item.manualMw)} Da` : ''
     const loc  = [item.location, item.sublocation].filter(v => v != null && v !== '').join(' / ')
     // Measured pH (2 decimals) takes precedence over the nominal pH. jsPDF's core fonts

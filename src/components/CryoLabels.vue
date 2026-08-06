@@ -5,7 +5,7 @@
 // scannable QR codes and full/short/code payload modes. Prints black-on-white.
 import { h, ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useLabStore } from '../stores/labStore'
-import { LWCS, HERMA, labelPayload, resolveQrMode, qrSvg, moduleMM, scanVerdict, dymoXml, labelTitle, labelMeta } from '../utils/cryoLabels'
+import { LWCS, HERMA, labelPayload, resolveQrMode, qrSvg, moduleMM, scanVerdict, dymoXml, labelTitle, labelMeta, labelCond } from '../utils/cryoLabels'
 
 const store = useLabStore()
 const props = defineProps({ seed: { type: Object, default: null } })
@@ -35,7 +35,10 @@ function addRecord(item) {
   if (!item) return
   const found = records.value.find(r => r.code === (item.code || '') && r.name === (item.name || ''))
   if (found) { found.copies++; return }
-  records.value.push({ code: item.code || '', name: item.name || '', short: item.short || '', cas: item.cas || '', seq: item.sequence || '', oligo: item.itemClass === 'DNA' || item.itemClass === 'RNA', copies: 1 })
+  // Carries the solution's identity too — concentration, buffer, pH — so the label
+  // can state what is in the tube, not only which compound it is.
+  records.value.push({ code: item.code || '', name: item.name || '', short: item.short || '', cas: item.cas || '', seq: item.sequence || '', oligo: item.itemClass === 'DNA' || item.itemClass === 'RNA',
+    stock: item.stock, stockUnit: item.stockUnit || '', buffer: item.buffer || '', diluent: item.diluent || '', pH: item.pH, measuredPH: item.measuredPH, copies: 1 })
 }
 function setCopies(rec, n) { rec.copies = Math.max(1, Math.min(999, (n | 0) || 1)) }
 onMounted(() => { addRecord(props.seed) })
@@ -79,7 +82,17 @@ function nameEl(name, s, min = '1.1') {
 function metaEl(rec, s, mono = MONO, mt = '0') {
   const m = labelMeta(rec)
   if (m.seq) return h('div', { style: { fontFamily: mono, fontWeight: 500, fontSize: (s.fCas * 0.92) + 'mm', lineHeight: 1.08, letterSpacing: '0.02em', color: '#000', wordBreak: 'break-all', overflow: 'hidden', flex: '0 1 auto', minHeight: 0, marginTop: mt } }, m.value)
+  // No CAS recorded → no line at all, matching the .dymo. A lone "CAS" tag with no
+  // number states a field the inventory does not have.
+  if (!m.value) return null
   return h('div', { style: { fontFamily: mono, fontWeight: 500, fontSize: s.fCas + 'mm', lineHeight: 1.1, color: '#000', whiteSpace: 'nowrap', overflow: 'hidden', flex: '0 0 auto', marginTop: mt } }, [h('span', { style: { opacity: 0.55 } }, m.tag), m.value])
+}
+// Concentration · buffer · pH, wherever the record carries them. Drawn a shade
+// lighter than the code so it reads as the tube's contents rather than its ID.
+function condEl(rec, s, mt = '0.25mm') {
+  const text = labelCond(rec, s)
+  if (!text) return null
+  return h('div', { style: { fontFamily: COND, fontWeight: 600, fontSize: (s.fCond || 1.6) + 'mm', lineHeight: 1.1, marginTop: mt, color: '#1a1a1a', flex: '0 0 auto', overflow: 'hidden', wordBreak: 'break-word' } }, text)
 }
 function codeEl(code, s, mt = '0.3mm') {
   return h('div', { style: { fontFamily: MONO, fontWeight: 600, fontSize: s.fCode + 'mm', lineHeight: 1.05, marginTop: mt, color: '#000', flex: '0 0 auto' } }, code)
@@ -91,7 +104,11 @@ function ruleEl(o = 0.4, m = '0.35mm 0 0.3mm') {
 function eppiInner(rec, s) {
   const els = [nameEl(labelTitle(s, rec), s, String(s.fMin || 1.1))]
   if (s.rule !== false) els.push(ruleEl())   // LWCS506 drops the rule to buy height
-  els.push(metaEl(rec, s), codeEl(rec.code, s))
+  const meta = metaEl(rec, s)
+  if (meta) els.push(meta)
+  const cond = condEl(rec, s)
+  if (cond) els.push(cond)
+  els.push(codeEl(rec.code, s))
   return els
 }
 // DYMO landscape strip: name/CAS/code column on the left, QR at the right end —
@@ -115,8 +132,9 @@ function hermaTile(rec, s) {
     nameEl(rec.name, s, '1.0'),
     ruleEl(0.35, '0.3mm 0 0.25mm'),
     metaEl(rec, s),
+    condEl(rec, s),
     codeEl(rec.code, s, '0.2mm'),
-  ])
+  ].filter(Boolean))
   const right = h('div', { style: { flex: '0 0 auto', display: 'flex', alignItems: 'center' } }, qrImg(rec.code, s))
   return h('div', { style: { width: s.tileW + 'mm', height: s.tileH + 'mm', boxSizing: 'border-box', border: '0.15mm solid #b7b6b1', borderRadius: '0.5mm', background: '#fff', padding: '0.7mm', display: 'flex', gap: '0.7mm', alignItems: 'stretch', fontFamily: COND } }, [left, right])
 }
@@ -134,8 +152,9 @@ function hermaWrap(rec, s) {
     const left = h('div', { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' } }, [
       h('div', { 'data-fit': '1', 'data-max': String(s.fName), 'data-min': '1.8', style: { fontFamily: COND, fontWeight: 700, lineHeight: 1.03, letterSpacing: '-0.01em', color: '#000', overflow: 'hidden', wordBreak: 'break-word', fontSize: s.fName + 'mm', maxHeight: '24mm' } }, rec.name),
       metaEl(rec, s, MONO, '1.4mm'),
+      condEl(rec, s, '1.2mm'),
       h('div', { style: { fontFamily: MONO, fontWeight: 600, fontSize: s.fCode + 'mm', lineHeight: 1.05, color: '#000', marginTop: '1mm' } }, rec.code),
-    ])
+    ].filter(Boolean))
     const right = h('div', { style: { flex: '0 0 auto', display: 'flex', alignItems: 'center' } }, qrImg(rec.code, s))
     blocks.push(h('div', { style: { width: W + 'mm', height: HERMA.cell.h + 'mm', boxSizing: 'border-box', padding: '3mm 3.5mm', display: 'flex', gap: '3mm', alignItems: 'center', borderRight: s.repeat > 1 ? '0.2mm dashed #c3c2bc' : 'none' } }, [left, right]))
   }

@@ -4,6 +4,9 @@ import { useLabStore } from '../stores/labStore'
 import { filterInventory } from '../utils/inventoryFilter'
 import { esc, sanitize } from '../utils/htmlSafe'
 import { invChip } from '../utils/invChip'
+import { parseOnp } from '../utils/onpImport'
+import { parseWellHtml, buildWellHtml, withFinalConcentrations, totalVolume, fmtConc,
+         collectPlateStocks, applyStockToPlate } from '../utils/wellComposition'
 import ExpStatusPicker from './ExpStatusPicker.vue'
 import { usePlanWorkspace } from '../composables/usePlanWorkspace'
 import CloudLibraryModal from './CloudLibraryModal.vue'
@@ -70,6 +73,23 @@ const getWellId = (r, c) => { return String.fromCharCode(65 + r) + (c + 1); }
 
 const filterBlockInventory = (query, scope) => filterInventory(store.inventory, query, scope)
 
+// Lab and Private stocks are separate shelves, and filterInventory deliberately
+// searches one at a time. A picker restricted to one shelf silently hides the other —
+// you cannot link the private EDC you actually used if the picker only knows the lab's.
+// So search both by default and say which shelf every hit is on.
+const SHELVES = { Global: { label: 'Lab', color: '#2563eb' }, Personal: { label: 'Private', color: '#7c3aed' } }
+const shelfOf = (item) => (item && item.scope === 'Personal') ? 'Personal' : 'Global'
+
+const stockPickList = (query) => {
+    const scope = store.plateRefSearchScope === 'Personal' ? 'Personal' : 'Global'
+    return filterInventory(store.inventory, query, scope).slice(0, 200)
+}
+// The shelf an already-linked stock sits on, for the plate-wide list.
+const linkedShelf = (invId) => {
+    const item = invId ? store.inventory.find(i => i.id === invId) : null
+    return item ? shelfOf(item) : null
+}
+
 // --- Plate Management Actions ---
 const addWellPlate = () => { 
     store.wellPlates.unshift({ 
@@ -88,6 +108,131 @@ const addWellPlate = () => {
 
 
 
+
+// --- Robot Protocol (.onp) IMPORT — the inverse of the exporters below ---
+// Reads a protocol back into plates: every PIPETTING step is replayed into the
+// labware it targets, so the plate shows what the robot was actually told to do.
+// Wells are rendered with the concentration each component REACHES (stock · volume
+// / total volume, on the real total), which is the honest reading when a well was
+// filled past the volume it was designed for.
+const onpInputRef = ref(null)
+const onpImportBusy = ref(false)
+
+const importOnpFile = async (event) => {
+    const file = event.target.files && event.target.files[0]
+    event.target.value = ''
+    if (!file) return
+    onpImportBusy.value = true
+    try {
+        const text = await file.text()
+        let protocol
+        try { protocol = JSON.parse(text) }
+        catch { alert(`“${file.name}” isn’t readable as a protocol — an .onp is a JSON file.`); return }
+
+        const { plates, warnings } = parseOnp(protocol, { inventory: store.inventory })
+        const created = []
+        plates.forEach((p, i) => {
+            const wells = {}
+            Object.entries(p.wells).forEach(([wellId, entries]) => {
+                // No design volume is assumed: a protocol only says what was pipetted, so
+                // the concentrations shown are computed on each well's own real total.
+                wells[wellId] = buildWellHtml(entries, { inventory: store.inventory, showFinal: true })
+            })
+            const vr = p.volumeRange
+            const spread = vr ? (Math.abs(vr.max - vr.min) < 0.005
+                ? `every well ${vr.min.toFixed(1)} µL`
+                : `well totals ${vr.min.toFixed(1)}–${vr.max.toFixed(1)} µL — they are not all the same`) : ''
+            const plate = {
+                id: crypto.randomUUID(),
+                name: plates.length > 1 ? p.name : (p.name || file.name.replace(/\.onp$/i, '')),
+                format: p.format,
+                selectedWell: null,
+                targetLabware: p.targetLabware,
+                wells,
+                scope: 'Personal',
+                owner_id: store.user?.id,
+            }
+            store.wellPlates.unshift(plate)
+            created.push(`${plate.name} — ${Object.keys(wells).length} wells, ${plate.format}-well, ${spread}`)
+        })
+        store.saveWorkspaceState()
+
+        const notes = warnings.length ? `\n\n${warnings.join('\n')}` : ''
+        alert(`Imported ${plates.length} plate${plates.length === 1 ? '' : 's'} from ${file.name}:\n\n`
+            + created.map(c => '· ' + c).join('\n')
+            + `\n\nEach well shows the concentration it ACTUALLY reaches, computed from the volumes that were pipetted `
+            + `into it — so a well that was overfilled reads weaker than it was designed for.`
+            + `\n\nSet the plate's well volume in the composition panel to have overfilled wells flagged, and edit the `
+            + `stock used in any well there if it differs from the inventory.`
+            + `\n\nCompounds were re-linked to inventory by name — an .onp carries no stock codes, so check any that stayed grey.${notes}`)
+    } catch (e) {
+        alert(`Could not import this protocol: ${(e && e.message) || e}`)
+    } finally {
+        onpImportBusy.value = false
+    }
+}
+
+// --- Per-well composition: what went in, and what it actually came out at ---
+// The well's HTML stays the source of truth (the exporters and the usage tracker
+// read it), so this is a structured view over it that writes straight back.
+const wellRows = (plate) => {
+    if (!plate?.selectedWell) return []
+    return withFinalConcentrations(parseWellHtml(plate.wells[plate.selectedWell] || ''))
+}
+const wellTotal = (plate) => {
+    if (!plate?.selectedWell) return 0
+    return totalVolume(parseWellHtml(plate.wells[plate.selectedWell] || ''))
+}
+
+// Editing the stock used in THIS well. The inventory is untouched: a well records
+// what was pipetted into it, which may be an older or a freshly diluted stock.
+const setWellEntry = (plate, index, field, value) => {
+    if (!plate?.selectedWell) return
+    const entries = parseWellHtml(plate.wells[plate.selectedWell] || '')
+    if (!entries[index]) return
+    const v = parseFloat(String(value).replace(',', '.'))
+    if (field === 'unit') entries[index].unit = String(value || '').trim()
+    else if (isFinite(v) && v >= 0) entries[index][field] = v
+    else return
+    plate.wells[plate.selectedWell] = buildWellHtml(entries, { inventory: store.inventory, showFinal: true })
+    syncWellEditor(plate)
+    store.saveWorkspaceState()
+}
+
+// --- Stocks used across the whole plate ---
+// A plate normally uses one bottle of each compound in every well, so the stock is a
+// property of the plate, not of 96 separate wells. This lists what the plate uses and
+// changes it everywhere at once — in particular it attaches an inventory item, which
+// restores the data-inv-id the usage tracker keys traceability on (an imported .onp
+// carries compound names but no stock codes, so those arrive unlinked).
+const showPlateStocks = ref({})
+const plateStocks = (plate) => collectPlateStocks(plate.wells || {})
+
+const linkPlateStock = (plate, key, inv) => {
+    const { wells, wellsChanged } = applyStockToPlate(plate.wells, key, { inv }, { inventory: store.inventory })
+    plate.wells = wells
+    activeDropdown.value = null
+    if (plate.selectedWell) syncWellEditor(plate)
+    store.saveWorkspaceState()
+    store.toast?.(`Linked ${inv.name} in ${wellsChanged} well${wellsChanged === 1 ? '' : 's'}`)
+}
+
+const setPlateStock = (plate, key, field, value) => {
+    const v = field === 'unit' ? String(value || '').trim() : parseFloat(String(value).replace(',', '.'))
+    if (field !== 'unit' && !(isFinite(v) && v >= 0)) return
+    const { wells } = applyStockToPlate(plate.wells, key, { [field]: v }, { inventory: store.inventory })
+    plate.wells = wells
+    if (plate.selectedWell) syncWellEditor(plate)
+    store.saveWorkspaceState()
+}
+
+// Push the rebuilt HTML into the contenteditable so both views agree.
+const syncWellEditor = (plate) => {
+    nextTick(() => {
+        const editor = document.getElementById('wellEditor_' + plate.id)
+        if (editor) editor.innerHTML = plate.wells[plate.selectedWell] || ''
+    })
+}
 
 const updateDefaultLabware = (plate) => {
     if (plate.format === 384) plate.targetLabware = '201901101700';
@@ -790,6 +935,11 @@ const exportAndrewPlusMulti = () => {
         <div style="display: flex; gap: 10px;">
             <button @click="showOnpSettings = !showOnpSettings" class="secondary small" title="Robot Protocol Export Settings"><i class="fas fa-cog"></i> ONP</button>
             <button @click="openGroupExport" class="secondary small" title="Combine multiple plates into one .onp (shared stocks merged)"><i class="fas fa-layer-group"></i> Group .onp</button>
+            <button @click="onpInputRef.click()" class="secondary small" :disabled="onpImportBusy"
+                title="Read an Andrew+ .onp back into plates — every pipetting step replayed, with the concentration each well actually reached">
+                <i class="fas" :class="onpImportBusy ? 'fa-spinner fa-spin' : 'fa-file-import'"></i> Import .onp
+            </button>
+            <input type="file" ref="onpInputRef" accept=".onp,.json,application/json" style="display:none" @change="importOnpFile" />
             <button @click="showCloudLibrary = true" class="secondary small"><i class="fas fa-cloud"></i> Library</button>
             <button @click="addWellPlate" class="small"><i class="fas fa-plus"></i> New Plate</button>
         </div>
@@ -886,6 +1036,83 @@ const exportAndrewPlusMulti = () => {
             </span>
         </div>
 
+        <!-- Stocks used across the whole plate: one row per compound, changed everywhere at once. -->
+        <div v-if="plateStocks(plate).length" style="margin-top:12px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface);">
+            <div @click="showPlateStocks[plate.id] = !showPlateStocks[plate.id]"
+                 style="padding:8px 14px; cursor:pointer; display:flex; align-items:center; gap:8px; font-size:0.85rem; font-weight:600;">
+                <i class="fas" :class="showPlateStocks[plate.id] ? 'fa-chevron-down' : 'fa-chevron-right'" style="opacity:0.5;"></i>
+                <i class="fas fa-vials" style="opacity:0.6;"></i>
+                Stocks used in this plate
+                <span style="opacity:0.55; font-weight:400;">({{ plateStocks(plate).length }} compound{{ plateStocks(plate).length === 1 ? '' : 's' }})</span>
+                <span v-if="plateStocks(plate).some(s => !s.invId)" style="margin-left:auto; font-size:0.72rem; color:#d97706;">
+                    <i class="fas fa-link-slash"></i> {{ plateStocks(plate).filter(s => !s.invId).length }} not linked to inventory
+                </span>
+            </div>
+            <div v-if="showPlateStocks[plate.id]" style="padding:0 14px 12px;">
+                <div style="font-size:0.72rem; opacity:0.6; margin-bottom:8px;">
+                    Changing a stock here rewrites it in every well of this plate and recomputes what each well holds.
+                    Linking an inventory item records which bottle was used — a well that already has its own recorded
+                    stock keeps that value, since it is what was pipetted.
+                </div>
+                <div style="display:grid; grid-template-columns:1.8fr 90px 70px 90px 1fr; gap:8px; font-size:0.68rem; font-weight:700; opacity:0.55; padding-bottom:4px;">
+                    <span>Compound</span><span>Stock</span><span>Unit</span><span>Wells</span><span>Inventory stock used</span>
+                </div>
+                <div v-for="s in plateStocks(plate)" :key="s.key"
+                     style="display:grid; grid-template-columns:1.8fr 90px 70px 90px 1fr; gap:8px; align-items:center; padding:3px 0; font-size:0.82rem;">
+                    <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" :title="s.name">
+                        {{ s.code ? '[' + s.code + '] ' : '' }}{{ s.name }}
+                    </span>
+                    <input type="number" step="any" min="0" :value="s.mixedStock ? null : s.stock"
+                           :placeholder="s.mixedStock ? 'mixed' : '—'"
+                           @change="setPlateStock(plate, s.key, 'stock', $event.target.value)"
+                           style="padding:2px 5px; font-size:0.78rem; width:100%;"
+                           :title="s.mixedStock ? 'Wells disagree on this stock — setting a value here makes them all the same' : ''">
+                    <input type="text" :value="s.unit" @change="setPlateStock(plate, s.key, 'unit', $event.target.value)"
+                           style="padding:2px 5px; font-size:0.78rem; width:100%;" placeholder="mM">
+                    <span style="opacity:0.6; font-size:0.76rem;">{{ s.wells.length }} · {{ s.totalVolume.toFixed(1) }} µL</span>
+                    <div style="position:relative;" @click.stop>
+                        <div @click="activeDropdown = activeDropdown === 'stock_' + plate.id + s.key ? null : 'stock_' + plate.id + s.key"
+                             style="padding:3px 8px; font-size:0.78rem; border-radius:var(--radius); border:1px solid var(--border); cursor:pointer; display:flex; align-items:center; gap:6px;"
+                             :style="s.invId ? '' : 'border-style:dashed; opacity:0.75;'">
+                            <span v-if="linkedShelf(s.invId)"
+                                  :style="`flex:0 0 auto; font-size:0.6rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; padding:1px 5px; border-radius:3px; color:#fff; background:${SHELVES[linkedShelf(s.invId)].color};`">
+                                {{ SHELVES[linkedShelf(s.invId)].label }}
+                            </span>
+                            <i v-else class="fas fa-link" style="opacity:0.6; font-size:0.7rem;"></i>
+                            <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                {{ s.invId ? (s.code ? '[' + s.code + '] ' : '') + s.name : 'link a stock…' }}
+                            </span>
+                            <i class="fas fa-chevron-down" style="opacity:0.4; margin-left:auto; font-size:0.7rem;"></i>
+                        </div>
+                        <div v-if="activeDropdown === 'stock_' + plate.id + s.key"
+                             style="position:absolute; top:100%; right:0; z-index:1000; background:var(--surface); border:1px solid var(--border); box-shadow:0 4px 6px rgba(0,0,0,0.1); border-radius:var(--radius); min-width:310px;">
+                            <div style="display:flex; gap:4px; padding:6px 6px 0;">
+                                <button v-for="opt in [['Global','Lab inventory'],['Personal','Private inventory']]" :key="opt[0]"
+                                        @click.stop="store.plateRefSearchScope = opt[0]" class="small"
+                                        :style="store.plateRefSearchScope === opt[0] ? 'flex:1; padding:2px 6px; font-size:0.72rem;' : 'flex:1; padding:2px 6px; font-size:0.72rem; background:transparent; color:inherit; border:1px solid var(--border);'">
+                                    {{ opt[1] }}
+                                </button>
+                            </div>
+                            <input type="text" v-model="store.wellRtfSearchQuery" :placeholder="`Search ${store.plateRefSearchScope === 'Personal' ? 'private' : 'lab'} inventory…`"
+                                   style="margin:5px; width:calc(100% - 10px); padding:4px; border:1px solid var(--border); border-radius:var(--radius);" @click.stop>
+                            <div style="overflow-y:auto; max-height:220px;">
+                                <div v-for="inv in stockPickList(store.wellRtfSearchQuery)" :key="inv.id"
+                                     @mousedown.prevent="linkPlateStock(plate, s.key, inv)"
+                                     style="padding:6px 10px; cursor:pointer; font-size:0.82rem; border-bottom:1px solid var(--bg); display:flex; align-items:center; gap:7px;">
+                                    <span style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                        [{{ inv.code }}] {{ inv.name }} ({{ store.formatNum(inv.stock) }} {{ inv.stockUnit || 'µM' }})
+                                    </span>
+                                </div>
+                                <div v-if="!stockPickList(store.wellRtfSearchQuery).length" style="padding:8px 10px; font-size:0.78rem; opacity:0.55;">
+                                    Nothing in the {{ store.plateRefSearchScope === 'Personal' ? 'private' : 'lab' }} inventory matches — try the other shelf.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div v-if="plate.selectedWell" class="well-editor-panel">
             <div style="background: var(--summary-bg); padding: 8px 15px; border-bottom: 1px solid var(--border); font-weight: bold; display: flex; justify-content: space-between; align-items: center;">
                 <span><i class="fas fa-crosshairs"></i> Editing Well: <span style="color: var(--primary); font-size: 1.1rem;">{{ plate.selectedWell }}</span></span>
@@ -902,21 +1129,71 @@ const exportAndrewPlusMulti = () => {
                         <i class="fas fa-chevron-down" style="opacity: 0.5;"></i>
                     </div>
                     <div v-if="activeDropdown === 'plate_ref_' + plate.id" style="position: absolute; top: 100%; right: 0; z-index: 1000; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: var(--radius); min-width: 250px; display: flex; flex-direction: column;">
-                        <div style="display: flex; gap: 5px; padding: 5px; border-bottom: 1px solid var(--border);">
-                            <label class="checkbox-label" style="font-weight: bold; font-size: 0.75rem;"><input type="radio" value="Global" v-model="store.plateRefSearchScope"> Global</label>
-                            <label class="checkbox-label" style="font-weight: bold; font-size: 0.75rem;"><input type="radio" value="Personal" v-model="store.plateRefSearchScope"> Personal</label>
+                        <div style="display: flex; gap: 4px; padding: 6px 6px 0;">
+                            <button v-for="opt in [['Global','Lab inventory'],['Personal','Private inventory']]" :key="opt[0]"
+                                    @click.stop="store.plateRefSearchScope = opt[0]" class="small"
+                                    :style="store.plateRefSearchScope === opt[0] ? 'flex:1; padding:2px 6px; font-size:0.72rem;' : 'flex:1; padding:2px 6px; font-size:0.72rem; background:transparent; color:inherit; border:1px solid var(--border);'">
+                                {{ opt[1] }}
+                            </button>
                         </div>
-                        <input type="text" v-model="store.wellRtfSearchQuery" placeholder="Search inventory..." style="margin: 5px; width: calc(100% - 10px); padding: 4px; border: 1px solid var(--border); border-radius: var(--radius);" @click.stop>
+                        <input type="text" v-model="store.wellRtfSearchQuery" :placeholder="`Search ${store.plateRefSearchScope === 'Personal' ? 'private' : 'lab'} inventory…`" style="margin: 5px; width: calc(100% - 10px); padding: 4px; border: 1px solid var(--border); border-radius: var(--radius);" @click.stop>
                         <div style="overflow-y: auto; max-height: 200px;">
-                            <div v-for="inv in filterBlockInventory(store.wellRtfSearchQuery, store.plateRefSearchScope)" :key="inv.id" @mousedown.prevent="store.selectedWellInvRef = inv.id; insertInventoryRefToWell(plate); activeDropdown = null" style="padding: 6px 10px; cursor: pointer; font-size: 0.85rem; border-bottom: 1px solid var(--bg);" onmouseover="this.style.background='var(--summary-bg)'" onmouseout="this.style.background='transparent'">
-                                [{{ inv.code }}] {{ inv.name }} ({{store.formatNum(inv.stock)}} {{inv.stockUnit || 'µM'}})
+                            <div v-for="inv in stockPickList(store.wellRtfSearchQuery)" :key="inv.id" @mousedown.prevent="store.selectedWellInvRef = inv.id; insertInventoryRefToWell(plate); activeDropdown = null" style="padding: 6px 10px; cursor: pointer; font-size: 0.85rem; border-bottom: 1px solid var(--bg); display:flex; align-items:center; gap:7px;" onmouseover="this.style.background='var(--summary-bg)'" onmouseout="this.style.background='transparent'">
+                                <span style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                    [{{ inv.code }}] {{ inv.name }} ({{store.formatNum(inv.stock)}} {{inv.stockUnit || 'µM'}})
+                                </span>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-            <div class="journal-textarea rtf-editor" 
-                 contenteditable="true" 
+            <!-- What is actually in this well. The stock is editable per well: a well
+                 records the stock that went into IT, which is not always what the
+                 inventory says today (an older bottle, a fresh dilution). Changing it
+                 recomputes the concentration reached and never touches the inventory. -->
+            <div v-if="wellRows(plate).length" style="padding:8px 12px; border-bottom:1px solid var(--border); background:var(--summary-bg);">
+                <div style="display:grid; grid-template-columns:1.6fr 84px 96px 60px 1fr; gap:6px; font-size:0.68rem; font-weight:700; opacity:0.55; padding-bottom:4px;">
+                    <span>Component</span><span>Volume µL</span><span>Stock used</span><span>Unit</span><span>Actually in the well</span>
+                </div>
+                <div v-for="(row, ri) in wellRows(plate)" :key="ri"
+                     style="display:grid; grid-template-columns:1.6fr 84px 96px 60px 1fr; gap:6px; align-items:center; font-size:0.8rem; padding:2px 0;">
+                    <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" :title="row.name">
+                        <i class="fas" :class="row.kind === 'water' ? 'fa-droplet' : 'fa-tag'" style="opacity:0.5; font-size:0.7rem;"></i>
+                        {{ row.code ? '[' + row.code + '] ' : '' }}{{ row.name }}
+                    </span>
+                    <input type="number" step="any" min="0" :value="row.volume"
+                           @change="setWellEntry(plate, ri, 'volume', $event.target.value)"
+                           style="padding:2px 5px; font-size:0.78rem; width:100%;">
+                    <input v-if="row.kind === 'reagent'" type="number" step="any" min="0" :value="row.stock"
+                           @change="setWellEntry(plate, ri, 'stock', $event.target.value)"
+                           style="padding:2px 5px; font-size:0.78rem; width:100%;" placeholder="—">
+                    <span v-else style="opacity:0.35;">—</span>
+                    <input v-if="row.kind === 'reagent'" type="text" :value="row.unit"
+                           @change="setWellEntry(plate, ri, 'unit', $event.target.value)"
+                           style="padding:2px 5px; font-size:0.78rem; width:100%;" placeholder="mM">
+                    <span v-else style="opacity:0.35;">—</span>
+                    <span v-if="row.final != null" style="font-variant-numeric:tabular-nums;">
+                        <strong>{{ fmtConc(row.final) }}</strong> {{ row.unit }}
+                    </span>
+                    <span v-else style="opacity:0.4;">{{ row.kind === 'water' ? 'fill-up' : 'no stock recorded' }}</span>
+                </div>
+                <div style="margin-top:5px; font-size:0.72rem; display:flex; gap:10px; align-items:center;">
+                    <span :style="plate.targetVolume && wellTotal(plate) > plate.targetVolume + 1e-9 ? 'color:#ef4444; font-weight:700;' : 'opacity:0.6;'">
+                        Σ {{ wellTotal(plate).toFixed(2) }} µL<span v-if="plate.targetVolume"> of {{ plate.targetVolume }} µL</span>
+                    </span>
+                    <span v-if="plate.targetVolume && wellTotal(plate) > plate.targetVolume + 1e-9" style="color:#ef4444;">
+                        overfilled — the concentrations above are what this well really holds, not what was planned
+                    </span>
+                    <label style="margin-left:auto; opacity:0.6; display:flex; gap:5px; align-items:center;">
+                        well volume
+                        <input type="number" step="any" min="0" v-model.number="plate.targetVolume" @change="store.saveWorkspaceState()"
+                               placeholder="—" style="padding:2px 5px; font-size:0.75rem; width:70px;">
+                    </label>
+                </div>
+            </div>
+
+            <div class="journal-textarea rtf-editor"
+                 contenteditable="true"
                  placeholder="Type contents, concentrations, or insert stock references..."
                  style="border: none; border-radius: 0; outline: none; min-height: 100px;"
                  @input="updateWellContent(plate, $event)"

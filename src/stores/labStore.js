@@ -28,6 +28,8 @@ export const useLabStore = defineStore('lab', {
     rtfSearchQuery: '',
     wellRtfSearchQuery: '',
     journalRefSearchScope: 'Global',
+    // 'Global' (lab inventory) or 'Personal' (private inventory) — two shelves,
+    // switched in the stock pickers.
     plateRefSearchScope: 'Global',
     selectedInvRef: '',
     activeDropdown: null,

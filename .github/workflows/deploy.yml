@@ -102,22 +102,18 @@ jobs:
             esac
           done
 
-      # Wait twenty minutes instead of ten. This is a probe, not a known fix.
+      # Do not add `timeout:` here expecting a longer wait. The action clamps it —
+      # `this.timeout = Math.min(timeoutInput, MAX_TIMEOUT)` with MAX_TIMEOUT =
+      # 600000 — so anything above ten minutes is silently reduced and only earns
+      # a warning in the log. Waiting longer than ten minutes means looping the
+      # step yourself, not passing a bigger number.
       #
-      # From 11:33 on 06.08.2026 every deployment ran waiting → queued →
-      # in_progress and then stopped there; deploy-pages polled its full ten
-      # minutes and wrote the 'failure' itself. Pages never reported an outcome
-      # either way. That the repo is not at fault is settled: 690d93c has source
-      # byte-identical to e349042, which published fine at 08:25 that morning,
-      # and 690d93c failed twice — same tree, same workflow, no publish.
-      #
-      # So either Pages is taking longer than ten minutes to process, in which
-      # case a longer wait finishes the job, or it is not processing at all, in
-      # which case this run fails at twenty minutes and the answer is in the repo
-      # settings (Settings → Pages → Source must be "GitHub Actions") or with
-      # GitHub support. One 20-minute run tells us which.
+      # The 06.08.2026 outage was not this repo. Every deployment from 11:33 ran
+      # waiting → queued → in_progress and then stopped, and deploy-pages wrote
+      # the 'failure' itself when its poll gave up. GitHub had Pages at
+      # major_outage with an open incident that day. The repo was never at fault:
+      # 690d93c has source byte-identical to e349042, which published fine at
+      # 08:25 the same morning, and 690d93c still failed twice.
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
-        with:
-          timeout: 1200000

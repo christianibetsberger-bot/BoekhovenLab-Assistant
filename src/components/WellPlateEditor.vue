@@ -6,7 +6,7 @@ import { esc, sanitize } from '../utils/htmlSafe'
 import { invChip } from '../utils/invChip'
 import { parseOnp } from '../utils/onpImport'
 import { parseWellHtml, buildWellHtml, withFinalConcentrations, totalVolume, fmtConc,
-         collectPlateStocks, applyStockToPlate } from '../utils/wellComposition'
+         collectPlateStocks, applyStockToPlate, unlinkedVolumes } from '../utils/wellComposition'
 import ExpStatusPicker from './ExpStatusPicker.vue'
 import { usePlanWorkspace } from '../composables/usePlanWorkspace'
 import CloudLibraryModal from './CloudLibraryModal.vue'
@@ -182,6 +182,18 @@ const wellRows = (plate) => {
 const wellTotal = (plate) => {
     if (!plate?.selectedWell) return 0
     return totalVolume(parseWellHtml(plate.wells[plate.selectedWell] || ''))
+}
+// Liquid the well names but that carries no chip. It is NOT in the Σ above, because
+// the robot exporters skip it too — the Σ has to stay a description of the plate that
+// will actually be built. Saying so is the point: an unexplained short total is what
+// sent a user looking for a bug, and the honest answer is "this much is unlinked".
+const wellUnlinked = (plate) => {
+    if (!plate?.selectedWell) return { total: 0, names: '' }
+    const rows = unlinkedVolumes(plate.wells[plate.selectedWell] || '')
+    return {
+        total: rows.reduce((s, r) => s + r.volume, 0),
+        names: [...new Set(rows.map(r => r.name))].join(', '),
+    }
 }
 
 // Editing the stock used in THIS well. The inventory is untouched: a well records
@@ -1190,6 +1202,11 @@ const exportAndrewPlusMulti = () => {
                     </span>
                     <span v-if="plate.targetVolume && wellTotal(plate) > plate.targetVolume + 1e-9" style="color:#ef4444;">
                         overfilled — the concentrations above are what this well really holds, not what was planned
+                    </span>
+                    <span v-if="wellUnlinked(plate).total > 0" style="color:#f59e0b;"
+                          :title="'These lines state a volume but carry no inventory chip, so nothing records which stock they came from. They are not in the Σ and the robot export skips them. Add a chip to include them.'">
+                        <i class="fas fa-triangle-exclamation"></i>
+                        + {{ wellUnlinked(plate).total.toFixed(2) }} µL not linked to a stock ({{ wellUnlinked(plate).names }}) — not counted, not exported
                     </span>
                     <label style="margin-left:auto; opacity:0.6; display:flex; gap:5px; align-items:center;">
                         well volume

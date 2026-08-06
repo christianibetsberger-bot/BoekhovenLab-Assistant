@@ -86,6 +86,10 @@ const sameComponent = (component, entry) => {
 // the same volume written twice.
 const VOL_TOL = 0.005
 
+// A fill-up whose name says water. Anything else is a medium with its own identity
+// (a buffer), and a caller must not treat it as interchangeable with water.
+const WATER_NAME_RE = /^\s*(?:mq\s*)?(?:h₂o|h2o|water)\s*$/i
+
 /**
  * What a plate was screening, read off the plate itself.
  *
@@ -251,7 +255,11 @@ export function inferScreenFromPlate(wells, { components = [], plateId = '' } = 
   const waterVols = ids.map(id => waterByWell.get(id)).filter(v => v !== undefined)
   const fillup = waterVols.length
     ? {
-        kind: 'water',
+        // `kind` is what the caller uses to decide it may reset the fill-up medium
+        // back to water. Now that a buffer fill-up is readable, it has to be told
+        // apart from water by name — otherwise adopting a buffered plate would
+        // silently overwrite the buffer the plate was actually made with.
+        kind: WATER_NAME_RE.test(waterName || '') || !waterName ? 'water' : 'medium',
         name: waterName || 'MQ H₂O',
         minVolume: Math.min(...waterVols),
         maxVolume: Math.max(...waterVols),

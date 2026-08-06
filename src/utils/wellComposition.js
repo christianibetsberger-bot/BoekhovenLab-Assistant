@@ -19,6 +19,29 @@ import { invChip, textChip } from './invChip'
 const CHIP_RE = /<span class="inv-ref"[^>]*>([\s\S]*?)<\/span>\s*(?:&nbsp;)?\s*([\d.,]+)\s*(µL|uL|mL|L)?/gi
 const WATER_RE = /<strong>\s*(?:MQ\s*H₂O|MQ\s*Water)\s*:?\s*<\/strong>\s*(?:&nbsp;)?\s*([\d.,]+)\s*(µL|uL|mL|L)?/i
 
+// The fill-up is not always water. A plate made up with buffer is written
+// `<strong>MOPS pH 7:</strong> 6.33 µL` — the same line, with the medium's own
+// name — and Matrix/Screening wrap the number in a <span>. WATER_RE matches
+// neither, so that volume was simply absent from the well total.
+//
+// What separates a fill-up from an unchipped reagent is one character: every
+// unchipped COMPONENT or CONSTANT line states its target concentration in
+// parentheses (`<strong>EDC:</strong> 4.00 µL (10 mM)`) and a fill-up never does.
+// So the trailing `(` is the discriminator, and it has to stay true — the producer
+// fixtures in wellComposition.test.js are there to catch it drifting.
+//
+// Deliberately stricter than WATER_RE in two ways: a bare `<strong>` with no
+// attributes (every header carries a style, so no header can match) and a
+// MANDATORY volume unit, so a hand-typed `<strong>pH:</strong> 7.4` is a note and
+// not 7.4 µL of buffer.
+const FILLUP_RE = /<strong>\s*([^<:]{1,40}?)\s*:\s*<\/strong>(?:\s|&nbsp;)*(?:<span[^>]*>\s*)?([\d.,]+)\s*(µL|uL|mL|L)(?![^<]*\()/gi
+
+// The mirror image: a labelled volume that DOES carry a concentration. That is a
+// reagent nobody linked to a bottle — `<strong>Unknown Component:</strong> 12.34 µL
+// (5 mM)`, or LidaKinetics' `<strong>T4-Ligase:</strong> <strong>Manual:</strong>
+// 3.00 µL (5 U)`. Matched only so it can be REPORTED; see unlinkedVolumes.
+const UNLINKED_RE = /<strong>\s*([^<:]{1,60}?)\s*:\s*<\/strong>(?:\s|&nbsp;)*(?:<strong>\s*[^<]*<\/strong>(?:\s|&nbsp;)*)?([\d.,]+)\s*(µL|uL|mL|L)\s*\(/gi
+
 const num = (s) => {
   const v = parseFloat(String(s ?? '').replace(',', '.'))
   return isFinite(v) ? v : 0
@@ -72,10 +95,46 @@ export function parseWellHtml(html) {
     })
   }
 
+  // The fill-up. An explicit MQ H₂O line wins, exactly as before — only a well that
+  // has none falls through to the general form, so nothing that parses today parses
+  // differently. The LAST match is taken because every producer writes the fill-up
+  // as the final volume line of the well.
   const w = src.match(WATER_RE)
-  if (w) entries.push({ kind: 'water', name: 'MQ H₂O', volume: toUL(w[1], w[2]) })
+  if (w) {
+    entries.push({ kind: 'water', name: 'MQ H₂O', volume: toUL(w[1], w[2]) })
+  } else {
+    FILLUP_RE.lastIndex = 0
+    let f, last = null
+    while ((f = FILLUP_RE.exec(src)) !== null) last = f
+    if (last) entries.push({ kind: 'water', name: stripTags(last[1]) || 'Fill-up', volume: toUL(last[2], last[3]) })
+  }
 
   return entries
+}
+
+/**
+ * Volumes the well states that are deliberately NOT entries: a labelled line that
+ * carries a concentration but no chip, so nothing records which bottle it came from.
+ *
+ * They are real liquid, and they are why a well can read short. They are still not
+ * summed into the total, because both .onp exporters skip them for the same reason —
+ * counting them here would make the editor agree with a plate the robot will not
+ * build, which is a worse failure than a number that is visibly short. Reported so
+ * the editor can say the volume is there and say why it is not counted.
+ *
+ * @returns [{ name, volume }] in the order they appear.
+ */
+export function unlinkedVolumes(html) {
+  const src = String(html || '')
+  const out = []
+  UNLINKED_RE.lastIndex = 0
+  let m
+  while ((m = UNLINKED_RE.exec(src)) !== null) {
+    const name = stripTags(m[1])
+    const volume = toUL(m[2], m[3])
+    if (name && volume > 0) out.push({ name, volume })
+  }
+  return out
 }
 
 /** Total volume actually pipetted into the well (µL). */
@@ -207,8 +266,13 @@ export function buildWellHtml(entries, { inventory = [], showFinal = true, targe
     html += `${chip}&nbsp; ${fmtVol(e.volume)} µL${final}<br>`
   })
 
+  // The fill-up keeps the name it was written with. Re-emitting a buffer fill-up as
+  // "MQ H₂O" would be worse than dropping it: the .onp exporters key that label to
+  // the water position on the deck, so a rebuilt well would tell the robot to top a
+  // buffered coacervation up with water. Under its own name it stays what it is —
+  // and stays invisible to the exporters, exactly as it is today.
   const water = rows.find(e => e.kind === 'water')
-  if (water) html += `<strong>MQ H₂O:</strong> ${fmtVol(water.volume)} µL<br>`
+  if (water) html += `<strong>${esc(water.name || 'MQ H₂O')}:</strong> ${fmtVol(water.volume)} µL<br>`
 
   if (showFinal && total > 0) {
     const over = targetVolume != null && total > Number(targetVolume) + 1e-9

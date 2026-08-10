@@ -887,9 +887,19 @@
             <!-- Stats + import button -->
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
               <span style="font-size:0.75rem; opacity:0.8;">{{ prStatsText }}</span>
-              <button class="small success-btn" @click="importPlatereaderResults" :disabled="!prPreviewItems.length">
-                <i class="fas fa-check"></i> Apply ({{ prPreviewItems.length }} wells)
-              </button>
+              <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button class="small" @click="logPlateToJournal" :disabled="!prPreviewItems.length"
+                  title="Append this plate to the active Lab Journal entry — one cell per well, coloured by the phase that was measured.">
+                  <i class="fas fa-book-medical"></i> Log plate
+                </button>
+                <button class="small" @click="logPlateAsWellPlate" :disabled="!prPreviewItems.length"
+                  title="Save what was measured as a new plate in Well Plate. Each well keeps its composition and gains its phase. The plate you read is left untouched.">
+                  <i class="fas fa-table-cells"></i> Save as plate
+                </button>
+                <button class="small success-btn" @click="importPlatereaderResults" :disabled="!prPreviewItems.length">
+                  <i class="fas fa-check"></i> Apply ({{ prPreviewItems.length }} wells)
+                </button>
+              </div>
             </div>
           </template>
 
@@ -946,6 +956,10 @@
                     : 'Save the map as a standalone interactive HTML file — open it in a browser to rotate.')"
                 style="background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid #10b981; margin: 0;">
                 <i class="fas fa-cube"></i> Export HTML
+              </button>
+              <button class="small" @click="logPhaseMapToJournal" style="margin:0;"
+                title="Append the map as it looks now to the active Lab Journal entry. The slice grid captures most reliably — the rotating 3D scene draws in WebGL and can snapshot blank on some machines.">
+                <i class="fas fa-book-medical"></i> Log to journal
               </button>
             </div>
           </div>
@@ -1393,6 +1407,10 @@
           <span class="kin-sub" style="margin-left:auto;">
             {{ kinLinkedCount }} of {{ kinWellIds.length }} wells matched to the plate<template v-if="kinAlreadyLogged">, {{ kinAlreadyLogged }} already in the ledger — applying again updates them</template>
           </span>
+          <button class="cond-btn ghost" @click="logKineticsToJournal"
+            title="Append the traces as they are drawn here to the active Lab Journal entry.">
+            <i class="fas fa-book-medical"></i> Log traces
+          </button>
           <button class="cond-btn ghost" @click="showKinReview = false">Close</button>
           <button class="cond-btn" @click="importPlatereaderResults" :disabled="!prPreviewItems.length">
             <i class="fas fa-check"></i> Apply {{ prPreviewItems.length }} wells
@@ -1443,6 +1461,7 @@ import { db } from '../services/supabase'
 import { esc } from '../utils/htmlSafe'
 import { sliceLevels } from '../utils/sliceLevels'
 import { buildExportHtml } from '../utils/phaseMapExport'
+import { buildFigureCard, buildPlateCard, buildMeasuredWellHtml } from '../utils/phaseJournal'
 import { invChip } from '../utils/invChip'
 import { useLabStore } from '../stores/labStore'
 import { filterInventory } from '../utils/inventoryFilter'
@@ -4127,6 +4146,112 @@ const calculateNextExperiments = async () => {
   } finally {
     isCalculating.value = false;
   }
+}
+
+// ── Logging to the Lab Journal ───────────────────────────────────────────────
+// What the run was, said once and attached to every card, so an entry read a
+// year later still names the file and the plate the numbers came from.
+const journalProvenance = () => [
+  { label: 'Run', value: prKinFileName.value || '' },
+  { label: 'Plate', value: prLinkedPlate.value?.name || '' },
+  { label: 'Reader', value: prIsKinetic.value ? 'kinetic (SkanIt XML)' : 'endpoint (CSV)' },
+  { label: 'Recorded', value: new Date().toLocaleString('de-DE') },
+]
+
+const jLog = (html, what) => {
+  if (!html) { alert(`Nothing to log — ${what} is empty.`); return false }
+  if (!store.appendToActiveJournal(html)) {
+    alert('Pick an active journal entry in the Lab Journal first, then log again.')
+    return false
+  }
+  return true
+}
+
+// Snapshot a Plotly view as a PNG and attach it.
+//
+// The 3D scene is the awkward one: it draws in WebGL, and a WebGL canvas whose
+// drawing buffer has already been presented can snapshot as an empty frame with
+// only the SVG legend on top — which is why the HTML export of this map exists
+// at all. So the image is checked for plausible size before it is attached, and
+// the user is told to use the slice grid rather than handed a blank figure.
+const logFigureToJournal = async (divId, title) => {
+  const el = document.getElementById(divId)
+  if (!el || !el.data) { alert('Generate the plot first.'); return }
+  let dataUrl
+  try {
+    dataUrl = await Plotly.toImage(el, { format: 'png', width: 1100, height: 720, scale: 2 })
+  } catch (err) {
+    console.error('Plotly.toImage failed:', err)
+    alert('That view could not be captured as an image. The slice grid always can — switch to it and try again.')
+    return
+  }
+  if (!dataUrl || dataUrl.length < 3000) {
+    alert('The captured image came back empty. This happens with the rotating 3D scene on some machines —'
+      + ' switch the Phase Map to "Slice grid" and log that instead, or use Export HTML for the interactive version.')
+    return
+  }
+  jLog(buildFigureCard({ title, dataUrl, meta: journalProvenance() }), 'the plot')
+    && store.toast?.('Figure added to the journal entry')
+}
+
+const logPhaseMapToJournal = () =>
+  logFigureToJournal(mapView.value === 'grid' ? 'phase-slice-grid' : 'phase-ternary-plot',
+    mapView.value === 'grid' ? 'Phase map — slice grid' : 'Phase map')
+
+const logKineticsToJournal = () => logFigureToJournal(KIN_PLOT_ID, 'Coacervation kinetics')
+
+// The plate as the reader saw it: one cell per well, coloured by phase.
+const logPlateToJournal = () => {
+  const items = prPreviewItems.value.map(i => ({
+    wellId: i.wellId,
+    phase: i.newPhase,
+    manual: !!i.manual,
+    detail: i.kin && Number.isFinite(i.kin.onsetMin) ? `onset ${Math.round(i.kin.onsetMin)} min` : '',
+  }))
+  const html = buildPlateCard({
+    items,
+    phaseName: phaseLabel,
+    phaseColor: getPhaseColor,
+    title: `Plate read — ${prLinkedPlate.value?.name || 'positional mapping'}`,
+    meta: journalProvenance(),
+  })
+  jLog(html, 'the plate') && store.toast?.('Plate read added to the journal entry')
+}
+
+// A new plate holding what was measured. New, not the original: the linked plate
+// is the design, and overwriting it would lose the thing the phases are evidence
+// about. Composition is carried over verbatim with the phase added underneath.
+const logPlateAsWellPlate = () => {
+  const items = prPreviewItems.value
+  if (!items.length) { alert('Nothing to save — no wells are classified yet.'); return }
+
+  const source = prLinkedPlate.value
+  const wells = {}
+  for (const i of items) {
+    wells[i.wellId] = buildMeasuredWellHtml({
+      existingHtml: source?.wells?.[i.wellId] || '',
+      phase: i.newPhase,
+      phaseName: phaseLabel,
+      phaseColor: getPhaseColor,
+      manual: !!i.manual,
+      detail: i.kin && Number.isFinite(i.kin.onsetMin) ? `onset ${Math.round(i.kin.onsetMin)} min` : '',
+    })
+  }
+
+  const stamp = new Date().toISOString().split('T')[0]
+  store.wellPlates.unshift({
+    id: crypto.randomUUID(),
+    name: `${source?.name || 'Phase read'} — measured ${stamp}`,
+    format: source?.format || 96,
+    selectedWell: null,
+    targetLabware: source?.targetLabware || '201812181400',
+    wells,
+    scope: 'Personal',
+    owner_id: store.user?.id,
+  })
+  store.saveWorkspaceState()
+  alert(`Saved ${items.length} measured well${items.length === 1 ? '' : 's'} as a new plate in Well Plate.`
+    + `\n\nThe original${source ? ` "${source.name}"` : ''} is untouched.`)
 }
 
 // Coming back from another module. The scene survived, but Plotly's canvas did

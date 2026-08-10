@@ -1433,7 +1433,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated, onDeactivated, nextTick, watch } from 'vue'
+
+// App.vue keeps this module alive by component name, and `<script setup>` only
+// infers a name from the filename. Declaring it makes that contract explicit
+// rather than a build artefact — rename the file and the include list still works.
+defineOptions({ name: 'PhasePredictor' })
 import { db } from '../services/supabase'
 import { esc } from '../utils/htmlSafe'
 import { sliceLevels } from '../utils/sliceLevels'
@@ -4123,6 +4128,21 @@ const calculateNextExperiments = async () => {
     isCalculating.value = false;
   }
 }
+
+// Coming back from another module. The scene survived, but Plotly's canvas did
+// not draw while this subtree was detached and renderPlot() resolves its target
+// with getElementById and quietly returns when it is missing — so without this
+// the map comes back blank even though every value behind it is intact.
+// (Sizing is separate and already handled: goView fires a resize after 60 ms.)
+onActivated(() => { nextTick(() => renderPlot()) })
+
+// Both dialogs are <Teleport to="body">. Deactivating moves the teleport target
+// rather than hiding it, so a dialog left open would stay on top of whatever
+// module you switched to. Close them on the way out.
+onDeactivated(() => {
+  showKinReview.value = false
+  showSaveCond.value = false
+})
 
 onMounted(async () => {
   if (store.user?.id) {

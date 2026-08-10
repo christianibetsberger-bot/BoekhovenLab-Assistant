@@ -129,6 +129,29 @@ const GL_KEY_V2 = computed(() => store.user?.id ? `gl2_${store.user.id}`   : nul
 const LMETA_KEY = computed(() => store.user?.id ? `lmeta_${store.user.id}` : null)
 const DV_KEY    = computed(() => store.user?.id ? `dv_${store.user.id}`    : null)
 
+// Modules kept in memory when you navigate away, by component name.
+//
+// Deliberately a short list rather than "everything". A kept module holds its
+// whole scene — a parsed kinetic run, a boundary voxel grid, a WebGL context —
+// and most modules lose nothing by being rebuilt. Phase Map is here because its
+// state is expensive to re-enter by hand: a linked plate, an imported run and a
+// screened search space are minutes of work, not one click.
+//
+// Names must match the component's own name, not the MODULE_META key — Vue reads
+// `Component.name || Component.__name`, so 'phasePredictor' would match nothing.
+// PhasePredictor declares its name explicitly with defineOptions for that reason.
+const KEPT_ALIVE = ['PhasePredictor']
+
+if (import.meta.env.DEV) {
+  // An include list that matches no component is a silent no-op — the module is
+  // simply destroyed as before and the bug looks unfixed. Say so at startup.
+  const named = Object.values(MODULE_META)
+    .map(m => m.component?.name || m.component?.__name)
+    .filter(Boolean)
+  const missing = KEPT_ALIVE.filter(n => !named.includes(n))
+  if (missing.length) console.warn(`[KeepAlive] no component named: ${missing.join(', ')}`)
+}
+
 // Navigate the desktop view router (dock + dashboard-card affordances call this).
 function goView(v) {
   desktopView.value = v
@@ -1087,8 +1110,13 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
         <template v-else>
         <DashboardOverview v-if="desktopView === 'dashboard'" @open="goView" />
 
-        <!-- Single module full page -->
-        <div v-else class="module-page">
+        <!-- Single module full page.
+             v-show, not v-else: KeepAlive purges its whole cache in its own
+             onBeforeUnmount, so a KeepAlive living inside a v-else branch is
+             emptied the moment you press Dashboard — which is most of the ways
+             out of a module. Keeping this wrapper mounted (it is a div with a
+             max-width) is what lets the cache below survive. -->
+        <div v-show="desktopView !== 'dashboard'" class="module-page">
           <div class="module-page-bar">
             <button class="mp-back" @click="goView('dashboard')">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="9.5,3 5,8 9.5,13"/></svg>
@@ -1097,7 +1125,10 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
             <span class="mp-title">{{ MODULE_META[desktopView]?.label }}</span>
           </div>
           <div class="module-page-body">
-            <component :is="MODULE_META[desktopView].component" :key="desktopView" />
+            <KeepAlive :include="KEPT_ALIVE">
+              <component v-if="MODULE_META[desktopView]"
+                         :is="MODULE_META[desktopView].component" :key="desktopView" />
+            </KeepAlive>
           </div>
         </div>
         </template>

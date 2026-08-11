@@ -5,6 +5,8 @@ import { filterInventory } from '../utils/inventoryFilter'
 import { esc, sanitize } from '../utils/htmlSafe'
 import { invChip } from '../utils/invChip'
 import { parseOnp } from '../utils/onpImport'
+import * as XLSX from 'xlsx'
+import { buildPlateRows, buildWellSummary, buildPlateGrid, plateToYaml, plateExportFilename, plateDims } from '../utils/plateExport'
 import { parseWellHtml, buildWellHtml, withFinalConcentrations, totalVolume, fmtConc,
          collectPlateStocks, applyStockToPlate, unlinkedVolumes } from '../utils/wellComposition'
 import ExpStatusPicker from './ExpStatusPicker.vue'
@@ -61,14 +63,10 @@ const onpConfig = ref({
 })
 
 // --- Helper Functions ---
-const getPlateRows = (format) => { 
-    if (format === 'ibidi') return 3; if (format === 'pcr8') return 1; 
-    return format === 384 ? 16 : (format === 48 ? 6 : (format === 24 ? 4 : 8)); 
-}
-const getPlateCols = (format) => { 
-    if (format === 'ibidi') return 6; if (format === 'pcr8') return 8; 
-    return format === 384 ? 24 : (format === 48 ? 8 : (format === 24 ? 6 : 12)); 
-}
+// Geometry lives in plateExport so the grid you see and the grid that gets
+// exported cannot drift apart when a format is added.
+const getPlateRows = (format) => plateDims(format).rows
+const getPlateCols = (format) => plateDims(format).cols
 const getWellId = (r, c) => { return String.fromCharCode(65 + r) + (c + 1); }
 
 const filterBlockInventory = (query, scope) => filterInventory(store.inventory, query, scope)
@@ -333,6 +331,73 @@ const savePlateToJournal = (plate) => {
         return;
     }
     alert('Successfully appended Plate Map to Lab Journal!');
+}
+
+// --- Spreadsheet / YAML export ------------------------------------------------
+// The .onp export answers "what should the robot do"; these answer "what is in
+// this plate", which is the question everyone else asks. Same parsed data, three
+// sheets: the long rows to analyse, a per-well summary, and the grid to read.
+const downloadBlob = (blob, filename) => {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = filename
+    document.body.appendChild(a); a.click()
+    document.body.removeChild(a); URL.revokeObjectURL(url)
+}
+
+const exportPlateWorkbook = (plate) => {
+    const rows = buildPlateRows(plate)
+    if (!rows.length) { alert('This plate has no filled wells to export.'); return }
+
+    const wb = XLSX.utils.book_new()
+
+    // Long format first: it is the sheet a script will read, and the one that
+    // survives being pasted into anything.
+    const wsWells = XLSX.utils.json_to_sheet(rows, {
+        header: ['well', 'row', 'column', 'compound', 'code', 'inventory_id', 'role',
+                 'stock_conc', 'stock_unit', 'volume_ul', 'final_conc', 'final_unit',
+                 'well_total_ul', 'linked_to_inventory'],
+    })
+    wsWells['!cols'] = [
+        { wch: 6 }, { wch: 5 }, { wch: 7 }, { wch: 26 }, { wch: 9 }, { wch: 16 }, { wch: 11 },
+        { wch: 11 }, { wch: 10 }, { wch: 10 }, { wch: 11 }, { wch: 10 }, { wch: 13 }, { wch: 18 },
+    ]
+    wsWells['!freeze'] = { xSplit: 0, ySplit: 1 }
+    XLSX.utils.book_append_sheet(wb, wsWells, 'Wells')
+
+    const wsSummary = XLSX.utils.json_to_sheet(buildWellSummary(plate), {
+        header: ['well', 'components', 'total_ul', 'unlinked_ul', 'design_volume_ul', 'overfilled'],
+    })
+    wsSummary['!cols'] = [{ wch: 6 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 17 }, { wch: 11 }]
+    XLSX.utils.book_append_sheet(wb, wsSummary, 'Well summary')
+
+    const wsGrid = XLSX.utils.aoa_to_sheet(buildPlateGrid(plate))
+    const { cols } = plateDims(plate.format)
+    wsGrid['!cols'] = [{ wch: 4 }, ...Array.from({ length: cols }, () => ({ wch: 24 }))]
+    XLSX.utils.book_append_sheet(wb, wsGrid, 'Plate map')
+
+    const wsMeta = XLSX.utils.aoa_to_sheet([
+        ['Plate', plate.name || 'Plate'],
+        ['Format', plate.format ?? 96],
+        ['Design volume (µL)', Number(plate.targetVolume) || ''],
+        ['Exported', new Date().toLocaleString('de-DE')],
+        [],
+        ['Note', 'final_conc is computed on the well\'s real total, i.e. what it actually reached.'],
+        ['Note', 'Rows with role "unlinked" carry no inventory chip: real liquid, excluded from'],
+        ['', 'well_total_ul and skipped by the robot export, because nothing records their source.'],
+    ])
+    wsMeta['!cols'] = [{ wch: 20 }, { wch: 80 }]
+    XLSX.utils.book_append_sheet(wb, wsMeta, 'About')
+
+    const today = new Date().toISOString().split('T')[0]
+    XLSX.writeFile(wb, plateExportFilename(plate, 'xlsx', today))
+}
+
+const exportPlateYaml = (plate) => {
+    const yaml = plateToYaml(plate, { exportedAt: new Date().toISOString() })
+    const today = new Date().toISOString().split('T')[0]
+    downloadBlob(new Blob([yaml], { type: 'text/yaml;charset=utf-8' }),
+                 plateExportFilename(plate, 'yaml', today))
 }
 
 // --- Robot Protocol (.onp) Export Engine ---
@@ -1020,6 +1085,8 @@ const exportAndrewPlusMulti = () => {
                 </select>
                 <button class="pt-btn" @click="savePlateToJournal(plate)" title="Log to Journal"><i class="fas fa-file-import"></i> Log</button>
                 <button class="pt-btn" @click="exportAndrewPlus(plate)" title="Export Robot Protocol (.onp) — Requires a valid Andrew+ license. Not affiliated with or endorsed by Waters Corporation."><i class="fas fa-robot"></i> .onp</button>
+                <button class="pt-btn" @click="exportPlateWorkbook(plate)" title="Excel workbook: one row per compound per well with stock, pipetted volume and the concentration reached, plus a per-well summary and a readable plate map."><i class="fas fa-file-excel"></i> Excel</button>
+                <button class="pt-btn" @click="exportPlateYaml(plate)" title="YAML: the same data keyed by well — text, diffable, and readable by any script without a parser for our HTML."><i class="fas fa-file-code"></i> YAML</button>
 
                 <span class="pt-sep"></span>
 

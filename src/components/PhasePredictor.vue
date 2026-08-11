@@ -1224,12 +1224,12 @@
 
     <!-- ── Kinetics review: the curves, the thresholds that cut them, and the override ── -->
     <Teleport to="body">
-    <div v-if="showKinReview" class="kin-modal" :class="{ 'dark-mode': store.isDarkMode }" @click.self="showKinReview = false">
+    <div v-if="showKinReview" class="kin-modal" :class="{ 'dark-mode': store.isDarkMode }" @click.self="closeKinReview">
       <div class="kin-dialog">
         <div class="kin-head">
           <span><i class="fas fa-chart-line"></i> Coacervation kinetics — {{ prKinFileName }}</span>
           <span class="kin-sub">{{ kinRunSummary }}</span>
-          <button class="cond-x" @click="showKinReview = false">✕</button>
+          <button class="cond-x" @click="closeKinReview" :disabled="kinBulkLogging">✕</button>
         </div>
 
         <!-- Thresholds. Every field re-classifies the whole plate as it is typed. -->
@@ -1407,11 +1407,26 @@
           <span class="kin-sub" style="margin-left:auto;">
             {{ kinLinkedCount }} of {{ kinWellIds.length }} wells matched to the plate<template v-if="kinAlreadyLogged">, {{ kinAlreadyLogged }} already in the ledger — applying again updates them</template>
           </span>
-          <button class="cond-btn ghost" @click="logKineticsToJournal"
-            title="Append the traces as they are drawn here to the active Lab Journal entry.">
-            <i class="fas fa-book-medical"></i> Log traces
-          </button>
-          <button class="cond-btn ghost" @click="showKinReview = false">Close</button>
+          <template v-if="kinBulkLogging">
+            <span class="kin-sub">
+              <i class="fas fa-spinner fa-spin"></i>
+              Logging {{ kinBulkProgress.done }} / {{ kinBulkProgress.total }}…
+            </span>
+            <button class="cond-btn ghost" @click="kinBulkCancel = true" :disabled="kinBulkCancel">
+              {{ kinBulkCancel ? 'Stopping…' : 'Cancel' }}
+            </button>
+          </template>
+          <template v-else>
+            <button class="cond-btn ghost" @click="logKineticsToJournal"
+              title="Append the traces as they are drawn here to the active Lab Journal entry.">
+              <i class="fas fa-book-medical"></i> Log traces
+            </button>
+            <button class="cond-btn ghost" @click="logAllKineticsToJournal" :disabled="!kinWellIds.length"
+              :title="`Log every well's curve as its own figure — ${kinWellIds.length} images appended to the active Lab Journal entry.`">
+              <i class="fas fa-images"></i> Log all wells ({{ kinWellIds.length }})
+            </button>
+          </template>
+          <button class="cond-btn ghost" @click="closeKinReview" :disabled="kinBulkLogging">Close</button>
           <button class="cond-btn" @click="importPlatereaderResults" :disabled="!prPreviewItems.length">
             <i class="fas fa-check"></i> Apply {{ prPreviewItems.length }} wells
           </button>
@@ -3474,6 +3489,40 @@ const kinAlreadyLogged = computed(() => {
 // ── Trace plot ──────────────────────────────────────────────────────────────
 const KIN_PLOT_ID = 'kin-trace-plot'
 
+// One well's curve, on its own — the piece the single-well view of renderKinTrace
+// draws, factored out so the mass-export loop below can draw the same picture for
+// every well in turn without a second copy of what a well's trace looks like.
+const buildSingleWellTrace = (id) => {
+  const ch = kinChannel.value, a = kinAnalysis.value
+  if (!ch || !a || !ch.wells[id]) return null
+  const w = a.wells[id], trace = ch.wells[id]
+  const colour = getPhaseColor(kinPhaseOf(kinClassOf(id)), 1)
+  const traces = [
+    { type: 'scattergl', mode: 'lines', x: trace.t, y: trace.v, line: { color: 'rgba(148,163,184,0.5)', width: 1 }, hoverinfo: 'skip' },
+    {
+      type: 'scattergl', mode: 'lines', x: trace.t, y: w.smoothed,
+      line: { color: colour, width: 2.2 },
+      hovertemplate: '%{y:.4f} @ %{x:.0f} min<extra></extra>',
+    },
+  ]
+  const shapes = []
+  const hline = (y, color, dash, label) => shapes.push({
+    type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: y, y1: y,
+    line: { color, width: 1, dash }, label: { text: label, font: { color, size: 9 }, textposition: 'end', yanchor: 'bottom' },
+  })
+  hline(w.baseline, '#64748b', 'dot', 'baseline')
+  hline(w.riseLevel, '#f59e0b', 'dash', 'coacervation')
+  if (w.dropLevel !== null) hline(w.dropLevel, '#38bdf8', 'dash', 'dissolution')
+  const vline = (x, color, label) => shapes.push({
+    type: 'line', yref: 'paper', y0: 0, y1: 1, xref: 'x', x0: x, x1: x,
+    line: { color, width: 1, dash: 'dot' }, label: { text: label, font: { color, size: 9 }, textposition: 'top center' },
+  })
+  if (w.onsetMin !== null) vline(w.onsetMin, '#f59e0b', 'onset')
+  if (w.dissolvedMin !== null) vline(w.dissolvedMin, '#38bdf8', 'dissolved')
+
+  return { traces, shapes, w, title: `${id} · ${classMeta(kinClassOf(id))?.label || ''}` }
+}
+
 const kinTraceLayout = (title) => ({
   paper_bgcolor: '#000000',
   plot_bgcolor: '#000000',
@@ -3521,27 +3570,8 @@ const renderKinTrace = () => {
       })
     }
   } else if (kinSelected.value && ch.wells[kinSelected.value]) {
-    const id = kinSelected.value, w = a.wells[id], trace = ch.wells[id]
-    const colour = getPhaseColor(kinPhaseOf(kinClassOf(id)), 1)
-    traces.push({ type: 'scattergl', mode: 'lines', x: trace.t, y: trace.v, line: { color: 'rgba(148,163,184,0.5)', width: 1 }, hoverinfo: 'skip' })
-    traces.push({
-      type: 'scattergl', mode: 'lines', x: trace.t, y: w.smoothed,
-      line: { color: colour, width: 2.2 },
-      hovertemplate: '%{y:.4f} @ %{x:.0f} min<extra></extra>',
-    })
-    const hline = (y, color, dash, label) => shapes.push({
-      type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: y, y1: y,
-      line: { color, width: 1, dash }, label: { text: label, font: { color, size: 9 }, textposition: 'end', yanchor: 'bottom' },
-    })
-    hline(w.baseline, '#64748b', 'dot', 'baseline')
-    hline(w.riseLevel, '#f59e0b', 'dash', 'coacervation')
-    if (w.dropLevel !== null) hline(w.dropLevel, '#38bdf8', 'dash', 'dissolution')
-    const vline = (x, color, label) => shapes.push({
-      type: 'line', yref: 'paper', y0: 0, y1: 1, xref: 'x', x0: x, x1: x,
-      line: { color, width: 1, dash: 'dot' }, label: { text: label, font: { color, size: 9 }, textposition: 'top center' },
-    })
-    if (w.onsetMin !== null) vline(w.onsetMin, '#f59e0b', 'onset')
-    if (w.dissolvedMin !== null) vline(w.dissolvedMin, '#38bdf8', 'dissolved')
+    const built = buildSingleWellTrace(kinSelected.value)
+    if (built) { traces.push(...built.traces); shapes.push(...built.shapes) }
   }
 
   if (limit && limit > 0 && limit < ch.durationMin) {
@@ -4199,6 +4229,87 @@ const logPhaseMapToJournal = () =>
     mapView.value === 'grid' ? 'Phase map — slice grid' : 'Phase map')
 
 const logKineticsToJournal = () => logFigureToJournal(KIN_PLOT_ID, 'Coacervation kinetics')
+
+// ── Bulk export: every well's curve as its own figure ───────────────────────
+// The overlay view answers "where do the classes split"; this answers "show me
+// well by well what happened", which a single combined image cannot do once
+// more than a handful of curves are on top of each other.
+const kinBulkLogging = ref(false)
+const kinBulkCancel = ref(false)
+const kinBulkProgress = ref({ done: 0, total: 0 })
+
+// Routed through one place so every way of closing the dialog — the X, Close,
+// or clicking the backdrop — agrees on the one rule: not mid-capture. A close
+// there would purge the div a running Plotly.toImage call still expects.
+const closeKinReview = () => { if (!kinBulkLogging.value) showKinReview.value = false }
+
+const logAllKineticsToJournal = async () => {
+  const ids = kinWellIds.value
+  if (!ids.length) { alert('No wells to log — load a kinetic run first.'); return }
+
+  // A full plate is 96 or 384 separate figures, and a journal entry is one HTML
+  // blob with every image embedded as base64 — there is no object storage behind
+  // it. Worth a number and a way out before committing to it.
+  const estMB = Math.round((ids.length * 35 / 1024) * 10) / 10
+  if (!confirm(`Log ${ids.length} individual figures — one per well — to the active journal entry?`
+    + `\n\nEach well is captured on its own, roughly ${estMB} MB in total. This can take a while for a`
+    + ` full plate and can be cancelled partway; whatever was already captured is still logged.`)) return
+
+  const prevSelected = kinSelected.value
+  const prevOverlay = kinOverlayAll.value
+  kinOverlayAll.value = false
+  kinBulkLogging.value = true
+  kinBulkCancel.value = false
+  kinBulkProgress.value = { done: 0, total: ids.length }
+
+  const cards = []
+  try {
+    for (const id of ids) {
+      if (kinBulkCancel.value) break
+      const built = buildSingleWellTrace(id)
+      if (built) {
+        kinSelected.value = id
+        await nextTick()
+        const el = document.getElementById(KIN_PLOT_ID)
+        try {
+          if (el) {
+            await Plotly.react(el, built.traces, { ...kinTraceLayout(built.title), shapes: built.shapes },
+              { displayModeBar: false, responsive: true })
+            const dataUrl = await Plotly.toImage(el, { format: 'png', width: 820, height: 380, scale: 2 })
+            if (dataUrl && dataUrl.length > 3000) {
+              cards.push(buildFigureCard({
+                title: built.title,
+                dataUrl,
+                meta: [
+                  ...journalProvenance(),
+                  { label: 'Class', value: classMeta(kinClassOf(id))?.label || '' },
+                  { label: 'Onset', value: built.w.onsetMin != null ? `${Math.round(built.w.onsetMin)} min` : '' },
+                  { label: 'Dissolved', value: built.w.dissolvedMin != null ? `${Math.round(built.w.dissolvedMin)} min` : '' },
+                ],
+              }))
+            }
+          }
+        } catch (err) {
+          console.error(`Could not capture well ${id}:`, err)
+        }
+      }
+      kinBulkProgress.value = { ...kinBulkProgress.value, done: kinBulkProgress.value.done + 1 }
+    }
+  } finally {
+    kinSelected.value = prevSelected
+    kinOverlayAll.value = prevOverlay
+    await nextTick()
+    renderKinTrace()
+    kinBulkLogging.value = false
+  }
+
+  if (!cards.length) { alert('Nothing could be captured.'); return }
+  const cancelled = kinBulkCancel.value && kinBulkProgress.value.done < ids.length
+  if (jLog(cards.join(''), 'the traces')) {
+    store.toast?.(`${cards.length} figure${cards.length === 1 ? '' : 's'} added to the journal entry`
+      + (cancelled ? ' (stopped early)' : ''))
+  }
+}
 
 // The plate as the reader saw it: one cell per well, coloured by phase.
 const logPlateToJournal = () => {

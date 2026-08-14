@@ -27,6 +27,8 @@ export const MODULE_ICONS = {
   screeningPlanner: svg('<path d="M2.5 3.5H13.5L9.3 8.4V12.6L6.7 13.9V8.4Z"/>'),
   phasePredictor:   svg('<path d="M2.5 2.5v11h11"/><circle cx="5.5" cy="10.5" r="1"/><circle cx="8.5" cy="7" r="1"/><circle cx="11.5" cy="9" r="1"/>'),
   lidaKinetics:     svg('<path d="M2.5 2.5v11h11"/><path d="M3.5 12c2-6 3.5-6 4.5-3s2.5 4 4.5-4"/>'),
+  // Planner: the vertical day timeline with its task dots and a check.
+  todoPlanner:      svg('<line x1="4.5" y1="2.5" x2="4.5" y2="13.5"/><circle cx="4.5" cy="4" r="1.3"/><circle cx="4.5" cy="8" r="1.3"/><circle cx="4.5" cy="12" r="1.3"/><line x1="8" y1="4" x2="13.5" y2="4"/><line x1="8" y1="8" x2="13.5" y2="8"/><path d="M8.5 12 9.8 13.3 12.5 10.6"/>'),
 }
 
 export function moduleIcon(id) { return MODULE_ICONS[id] || '' }

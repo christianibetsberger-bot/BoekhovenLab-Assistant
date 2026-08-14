@@ -67,6 +67,56 @@ function fold(line: string): string {
   return out.join("\r\n");
 }
 
+interface Todo {
+  id: string;
+  title: string;
+  notes: string | null;
+  category: string | null;
+  date: string;          // YYYY-MM-DD
+  start_min: number;     // minutes from midnight, local wall-clock
+  duration_min: number;
+  done: boolean;
+  created_at?: string | null;
+}
+
+// Planner todos carry a local wall-clock time (date + minutes), not a timezone —
+// emitted as iCalendar *floating* times (no Z), so "10:30" stays 10:30 wherever
+// the subscribing calendar lives. Minutes past midnight roll into the next day:
+// hour 24 is not a valid iCalendar TIME and can make a parser drop the event.
+function toFloating(date: string, min: number): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  const [y, mo, d] = date.split("-").map(Number);
+  const dt = new Date(y, mo - 1, d + Math.floor(min / 1440));
+  const m = ((min % 1440) + 1440) % 1440;
+  return `${dt.getFullYear()}${p(dt.getMonth() + 1)}${p(dt.getDate())}` +
+    `T${p(Math.floor(m / 60))}${p(m % 60)}00`;
+}
+
+function todoEventLines(todos: Todo[], stamp: string): string[] {
+  const lines: string[] = [];
+  for (const t of todos) {
+    const descParts: string[] = [];
+    if (t.notes) descParts.push(t.notes);
+    if (t.category) descParts.push(`Category: ${t.category}`);
+    descParts.push("Planner todo (Boekhoven Lab Assistant)");
+    lines.push(
+      "BEGIN:VEVENT",
+      fold(`UID:todo-${t.id}@boekhovenlab.app`),
+      `DTSTAMP:${stamp}`,
+      `DTSTART:${toFloating(t.date, t.start_min)}`,
+      `DTEND:${toFloating(t.date, t.start_min + t.duration_min)}`,
+      fold(`SUMMARY:${esc((t.done ? "✓ " : "") + t.title)}`),
+      fold(`DESCRIPTION:${esc(descParts.join("\n"))}`),
+      "STATUS:CONFIRMED",
+      "TRANSP:OPAQUE",
+      `LAST-MODIFIED:${toICS(t.created_at || new Date().toISOString())}`,
+      "SEQUENCE:0",
+      "END:VEVENT",
+    );
+  }
+  return lines;
+}
+
 interface Meeting {
   id: string;
   title: string;
@@ -81,7 +131,7 @@ interface Meeting {
   updated_at?: string | null;
 }
 
-function buildICS(meetings: Meeting[]): string {
+function buildICS(meetings: Meeting[], todos: Todo[] = []): string {
   const stamp = toICS(new Date().toISOString());
   const lines: string[] = [
     "BEGIN:VCALENDAR",
@@ -125,6 +175,8 @@ function buildICS(meetings: Meeting[]): string {
     );
   }
 
+  lines.push(...todoEventLines(todos, stamp));
+
   lines.push("END:VCALENDAR");
   return lines.join("\r\n") + "\r\n";
 }
@@ -149,7 +201,7 @@ Deno.serve(async (req: Request) => {
   // Resolve the token → the user it belongs to.
   const { data: tok, error: tokErr } = await supabase
     .from("calendar_tokens")
-    .select("user_id, user_email")
+    .select("user_id, user_email, include_todos")
     .eq("token", token)
     .maybeSingle();
   if (tokErr) {
@@ -180,7 +232,23 @@ Deno.serve(async (req: Request) => {
     return new Response("Could not load meetings.", { status: 500, headers: CORS });
   }
 
-  const body = buildICS((meetings ?? []) as Meeting[]);
+  // Personal Planner todos — STRICTLY this user's own (owner_id = token's user),
+  // and only when they opted in. Todos are never served into anyone else's feed.
+  let todos: Todo[] = [];
+  if (tok.include_todos) {
+    const dayCutoff = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
+    const { data: tRows } = await supabase
+      .from("todo_items")
+      .select("*")
+      .eq("owner_id", tok.user_id)
+      .not("date", "is", null)
+      .not("start_min", "is", null)
+      .gte("date", dayCutoff)
+      .order("date");
+    todos = (tRows ?? []) as Todo[];
+  }
+
+  const body = buildICS((meetings ?? []) as Meeting[], todos);
   return new Response(body, {
     status: 200,
     headers: {

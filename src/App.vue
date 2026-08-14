@@ -20,6 +20,7 @@ import WellPlateEditor from './components/WellPlateEditor.vue'
 import ArchiveManager from './components/ArchiveManager.vue'
 import TimeTracker from './components/TimeTracker.vue'
 import InstrumentBooking from './components/InstrumentBooking.vue'
+import TodoPlanner from './components/TodoPlanner.vue'
 import TopBarClock from './components/TopBarClock.vue'
 import DashboardOverview from './components/DashboardOverview.vue'
 
@@ -46,6 +47,7 @@ const MODULE_META = {
   wellPlateEditor:  { label: 'Well Plate',  icon: 'fa-border-all',        component: markRaw(WellPlateEditor) },
   timeTracker:      { label: 'Time Tracker', icon: 'fa-clock',             component: markRaw(TimeTracker) },
   instrumentBooking:{ label: 'Booking',      icon: 'fa-calendar-check',    component: markRaw(InstrumentBooking) },
+  todoPlanner:      { label: 'Planner',      icon: 'fa-calendar-day',      component: markRaw(TodoPlanner) },
 }
 
 // Dashboard (home) line icon for the dock.
@@ -120,7 +122,8 @@ function getDefaultGridLayout() {
     { i: 'wellPlateEditor',   x: 0,  y: 148, w: 12, h: 28 },
     { i: 'timeTracker',       x: 0,  y: 176, w: 6,  h: 24 },
     { i: 'archiveManager',    x: 6,  y: 176, w: 6,  h: 24 },
-    { i: 'globalSettings',    x: 0,  y: 200, w: 12, h: 20 },
+    { i: 'todoPlanner',       x: 0,  y: 200, w: 12, h: 30 },
+    { i: 'globalSettings',    x: 0,  y: 230, w: 12, h: 20 },
   ]
 }
 

@@ -17,7 +17,7 @@ async function loadInstruments() {
   } catch { /* table may not exist yet — built-ins still work */ }
 }
 onMounted(loadInstruments)
-async function refreshAll() { await Promise.all([loadBookings(), loadMeetings(), loadErrors(), loadProtocols(), loadInstruments()]) }
+async function refreshAll() { await Promise.all([loadBookings(), loadMeetings(), loadErrors(), loadProtocols(), loadInstruments(), loadMyTodos()]) }
 const groups = computed(() => mergeInstrumentGroups(instrumentRows.value))
 const allInstruments = computed(() => groups.value.flatMap(g => g.instruments))
 const category = ref('All')
@@ -277,6 +277,31 @@ const dayMeetings = computed(() => {
   const s = new Date(currentDay.value); const e = new Date(s); e.setDate(e.getDate() + 1)
   return meetings.value.filter(m => new Date(m.starts_at) < e && new Date(m.ends_at) > s)
 })
+// ── My Planner todos — personal overlay on the meetings day. Strictly per-user:
+// todo_items RLS only ever returns the requesting user's own rows, so this can
+// never show anyone else's todos and nothing here is lab-wide. Read-only here —
+// they are edited in the Planner module.
+const myTodos = ref([])
+async function loadMyTodos() {
+  try {
+    const { data, error } = await db.from('todo_items').select('*')
+      .not('date', 'is', null).not('start_min', 'is', null)
+    if (!error && data) myTodos.value = data
+  } catch { /* planner tables may not exist yet — meetings still work */ }
+}
+onMounted(loadMyTodos)
+const dayTodos = computed(() => {
+  const d = currentDay.value
+  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return myTodos.value.filter(t => t.date === iso)
+})
+const todoBandStyle = (t) => ({
+  top: (t.start_min / 60 * HOUR_H) + 'px',
+  height: Math.max(15, t.duration_min / 60 * HOUR_H - 2) + 'px',
+})
+const fmtMin = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
+const todoRange = (t) => `${fmtMin(t.start_min)}–${fmtMin(t.start_min + t.duration_min)}`
+
 const knownEmails = computed(() => [...new Set([
   ...bookings.value.map(b => b.owner_email),
   ...meetings.value.flatMap(m => [m.owner_email, ...(m.invitees || [])]),
@@ -574,6 +599,13 @@ watch(view, (v) => { if (v === 'calendar') scrollToMorning(); if (v === 'meeting
               <div class="mtg-band-title">{{ m.title }}</div>
               <div v-if="m.location" class="mtg-band-loc"><i class="fas fa-location-dot"></i> {{ m.location }}</div>
               <div class="mtg-band-meta">{{ fmtRange(m) }} · <i :class="m.scope === 'lab' ? 'fas fa-globe' : 'fas fa-lock'"></i> {{ m.scope === 'lab' ? 'Lab' : (m.invitees?.length || 0) + ' invited' }}</div>
+            </div>
+            <!-- My Planner todos: visible only to me, edited in the Planner -->
+            <div v-for="t in dayTodos" :key="'todo' + t.id" class="cal-band todo-band" :style="todoBandStyle(t)"
+                 :class="{ done: t.done }" @click.stop
+                 title="Your Planner todo — only you can see it. Edit it in the Planner module.">
+              <div class="mtg-band-title"><i class="fas" :class="t.icon" style="margin-right: 4px;"></i>{{ t.title }}</div>
+              <div class="mtg-band-meta">{{ todoRange(t) }} · <i class="fas fa-user-lock"></i> only you</div>
             </div>
           </div>
         </div>
@@ -904,6 +936,15 @@ watch(view, (v) => { if (v === 'calendar') scrollToMorning(); if (v === 'meeting
 
 /* Meetings */
 .mtg-col { flex: 1 1 auto; min-width: 320px; }
+
+/* My Planner todos: right half of the meetings day, dashed = personal, not shared.
+   Meetings keep the left edge, so a busy day still shows both side by side. */
+.todo-band {
+  left: 50%; right: 4px; background: var(--acs, rgba(37,99,235,.1)); color: var(--tx, inherit);
+  border: 1.5px dashed var(--acc, #2563eb); box-shadow: none; cursor: default;
+}
+.todo-band.done { opacity: 0.45; }
+.todo-band.done .mtg-band-title { text-decoration: line-through; }
 .mtg-band { left: 4px; right: 4px; padding: 4px 8px; }
 .mtg-band-title { font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mtg-band-loc { font-size: 10.5px; opacity: .95; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

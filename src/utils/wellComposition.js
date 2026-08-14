@@ -159,6 +159,22 @@ export function withFinalConcentrations(entries) {
   })
 }
 
+/**
+ * Rescale every volume in a well to a new total while keeping every final
+ * concentration exactly what it was: final = stock · volume / total is invariant
+ * when all volumes (fill-up included) are multiplied by the same factor. This is
+ * what lets a copied well be re-made at a smaller volume without redesigning it.
+ * Returns the scaled entries, or null when there is nothing measurable to scale
+ * from (empty well, zero total) or the target is not a positive number.
+ */
+export function scaleEntriesToTotal(entries, newTotal) {
+  const total = totalVolume(entries)
+  const target = Number(newTotal)
+  if (!(total > 0) || !(target > 0) || !isFinite(target)) return null
+  const f = target / total
+  return (entries || []).map(e => ({ ...e, volume: (Number(e.volume) || 0) * f }))
+}
+
 /** Round for display without inventing precision: 3 significant-ish decimals. */
 export const fmtConc = (v) => {
   if (v == null || !isFinite(v)) return ''

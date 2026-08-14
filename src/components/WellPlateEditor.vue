@@ -1,5 +1,5 @@
 <script setup>
-import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, nextTick, onMounted, onBeforeUnmount, onActivated } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import { filterInventory } from '../utils/inventoryFilter'
 import { esc, sanitize } from '../utils/htmlSafe'
@@ -8,7 +8,7 @@ import { parseOnp } from '../utils/onpImport'
 import * as XLSX from 'xlsx'
 import { buildPlateRows, buildWellSummary, buildPlateGrid, plateToYaml, plateExportFilename, plateDims } from '../utils/plateExport'
 import { parseWellHtml, buildWellHtml, withFinalConcentrations, totalVolume, fmtConc,
-         collectPlateStocks, applyStockToPlate, unlinkedVolumes } from '../utils/wellComposition'
+         collectPlateStocks, applyStockToPlate, unlinkedVolumes, scaleEntriesToTotal } from '../utils/wellComposition'
 import ExpStatusPicker from './ExpStatusPicker.vue'
 import { usePlanWorkspace } from '../composables/usePlanWorkspace'
 import CloudLibraryModal from './CloudLibraryModal.vue'
@@ -209,6 +209,25 @@ const setWellEntry = (plate, index, field, value) => {
     store.saveWorkspaceState()
 }
 
+// Re-make the selected well at a different total volume. Every volume — fill-up
+// included — is multiplied by the same factor, so every final concentration stays
+// exactly what it was; only the amount of liquid changes. This is the second half
+// of copying a well: paste it, then shrink it to the volume the new plate runs at.
+const scaleWellTo = (plate, value) => {
+    if (!plate?.selectedWell) return
+    const target = parseFloat(String(value).replace(',', '.'))
+    const entries = parseWellHtml(plate.wells[plate.selectedWell] || '')
+    const scaled = scaleEntriesToTotal(entries, target)
+    if (!scaled) {
+        if (String(value).trim() !== '') store.toast?.('Nothing to scale — the well needs parsed volumes and a positive target')
+        return
+    }
+    plate.wells[plate.selectedWell] = buildWellHtml(scaled, { inventory: store.inventory, showFinal: true })
+    syncWellEditor(plate)
+    store.saveWorkspaceState()
+    store.toast?.(`Well ${plate.selectedWell} scaled to ${target} µL — same concentrations, adjusted volumes`)
+}
+
 // --- Stocks used across the whole plate ---
 // A plate normally uses one bottle of each compound in every well, so the stock is a
 // property of the plate, not of 96 separate wells. This lists what the plate uses and
@@ -269,6 +288,28 @@ const formatWellDoc = (plate, cmd, value = null) => {
     document.execCommand(cmd, false, value);
     updateWellContent(plate, { target: editor });
 }
+// --- Copy a well between plates ---
+// One clipboard for the whole module: copy the selected well in one plate, then
+// select a well on any plate (the same one included) and paste. The HTML travels
+// verbatim, inventory chips included, so exports and the usage tracker read the
+// pasted well exactly like the original.
+const wellClipboard = ref(null)   // { html, from }
+const copyWell = (plate) => {
+    if (!plate.selectedWell) return
+    wellClipboard.value = {
+        html: plate.wells[plate.selectedWell] || '',
+        from: `${plate.name} · ${plate.selectedWell}`,
+    }
+    store.toast?.(`Copied ${plate.selectedWell} — select a well on any plate and paste`)
+}
+const pasteWell = (plate) => {
+    if (!wellClipboard.value || !plate.selectedWell) return
+    plate.wells[plate.selectedWell] = sanitize(wellClipboard.value.html)
+    syncWellEditor(plate)
+    store.saveWorkspaceState()
+    store.toast?.(`Pasted ${wellClipboard.value.from} into ${plate.selectedWell}`)
+}
+
 const insertInventoryRefToWell = (plate) => {
     if (!store.selectedWellInvRef || !plate.selectedWell) return;
     const item = store.inventory.find(i => i.id === store.selectedWellInvRef);
@@ -294,7 +335,22 @@ const onWellEditorClick = (e) => {
     const plate = store.wellPlates.find(p => p.id === plateId)
     if (plate?.selectedWell) plate.wells[plate.selectedWell] = sanitize(editor.innerHTML)
 }
-onMounted(() => document.addEventListener('click', onWellEditorClick))
+// A contenteditable holds no binding back to state: it is filled when a well is
+// clicked and never again. Anything that renders this panel with a well already
+// selected — a browser refresh restoring the workspace, coming back from another
+// module, or the Phase Map writing into the plate in the meantime — would
+// otherwise show an empty or stale editor whose next blur writes that staleness
+// back over the well's real content. So refill every open editor from state
+// whenever this module (re)appears.
+const syncAllWellEditors = () => nextTick(() => {
+    for (const plate of store.wellPlates) {
+        if (!plate.selectedWell) continue
+        const editor = document.getElementById('wellEditor_' + plate.id)
+        if (editor) editor.innerHTML = sanitize(plate.wells[plate.selectedWell] || '')
+    }
+})
+onMounted(() => { document.addEventListener('click', onWellEditorClick); syncAllWellEditors() })
+onActivated(syncAllWellEditors)
 onBeforeUnmount(() => document.removeEventListener('click', onWellEditorClick))
 
 // --- Integrations ---
@@ -401,7 +457,11 @@ const exportPlateYaml = (plate) => {
 }
 
 // --- Robot Protocol (.onp) Export Engine ---
-const exportAndrewPlus = (plate) => {
+// `excluded` is a set of compound keys ('__WATER__' or lowercased name) to leave
+// out of the protocol entirely. Everything else is pipetted at exactly the volume
+// the plate states — nothing is rescaled, so a well that loses a component simply
+// receives that much less liquid.
+const exportAndrewPlus = (plate, excluded = null) => {
     if (plate.format === 'ibidi' || plate.format === 'pcr8') {
         alert("Robot protocol export is not available for Ibidi gamma chambers or 8 PCR strips.");
         return;
@@ -447,7 +507,7 @@ const exportAndrewPlus = (plate) => {
         return hex(h0) + hex(h1) + hex(h2) + hex(h3);
     };
 
-    const transfers = [];
+    let transfers = [];
     const parser = new DOMParser();
 
     for (const [wId, html] of Object.entries(plate.wells)) {
@@ -500,6 +560,12 @@ const exportAndrewPlus = (plate) => {
                 }
             }
         });
+    }
+
+    // Drop the compounds the export dialog unticked. The filter runs on the parsed
+    // transfers, not the wells, so the plate itself is untouched.
+    if (excluded && excluded.size) {
+        transfers = transfers.filter(t => !excluded.has(t.type === 'water' ? '__WATER__' : t.sourceName.toLowerCase()));
     }
 
     if (transfers.length === 0) { alert("No pipetting transfers found in the plate."); return; }
@@ -605,8 +671,19 @@ const exportAndrewPlus = (plate) => {
         groupedTransfers[key].cavities.push(t.destCavity);
     });
 
+    // Steps run water first, then one compound at a time in alphabetical order —
+    // not in the order wells happened to mention them, which scattered a compound's
+    // steps through the protocol. On the bench that order is the natural one: fetch
+    // a stock once, pipette everything it feeds, put it away.
+    const orderedGroups = Object.values(groupedTransfers).sort((a, b) => {
+        const sa = sourceMap[a.sourceKey], sb = sourceMap[b.sourceKey];
+        if (sa.isWater !== sb.isWater) return sa.isWater ? -1 : 1;
+        const byName = (sa.sourceName || '').localeCompare(sb.sourceName || '', undefined, { sensitivity: 'base' });
+        return byName !== 0 ? byName : a.volume - b.volume;
+    });
+
     let stepIdx = 1;
-    for (const group of Object.values(groupedTransfers)) {
+    for (const group of orderedGroups) {
         const srcData = sourceMap[group.sourceKey];
         // Emit one step per de-duplicated round so a well never repeats within a step.
         for (const roundCavities of onpCavityRounds(group.cavities)) {
@@ -646,6 +723,49 @@ const exportAndrewPlus = (plate) => {
     const link = document.createElement('a');
     link.href = url; link.download = `RobotProtocol_${plate.name.replace(/\s+/g, '_')}.onp`;
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
+}
+
+// --- Per-export compound selection ---
+// The .onp button opens a dialog listing every compound the protocol would
+// pipette, each with its demand summed across the plate. Unticking one leaves it
+// out of the protocol; every other volume is exported unchanged. The list is
+// built by the SAME parser the exporter runs on (onpParsePlateTransfers uses the
+// identical regexes), so what the dialog shows is exactly what would be pipetted.
+const onpExportModal = ref(null)   // { plateId, plateName, items: [{ key, label, isWater, volume, wells, included }] }
+
+const openOnpExportModal = (plate) => {
+    if (plate.format === 'ibidi' || plate.format === 'pcr8') {
+        alert("Robot protocol export is not available for Ibidi gamma chambers or 8 PCR strips.");
+        return;
+    }
+    const transfers = onpParsePlateTransfers(plate)
+    if (!transfers.length) { alert("No pipetting transfers found in the plate."); return }
+
+    const byKey = new Map()
+    transfers.forEach(t => {
+        const key = t.type === 'water' ? '__WATER__' : t.sourceName.toLowerCase()
+        if (!byKey.has(key)) {
+            byKey.set(key, { key, label: t.type === 'water' ? 'Water (MQ H₂O)' : t.sourceName,
+                             isWater: t.type === 'water', volume: 0, wellSet: new Set(), included: true })
+        }
+        const g = byKey.get(key)
+        g.volume += t.volume
+        g.wellSet.add(`${t.destCavity.row}-${t.destCavity.column}`)
+    })
+    const items = [...byKey.values()]
+        .sort((a, b) => a.isWater !== b.isWater ? (a.isWater ? -1 : 1)
+            : a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }))
+        .map(({ wellSet, ...g }) => ({ ...g, wells: wellSet.size }))
+    onpExportModal.value = { plateId: plate.id, plateName: plate.name, items }
+}
+
+const confirmOnpExport = () => {
+    const m = onpExportModal.value
+    if (!m) return
+    const plate = store.wellPlates.find(p => p.id === m.plateId)
+    onpExportModal.value = null
+    if (!plate) return
+    exportAndrewPlus(plate, new Set(m.items.filter(i => !i.included).map(i => i.key)))
 }
 
 // --- Grouped Multi-Plate Robot Protocol (.onp) Export ---
@@ -907,8 +1027,18 @@ const exportAndrewPlusMulti = () => {
         groupedTransfers[key].cavities.push(t.destCavity);
     });
 
+    // Same step order as the single-plate export: water first, then compounds
+    // alphabetically, all of one compound's steps together. The sort is stable, so
+    // within one compound the plates keep the order they were selected in.
+    const orderedGroups = Object.values(groupedTransfers).sort((a, b) => {
+        const sa = sourceMap[a.sourceKey], sb = sourceMap[b.sourceKey];
+        if (sa.isWater !== sb.isWater) return sa.isWater ? -1 : 1;
+        const byName = (sa.sourceName || '').localeCompare(sb.sourceName || '', undefined, { sensitivity: 'base' });
+        return byName !== 0 ? byName : a.volume - b.volume;
+    });
+
     let stepIdx = 1;
-    for (const group of Object.values(groupedTransfers)) {
+    for (const group of orderedGroups) {
         const srcData = sourceMap[group.sourceKey];
         // Emit one step per de-duplicated round so a well never repeats within a step.
         for (const roundCavities of onpCavityRounds(group.cavities)) {
@@ -958,6 +1088,46 @@ const exportAndrewPlusMulti = () => {
     <CloudLibraryModal :show="showCloudLibrary" title="Plate Library" noun="plates"
                        :items="store.cloudPlates" table="plates"
                        @close="showCloudLibrary = false" @open="loadFromCloud" />
+
+    <!-- Single-plate .onp export: pick which compounds to pipette -->
+    <div v-if="onpExportModal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000;">
+        <div style="background: var(--surface); padding: 25px; border-radius: var(--radius); border: 1px solid var(--border); max-width: 520px; width: 90%; max-height: 80vh; overflow-y: auto;">
+            <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 10px; margin-bottom: 15px;">
+                <h3 style="margin: 0; color: var(--primary);"><i class="fas fa-robot"></i> Export .onp — {{ onpExportModal.plateName }}</h3>
+                <button class="danger small" @click="onpExportModal = null"><i class="fas fa-times"></i></button>
+            </div>
+
+            <p style="margin: 0 0 14px 0; font-size: 0.82rem; opacity: 0.75;">
+                Untick a compound to leave it out of the protocol. Every other volume is pipetted
+                exactly as the plate states — nothing is rescaled, so a well that loses a component
+                simply receives that much less liquid.
+            </p>
+
+            <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px;">
+                <label v-for="it in onpExportModal.items" :key="it.key"
+                       style="display: flex; align-items: center; gap: 10px; background: var(--panel-bg); padding: 8px 10px; border-radius: var(--radius); border: 1px solid var(--border); cursor: pointer;"
+                       :style="it.included ? '' : 'opacity: 0.5;'">
+                    <input type="checkbox" v-model="it.included" style="width: 16px; height: 16px;" />
+                    <i class="fas" :class="it.isWater ? 'fa-droplet' : 'fa-vial'" style="opacity: 0.5; width: 14px;"></i>
+                    <strong style="flex-grow: 1; font-size: 0.9rem;" :style="it.included ? '' : 'text-decoration: line-through;'">{{ it.label }}</strong>
+                    <span style="font-size: 0.72rem; opacity: 0.7; white-space: nowrap;">
+                        {{ it.wells }} well{{ it.wells === 1 ? '' : 's' }} · {{ it.volume.toFixed(1) }} µL
+                    </span>
+                </label>
+            </div>
+
+            <div class="flex-between" style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 0.8rem; opacity: 0.7;">
+                    {{ onpExportModal.items.filter(i => i.included).length }} of {{ onpExportModal.items.length }} compounds included
+                </span>
+                <button class="small" @click="confirmOnpExport"
+                        :disabled="!onpExportModal.items.some(i => i.included)"
+                        title="Export Robot Protocol (.onp) — Requires a valid Andrew+ license. Not affiliated with or endorsed by Waters Corporation.">
+                    <i class="fas fa-robot"></i> Export .onp
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- Grouped multi-plate .onp export -->
     <div v-if="showGroupExport" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000;">
@@ -1084,7 +1254,7 @@ const exportAndrewPlusMulti = () => {
                     <option v-for="lw in store.targetLabwares.filter(l => l.format === plate.format)" :value="lw.uuid" :key="lw.uuid">{{ lw.name }}</option>
                 </select>
                 <button class="pt-btn" @click="savePlateToJournal(plate)" title="Log to Journal"><i class="fas fa-file-import"></i> Log</button>
-                <button class="pt-btn" @click="exportAndrewPlus(plate)" title="Export Robot Protocol (.onp) — Requires a valid Andrew+ license. Not affiliated with or endorsed by Waters Corporation."><i class="fas fa-robot"></i> .onp</button>
+                <button class="pt-btn" @click="openOnpExportModal(plate)" title="Export Robot Protocol (.onp) — choose which compounds to pipette. Requires a valid Andrew+ license. Not affiliated with or endorsed by Waters Corporation."><i class="fas fa-robot"></i> .onp</button>
                 <button class="pt-btn" @click="exportPlateWorkbook(plate)" title="Excel workbook: one row per compound per well with stock, pipetted volume and the concentration reached, plus a per-well summary and a readable plate map."><i class="fas fa-file-excel"></i> Excel</button>
                 <button class="pt-btn" @click="exportPlateYaml(plate)" title="YAML: the same data keyed by well — text, diffable, and readable by any script without a parser for our HTML."><i class="fas fa-file-code"></i> YAML</button>
 
@@ -1202,7 +1372,17 @@ const exportAndrewPlusMulti = () => {
         <div v-if="plate.selectedWell" class="well-editor-panel">
             <div style="background: var(--summary-bg); padding: 8px 15px; border-bottom: 1px solid var(--border); font-weight: bold; display: flex; justify-content: space-between; align-items: center;">
                 <span><i class="fas fa-crosshairs"></i> Editing Well: <span style="color: var(--primary); font-size: 1.1rem;">{{ plate.selectedWell }}</span></span>
-                <span style="font-size: 0.8rem; font-weight: normal; opacity: 0.7;">Click any well above to edit</span>
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <span style="font-size: 0.8rem; font-weight: normal; opacity: 0.7; margin-right: 4px;">Click any well above to edit</span>
+                    <button class="pt-btn" @click="copyWell(plate)"
+                            title="Copy this well's content — then select a well on any plate and paste">
+                        <i class="fas fa-copy"></i> Copy well
+                    </button>
+                    <button class="pt-btn" @click="pasteWell(plate)" :disabled="!wellClipboard"
+                            :title="wellClipboard ? `Paste ${wellClipboard.from} into ${plate.selectedWell} (replaces its content)` : 'Nothing copied yet'">
+                        <i class="fas fa-paste"></i> Paste
+                    </button>
+                </span>
             </div>
             <div class="rtf-toolbar" style="border-bottom: 1px solid var(--border);">
                 <button class="rtf-btn" @click.prevent="formatWellDoc(plate, 'bold')" title="Bold"><i class="fas fa-bold"></i></button>
@@ -1275,7 +1455,14 @@ const exportAndrewPlusMulti = () => {
                         <i class="fas fa-triangle-exclamation"></i>
                         + {{ wellUnlinked(plate).total.toFixed(2) }} µL not linked to a stock ({{ wellUnlinked(plate).names }}) — not counted, not exported
                     </span>
-                    <label style="margin-left:auto; opacity:0.6; display:flex; gap:5px; align-items:center;">
+                    <label style="margin-left:auto; opacity:0.75; display:flex; gap:5px; align-items:center;"
+                           title="Re-make this well at a different total volume: every component (fill-up included) is scaled by the same factor, so all concentrations stay exactly what they are — only the pipetted volumes change.">
+                        <i class="fas fa-compress-arrows-alt" style="opacity:0.6;"></i> scale Σ to
+                        <input type="number" step="any" min="0" placeholder="µL"
+                               @change="scaleWellTo(plate, $event.target.value); $event.target.value = ''"
+                               style="padding:2px 5px; font-size:0.75rem; width:70px;">
+                    </label>
+                    <label style="opacity:0.6; display:flex; gap:5px; align-items:center;">
                         well volume
                         <input type="number" step="any" min="0" v-model.number="plate.targetVolume" @change="store.saveWorkspaceState()"
                                placeholder="—" style="padding:2px 5px; font-size:0.75rem; width:70px;">

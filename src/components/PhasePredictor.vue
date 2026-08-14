@@ -1749,6 +1749,7 @@ const exportAdditiveToPlate = () => {
 
     plate.wells[wId] = html
   })
+  store.saveLocalDrafts?.()
 
   alert(`Exported ${additivePreviewRows.value.length} additive wells to "${plate.name}" starting at ${startWell}.`)
 }
@@ -2235,6 +2236,9 @@ const writeRowsToPlate = (rows, plate, startWell, headerOf, extras = []) => {
         plate.wells[wId] = buildTargetWellHtml(row, { header: headerOf(row), extras })
         written++
     })
+    // Persist right away — the App's draft watcher debounces, and a refresh in
+    // that window would silently drop everything that was just sent.
+    store.saveLocalDrafts?.()
     return { written, overflow }
 }
 

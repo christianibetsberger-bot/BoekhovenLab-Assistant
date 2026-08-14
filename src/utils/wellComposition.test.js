@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { parseWellHtml, totalVolume, withFinalConcentrations, buildWellHtml,
-         collectPlateStocks, unlinkedVolumes } from './wellComposition'
+         collectPlateStocks, unlinkedVolumes, scaleEntriesToTotal } from './wellComposition'
 
 // Fixtures copied from the real producers' template literals. There was no test
 // anywhere that fed a producer's own output to parseWellHtml, which is how five
@@ -131,6 +131,51 @@ describe('the fill-up survives a rebuild under its own name', () => {
   it('a fill-up entry with no name still rebuilds as water (older saved plates)', () => {
     const out = buildWellHtml([{ kind: 'water', volume: 30 }], { showFinal: false })
     expect(out).toBe('<strong>MQ H₂O:</strong> 30.00 µL<br>')
+  })
+})
+
+describe('scaling a well to a new total volume', () => {
+  const well = phaseWell('<strong>MQ H₂O:</strong> 6.33 µL<br>')   // Σ 80.00 µL
+
+  it('hits the requested total and scales every entry, fill-up included', () => {
+    const scaled = scaleEntriesToTotal(parseWellHtml(well), 40)
+    expect(totalVolume(scaled)).toBeCloseTo(40, 6)
+    expect(scaled.find(e => e.name === 'Peptide').volume).toBeCloseTo(20.0, 6)
+    expect(scaled.find(e => e.kind === 'water').volume).toBeCloseTo(3.165, 6)
+  })
+
+  it('keeps every final concentration exactly what it was — the point of scaling', () => {
+    const before = withFinalConcentrations(parseWellHtml(well))
+    const after = withFinalConcentrations(scaleEntriesToTotal(parseWellHtml(well), 40))
+    before.forEach((e, i) => {
+      if (e.final == null) expect(after[i].final).toBeNull()
+      else expect(after[i].final).toBeCloseTo(e.final, 9)
+    })
+  })
+
+  it('survives the HTML round-trip: rebuild, reparse, and the concentrations still agree', () => {
+    const html = buildWellHtml(scaleEntriesToTotal(parseWellHtml(well), 40), { inventory: [] })
+    const rows = withFinalConcentrations(parseWellHtml(html))
+    const ref = withFinalConcentrations(parseWellHtml(well))
+    // Rebuild rounds volumes to 0.01 µL, so agreement is to pipetting precision,
+    // not exact — within 0.5% relative of the original concentration.
+    rows.filter(e => e.kind === 'reagent').forEach(e => {
+      const r = ref.find(x => x.name === e.name)
+      expect(Math.abs(e.final - r.final) / r.final).toBeLessThan(0.005)
+    })
+  })
+
+  it('scaling up works the same as scaling down', () => {
+    const scaled = scaleEntriesToTotal(parseWellHtml(well), 160)
+    expect(totalVolume(scaled)).toBeCloseTo(160, 6)
+    expect(scaled.find(e => e.name === 'EDC').volume).toBeCloseTo(8.0, 6)
+  })
+
+  it('refuses an empty well and a nonsense target instead of writing garbage', () => {
+    expect(scaleEntriesToTotal([], 40)).toBeNull()
+    expect(scaleEntriesToTotal(parseWellHtml(well), 0)).toBeNull()
+    expect(scaleEntriesToTotal(parseWellHtml(well), -5)).toBeNull()
+    expect(scaleEntriesToTotal(parseWellHtml(well), NaN)).toBeNull()
   })
 })
 

@@ -470,6 +470,91 @@ function cyclePosition() {
   nextTick(() => window.dispatchEvent(new Event('resize')))
 }
 
+// ── macOS-style dock magnification ─────────────────────────────────────────
+// Icons near the cursor grow with a cosine falloff and the buttons grow along
+// the dock axis, so neighbours are pushed apart exactly like the macOS dock.
+// Button centres are cached from the BASE layout on mouse-enter and mapped to
+// dock-content coordinates (scroll-proof): measuring live rects while the same
+// frame mutates their sizes feeds the output back into the input and jitters.
+const dockRef = ref(null)
+const DOCK_ZOOM_MAX = 1.45, DOCK_ZOOM_RADIUS = 84
+const dockReducedMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+let dockRaf = 0
+let dockCenters = null   // [{ btn, center }] in dock-content coordinates
+let dockResetTimer = 0
+
+function dockZoomEnter() {
+  dockCenters = null
+  const nav = dockRef.value
+  if (!nav) return
+  // Pop-out needs visible overflow, which a scrollable dock cannot have —
+  // decide per hover session, so it adapts to screen size and module count.
+  const scrollable = nav.scrollHeight > nav.clientHeight + 1 || nav.scrollWidth > nav.clientWidth + 1
+  nav.classList.toggle('dock-pop', !scrollable)
+}
+
+// Instant hover label — the native `title` tooltip only appears after the OS
+// delay (~1 s), so dock buttons carry `data-tip` instead and this shows a
+// macOS-style name label the moment the cursor is on a button.
+const dockTip = ref(null)   // { text, x, y, pos }
+function dockTipOver(e) {
+  const btn = e.target.closest('.sidebar-btn')
+  const text = btn?.dataset?.tip
+  if (!btn || !text) { dockTip.value = null; return }
+  const r = btn.getBoundingClientRect()
+  const p = sidebarPosition.value
+  dockTip.value = {
+    text, pos: p,
+    x: p === 'left' ? r.right + 12 : p === 'right' ? r.left - 12 : r.left + r.width / 2,
+    y: p === 'bottom' ? r.top - 12 : r.top + r.height / 2,
+  }
+}
+function dockTipOut(e) {
+  if (!e.relatedTarget?.closest?.('.sidebar-btn')) dockTip.value = null
+}
+function dockZoomMove(e) {
+  if (dockReducedMotion) return
+  const nav = dockRef.value
+  if (!nav || dockRaf) return
+  const { clientX, clientY } = e
+  dockRaf = requestAnimationFrame(() => {
+    dockRaf = 0
+    const horizontal = sidebarPosition.value === 'bottom'
+    const navRect = nav.getBoundingClientRect()
+    const scroll = horizontal ? nav.scrollLeft : nav.scrollTop
+    if (!dockCenters) {
+      dockCenters = [...nav.querySelectorAll('.sidebar-btn')].map(btn => {
+        const r = btn.getBoundingClientRect()
+        return { btn, center: (horizontal ? r.left + r.width / 2 - navRect.left : r.top + r.height / 2 - navRect.top) + scroll }
+      })
+    }
+    clearTimeout(dockResetTimer)
+    nav.classList.add('dock-zooming'); nav.classList.remove('dock-zoom-reset')
+    const pos = (horizontal ? clientX - navRect.left : clientY - navRect.top) + scroll
+    for (const { btn, center } of dockCenters) {
+      const d = Math.abs(pos - center)
+      const z = d >= DOCK_ZOOM_RADIUS ? 1
+        : 1 + (DOCK_ZOOM_MAX - 1) * Math.cos((d / DOCK_ZOOM_RADIUS) * Math.PI / 2)
+      // One variable drives everything: the icon tile, the glyph and the button
+      // all grow SQUARE from it (see the calc()s in the CSS), so the zoom keeps
+      // proportions — nothing is stretched along only one axis.
+      btn.style.setProperty('--dock-zoom', z.toFixed(3))
+    }
+  })
+}
+function dockZoomLeave() {
+  const nav = dockRef.value
+  if (!nav) return
+  if (dockRaf) { cancelAnimationFrame(dockRaf); dockRaf = 0 }
+  nav.classList.remove('dock-zooming'); nav.classList.add('dock-zoom-reset')
+  for (const btn of nav.querySelectorAll('.sidebar-btn')) btn.style.removeProperty('--dock-zoom')
+  dockTip.value = null
+  dockCenters = null
+  clearTimeout(dockResetTimer)
+  dockResetTimer = setTimeout(() => nav.classList.remove('dock-zoom-reset'), 260)
+}
+onUnmounted(() => { if (dockRaf) cancelAnimationFrame(dockRaf); clearTimeout(dockResetTimer) })
+
 // Sidebar remove / redock
 const showRedockPanel = ref(false)
 function removeFromSidebar(id) {
@@ -903,14 +988,16 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
     <template v-else>
 
       <!-- Auto-hide sidebar dock (desktop only — hover-based, unusable on touch) -->
-      <nav v-if="!isMobile" class="module-sidebar" :class="`pos-${sidebarPosition}`"
+      <nav v-if="!isMobile" ref="dockRef" class="module-sidebar" :class="`pos-${sidebarPosition}`"
         @dragover.prevent="sbGroupMemberDragOver"
         @drop.prevent="sbSidebarBackgroundDrop"
+        @mouseenter="dockZoomEnter" @mousemove="dockZoomMove" @mouseleave="dockZoomLeave"
+        @mouseover="dockTipOver" @mouseout="dockTipOut"
       >
         <div class="sidebar-modules">
           <!-- Dashboard (home) -->
           <button class="sidebar-btn" :class="{ 'is-active': desktopView === 'dashboard' }"
-                  title="Dashboard" @click="goView('dashboard')">
+                  data-tip="Dashboard" @click="goView('dashboard')">
             <div class="sidebar-icon"><span class="sidebar-svg" v-html="DASHBOARD_ICON"></span></div>
           </button>
 
@@ -919,7 +1006,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
             <span class="sidebar-divider"></span>
             <button v-for="id in group" :key="id" class="sidebar-btn"
                     :class="{ 'is-active': desktopView === id }"
-                    :title="MODULE_META[id].label" @click="goView(id)">
+                    :data-tip="MODULE_META[id].label" @click="goView(id)">
               <span v-if="MODULE_META[id].alpha" class="alpha-badge" title="Alpha version">α</span>
               <div class="sidebar-icon"><span class="sidebar-svg" v-html="MODULE_ICONS[id]"></span></div>
             </button>
@@ -927,14 +1014,14 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
         </div>
 
         <div class="sidebar-footer">
-          <button v-if="removedModuleIds.length" class="sidebar-btn" title="Add hidden modules back"
+          <button v-if="removedModuleIds.length" class="sidebar-btn" data-tip="Add hidden modules back"
             @click.stop="showRedockPanel = !showRedockPanel">
             <div class="sidebar-icon sidebar-icon-util"><i class="fas fa-plus"></i></div>
           </button>
-          <button class="sidebar-btn" :title="`Dock position: ${sidebarPosition}`" @click="cyclePosition">
+          <button class="sidebar-btn" :data-tip="`Dock position: ${sidebarPosition}`" @click="cyclePosition">
             <div class="sidebar-icon sidebar-icon-util"><i class="fas" :class="positionIcon"></i></div>
           </button>
-          <button class="sidebar-btn" title="Reset layout" @click="resetLayout">
+          <button class="sidebar-btn" data-tip="Reset layout" @click="resetLayout">
             <div class="sidebar-icon sidebar-icon-util"><i class="fas fa-rotate-left"></i></div>
           </button>
         </div>
@@ -942,6 +1029,9 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
 
       <!-- Redock picker — rendered at body level so it escapes the sidebar's overflow clip -->
       <Teleport to="body">
+        <!-- Instant dock hover label (escapes the dock's overflow clip) -->
+        <div v-if="dockTip" class="dock-tip" :class="[`dock-tip-${dockTip.pos}`, { 'dark-mode': store.isDarkMode }]"
+             :style="{ left: dockTip.x + 'px', top: dockTip.y + 'px' }">{{ dockTip.text }}</div>
         <div v-show="showRedockPanel" class="redock-panel"
           :class="[`panel-${sidebarPosition}`, { 'dark-mode': store.isDarkMode }]"
           @click.stop>
@@ -1193,6 +1283,21 @@ body { padding: 0 !important; margin: 0 !important; }
   transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1);
   scrollbar-width: none;
 }
+
+/* ── Magnification grows INWARD only, out over the bar (like macOS) ──
+   Buttons anchor at the dock's screen-edge side, so a growing icon's outer edge
+   stays pinned and the growth pops out over the bar's inner edge — the glass
+   bar itself never changes size. `dock-pop` (set by the dock JS) lifts the
+   overflow clip; it stays off only when the dock is actually scrollable, where
+   visible overflow would spill content past the panel ends. */
+.module-sidebar.pos-left  .sidebar-modules, .module-sidebar.pos-left  .sidebar-footer { align-items: flex-start; }
+.module-sidebar.pos-right .sidebar-modules, .module-sidebar.pos-right .sidebar-footer { align-items: flex-end; }
+.module-sidebar.pos-bottom .sidebar-modules, .module-sidebar.pos-bottom .sidebar-footer { align-items: flex-end; }
+/* Three classes so this outranks the per-position overflow rules below — those
+   set auto/hidden for scrolling, which would clip the pop-out. */
+.module-sidebar.dock-pop.pos-left,
+.module-sidebar.dock-pop.pos-right,
+.module-sidebar.dock-pop.pos-bottom { overflow: visible; }
 .module-sidebar::-webkit-scrollbar { display: none; }
 
 /* ── Left dock — a persistent floating glass dock (always visible) ── */
@@ -1311,19 +1416,30 @@ body { padding: 0 !important; margin: 0 !important; }
 /* ── Icon tile — translucent primary-color squircle ── */
 /* Dock tile — transparent by default; the active (docked) module fills accent.
    (Per the redesign: active = solid accent + white icon, inactive = muted.) */
+/* --dock-zoom drives the magnification (set per-button by the dock JS). The
+   tile, glyph and font all grow SQUARE from the same factor — layout-based, so
+   the button grows with them in both axes and neighbours are displaced, while
+   every icon keeps its proportions. */
 .sidebar-icon {
-  width: 38px; height: 38px;
-  border-radius: 12px;
+  width: calc(38px * var(--dock-zoom, 1)); height: calc(38px * var(--dock-zoom, 1));
+  border-radius: calc(12px * var(--dock-zoom, 1));
   display: flex; align-items: center; justify-content: center;
   position: relative; flex-shrink: 0;
   background: transparent;
   color: var(--tx2);
   transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
-.sidebar-icon i { font-size: 0.95rem; position: relative; z-index: 1; }
+/* While the cursor tracks across the dock, the per-frame updates ARE the
+   animation — transitions on top only add lag. They come back for the ease-out. */
+.module-sidebar.dock-zooming .sidebar-icon,
+.module-sidebar.dock-zooming .sidebar-svg { transition: none; }
+.module-sidebar.dock-zoom-reset .sidebar-icon,
+.module-sidebar.dock-zoom-reset .sidebar-svg { transition: width 0.22s ease, height 0.22s ease, font-size 0.22s ease; }
+.sidebar-icon i { font-size: calc(0.95rem * var(--dock-zoom, 1)); position: relative; z-index: 1; }
 .sidebar-svg {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 20px; height: 20px; position: relative; z-index: 1;
+  width: calc(20px * var(--dock-zoom, 1)); height: calc(20px * var(--dock-zoom, 1));
+  position: relative; z-index: 1;
 }
 .sidebar-svg svg { width: 100%; height: 100%; display: block; }
 
@@ -1335,13 +1451,29 @@ body { padding: 0 !important; margin: 0 !important; }
 /* Inactive module: transparent, tertiary text */
 .sidebar-btn.is-hidden .sidebar-icon { background: transparent; color: var(--tx3); }
 
-/* Hover: gentle scale (0.15s transform only) */
-.sidebar-btn:hover .sidebar-icon { transform: scale(1.12); }
+/* Instant dock hover label — shown the moment the cursor is on a button, no OS
+   tooltip delay. Fixed-positioned at body level, so the dock cannot clip it. */
+.dock-tip {
+  position: fixed; z-index: 3000; pointer-events: none;
+  background: rgba(40, 44, 60, 0.94); color: #fff;
+  padding: 4px 11px; border-radius: 8px;
+  font-size: 0.76rem; font-weight: 600; white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+.dock-tip.dark-mode { background: rgba(235, 238, 250, 0.95); color: #1c2030; }
+.dock-tip-left   { transform: translateY(-50%); }
+.dock-tip-right  { transform: translate(-100%, -50%); }
+.dock-tip-bottom { transform: translate(-50%, -100%); }
+
+/* Hover: gentle scale — only when the magnification zoom is not live, since the
+   zoom already grows the hovered icon and a transform on top would distort it. */
+.module-sidebar:not(.dock-zooming) .sidebar-btn:hover .sidebar-icon { transform: scale(1.12); }
 .sidebar-btn.is-hidden:hover .sidebar-icon { color: var(--tx2); }
 
 /* Utility icons (position toggle, reset, redock add) */
 .sidebar-icon-util { background: transparent; color: var(--tx3); }
-.sidebar-btn:hover .sidebar-icon-util { color: var(--tx2); transform: scale(1.10); }
+.module-sidebar:not(.dock-zooming) .sidebar-btn:hover .sidebar-icon-util { color: var(--tx2); transform: scale(1.10); }
+.sidebar-btn:hover .sidebar-icon-util { color: var(--tx2); }
 
 /* ── Redock picker panel ── */
 .redock-panel {

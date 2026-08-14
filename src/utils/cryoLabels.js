@@ -22,7 +22,11 @@ export const LWCS = {
   // and still stay legible — it already prints the short name for the same
   // reason), 'none' = omit. fCond = that line's font (mm).
   '506': { label: '0.5 mL Eppendorf', tube: 'eppi', cap: true, W: 33.4, H: 12.7, wrapW: 23.9, circ: 9.5, qr: 6.5, ecc: 'L', qrSize: 'AutoFit', fName: 2.6, fCas: 1.6, fCode: 2.6, fMin: 1.7, fCond: 1.5, cond: 'conc', useShort: true, rule: false, labelName: 'LWCS506', rect: { x: 0.012187534, y: 0.0075000003, w: 1.2833055, h: 0.43402776 } },
-  '507': { label: '1.5 mL Eppendorf', tube: 'eppi', cap: true, W: 39.7, H: 15.9, wrapW: 28.6, circ: 11.1, qr: 7.6, ecc: 'L', qrSize: 'AutoFit', fName: 2.7, fCas: 1.8, fCode: 2.7, fMin: 1.6, fCond: 1.6, cond: 'full', rule: true, labelName: 'LWCS507', rect: { x: 0.14513889, y: 0.045138888, w: 1.5, h: 0.5509028 } },
+  // dxText / dyQr: physical print-alignment nudges (mm) applied ONLY to the
+  // generated .dymo — checked against real prints on the 550, where the 507 text
+  // block sat too close to the cap circle and the QR a hair low in the cap.
+  // The preview keeps the ideal geometry; these compensate the printer, not the design.
+  '507': { label: '1.5 mL Eppendorf', tube: 'eppi', cap: true, W: 39.7, H: 15.9, wrapW: 28.6, circ: 11.1, qr: 7.6, ecc: 'L', qrSize: 'AutoFit', fName: 2.7, fCas: 1.8, fCode: 2.7, fMin: 1.6, fCond: 1.6, cond: 'full', rule: true, labelName: 'LWCS507', dxText: 1.0, dyQr: -0.4, rect: { x: 0.14513889, y: 0.045138888, w: 1.5, h: 0.5509028 } },
   '503': { label: 'Falcon 15 & 50 mL', tube: 'falcon', cap: false, W: 38.1, H: 19.1, qr: 14, ecc: 'M', qrSize: 'AutoFit', fName: 3.2, fCas: 2.1, fCode: 3.0, fMin: 1.8, fCond: 1.9, cond: 'full', rule: true, labelName: 'LWCS503', rect: { x: 0.060000032, y: 0.045, w: 1.38, h: 0.675 } },
 }
 
@@ -179,8 +183,9 @@ export function dymoXml(key, rec, mode = 'full', shortHost = 'boek.li') {
   // QR / SnapPEEL cap sits at the LEFT end (matching the die-cut in DYMO Connect);
   // the name/CAS/code text block runs to its right.
   const qrX = sp.cap ? (r.x + (circ - qr) / 2) : (r.x + pad)
-  const qrY = r.y + (r.h - qr) / 2
-  const tx = sp.cap ? (r.x + circ + pad) : (r.x + qr + 2 * pad)
+  // dyQr / dxText: per-size print-alignment nudges (mm, negative dyQr = up) — see LWCS.
+  const qrY = r.y + (r.h - qr) / 2 + (sp.dyQr || 0) / 25.4
+  const tx = (sp.cap ? (r.x + circ + pad) : (r.x + qr + 2 * pad)) + (sp.dxText || 0) / 25.4
   // Cap the text right edge at the die edge — the 507 print band runs ~2 mm past it.
   const dieR = sp.W / 25.4
   const tw = Math.max(0.3, Math.min(r.x + r.w, dieR) - pad - tx)

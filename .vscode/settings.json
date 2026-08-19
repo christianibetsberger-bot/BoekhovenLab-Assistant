@@ -1,0 +1,6 @@
+{
+  // Supabase Edge Functions run on Deno, not Node. Scope the Deno language
+  // server to that folder ONLY — the Vue app must stay on the regular TS server.
+  "deno.enable": true,
+  "deno.enablePaths": ["./supabase/functions"]
+}

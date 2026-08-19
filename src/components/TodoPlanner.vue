@@ -11,6 +11,10 @@ import { getOrCreateFeedToken, feedUrls, CalendarTokenTableMissing } from '../ut
 
 const store = useLabStore()
 
+// Rendered as the Planner tab of the Calendar module: `embedded` drops the own
+// card chrome so it sits flush inside the host module.
+const props = defineProps({ embedded: { type: Boolean, default: false } })
+
 // ── Icon catalogue: science first, then office, then everything else a day has ──
 const ICON_GROUPS = [
   { label: 'Science', icons: [
@@ -73,6 +77,20 @@ async function loadAll() {
 }
 onMounted(loadAll)
 
+// ── Meetings on the timeline ──
+// The Calendar module's meetings (lab-wide, own, invited — RLS decides) render
+// as read-only bands behind the tasks, so the planner and the Meetings tab
+// always tell the same story about the day. Todos stay the editable layer.
+const meetings = ref([])
+async function loadMeetings() {
+  try {
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 7)
+    const { data } = await db.from('meetings').select('*').gte('ends_at', cutoff.toISOString()).order('starts_at')
+    meetings.value = data || []
+  } catch { /* meetings table may not exist yet — the planner works without it */ }
+}
+onMounted(loadMeetings)
+
 // ── Day selection + week strip ──
 const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const todayISO = () => toISO(new Date())
@@ -114,6 +132,19 @@ const nowMin = ref(new Date().getHours() * 60 + new Date().getMinutes())
 let tick = null
 onMounted(() => { tick = setInterval(() => { const n = new Date(); nowMin.value = n.getHours() * 60 + n.getMinutes() }, 30000) })
 onBeforeUnmount(() => clearInterval(tick))
+
+// Meetings overlapping the selected day, clipped to it, in local minutes.
+const dayMeetings = computed(() => {
+  const dayStart = parseISO(selectedDate.value)
+  const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1)
+  return meetings.value
+    .filter(m => new Date(m.starts_at) < dayEnd && new Date(m.ends_at) > dayStart)
+    .map(m => ({
+      ...m,
+      startMin: Math.max(0, (new Date(m.starts_at) - dayStart) / 60000),
+      endMin: Math.min(24 * 60, (new Date(m.ends_at) - dayStart) / 60000),
+    }))
+})
 
 const dayTasks = computed(() =>
   tasks.value.filter(t => t.date === selectedDate.value && t.start_min != null)
@@ -397,9 +428,10 @@ async function recolorCategory(c, color) {
 </script>
 
 <template>
-  <div class="card">
-    <div class="flex-between" style="border-bottom: 1px solid var(--ln); padding-bottom: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
-      <h2 style="border: none; padding: 0; margin: 0;"><i class="fas fa-calendar-day"></i> Planner</h2>
+  <div :class="props.embedded ? '' : 'card'">
+    <div class="flex-between" :style="`padding-bottom: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; ${props.embedded ? '' : 'border-bottom: 1px solid var(--ln);'}`">
+      <h2 v-if="!props.embedded" style="border: none; padding: 0; margin: 0;"><i class="fas fa-calendar-day"></i> Planner</h2>
+      <span v-else></span>
       <div class="plate-toolbar" style="display: flex; gap: 6px; align-items: center;">
         <button class="tp-btn" :class="{ on: showCalPanel }" @click="openCalPanel" title="Show your todos in your own calendar (personal feed — never lab-wide)"><i class="fas fa-calendar-plus"></i> Calendar</button>
         <button class="tp-btn" :class="{ on: showCatMgr }" @click="showCatMgr = !showCatMgr" title="Colour-coded categories"><i class="fas fa-palette"></i> Categories</button>
@@ -499,6 +531,14 @@ async function recolorCategory(c, color) {
                 <span>{{ String(h - 1).padStart(2, '0') }}:00</span>
               </div>
             </template>
+            <!-- meetings from the Calendar module: read-only busy-time bands behind the tasks -->
+            <div v-for="m in dayMeetings" :key="'mtg' + m.id" class="tp-meeting"
+                 :style="{ top: m.startMin / 60 * HOUR_H + 'px', height: Math.max(20, (m.endMin - m.startMin) / 60 * HOUR_H - 2) + 'px' }">
+              <span class="tp-meeting-label">
+                <i class="fas fa-users"></i> {{ m.title }}<template v-if="m.location"> · {{ m.location }}</template>
+              </span>
+            </div>
+
             <!-- the spine: dashed = free time; capsules cover it where the day is planned -->
             <div class="tp-spine"></div>
             <!-- now line -->
@@ -672,6 +712,18 @@ async function recolorCategory(c, color) {
 .tp-spine { position: absolute; top: 0; bottom: 0; left: 79px; width: 0; border-left: 2px dashed var(--ln2, rgba(0,0,0,.16)); }
 .tp-now { position: absolute; left: 52px; right: 8px; height: 0; border-top: 2px solid #ef4444; z-index: 4; pointer-events: none; }
 .tp-now::before { content: ''; position: absolute; left: -5px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
+
+/* Meetings: read-only busy-time behind the tasks — visible, never in the way. */
+.tp-meeting {
+  position: absolute; left: 52px; right: 4px; z-index: 1; pointer-events: none;
+  background: var(--acs, rgba(37,99,235,.08));
+  border-left: 3px solid var(--acc, #2563eb); border-radius: 6px;
+  padding: 2px 8px; overflow: hidden; box-sizing: border-box;
+}
+.tp-meeting-label {
+  float: right; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 0.68rem; font-weight: 600; color: var(--acc, #2563eb); opacity: 0.9;
+}
 
 /* The task capsule ON the line: length = duration, icon at its head. */
 .tp-capsule {

@@ -270,10 +270,20 @@ export function buildWellHtml(entries, { inventory = [], showFinal = true, targe
     // The chip states the stock used IN THIS WELL, which may differ from the
     // inventory's current stock — the well records what was pipetted, not what the
     // bottle says today, so the well's own value wins.
+    //
+    // An entry that CARRIES an invId keeps it even when the item is not in the
+    // live inventory (archived, or a colleague's private stock this user can't
+    // see): the id is what the usage tracker keys traceability on, and the old
+    // textChip fallback silently destroyed it on every rebuild.
     const shown = e.stock == null ? '' : `${fmtConc(e.stock)} ${e.unit || ''}`.trim()
-    const chip = inv
-      ? invChip({ ...inv, stock: e.stock == null ? inv.stock : fmtConc(e.stock), stockUnit: e.unit || inv.stockUnit },
-                { labware: e.labware || '', removable: true })
+    const chip = (inv || e.invId)
+      ? invChip({
+          id: e.invId,
+          code: inv?.code ?? e.code,
+          name: inv?.name ?? e.name,
+          stock: e.stock == null ? (inv?.stock ?? '') : fmtConc(e.stock),
+          stockUnit: e.unit || inv?.stockUnit || '',
+        }, { labware: e.labware || '', removable: true })
       : textChip(`${e.code ? '[' + e.code + '] ' : ''}${e.name}${shown ? ' (' + shown + ')' : ''}`,
                  { labware: e.labware || '' })
     const final = (showFinal && e.final != null)

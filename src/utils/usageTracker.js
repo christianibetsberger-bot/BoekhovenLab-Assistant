@@ -91,7 +91,10 @@ export async function extractInvRefsFromHtml(html, inventory = null) {
     const id = el.getAttribute('data-inv-id')
     if (id) out.set(String(id), { id: String(id), code, name })
     else if (code) legacy.push({ code, name })
-    else unresolvedEls++          // a chip we can't tie to anything — never silently ignore it
+    // No id AND no [code]: that is a textChip — a deliberate free-text additive
+    // that never referenced an inventory item. It is not "unresolved": counting
+    // it as such permanently blocked stale-row cleanup for every source that
+    // contained one, which is how usage rows drifted out of step with reality.
   })
   let unresolved = unresolvedEls
   if (legacy.length) {

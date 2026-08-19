@@ -292,7 +292,7 @@ function linkToJournal(p) {
         <label class="pr-field"><span>Share</span><select v-model="editing.scope"><option value="Global">Lab</option><option value="Personal">Private</option></select></label>
       </div>
       <div v-if="showInstrumentField" class="pr-row">
-        <label class="pr-field grow"><span>Instrument <span style="font-weight:400;opacity:.6;">(from Instrument Booking — shows in that instrument's logbook)</span></span>
+        <label class="pr-field grow"><span>Instrument <span style="font-weight:400;opacity:.6;">(from the Calendar module — shows in that instrument's logbook)</span></span>
           <select v-model="editing.instrument">
             <option value="">— none —</option>
             <option v-for="i in instrumentChoices" :key="i" :value="i">{{ i }}</option>

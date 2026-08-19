@@ -1750,6 +1750,7 @@ const exportAdditiveToPlate = () => {
     plate.wells[wId] = html
   })
   store.saveLocalDrafts?.()
+  store.reconcilePlanUsage?.('plates', plate)
 
   alert(`Exported ${additivePreviewRows.value.length} additive wells to "${plate.name}" starting at ${startWell}.`)
 }
@@ -2239,6 +2240,10 @@ const writeRowsToPlate = (rows, plate, startWell, headerOf, extras = []) => {
     // Persist right away — the App's draft watcher debounces, and a refresh in
     // that window would silently drop everything that was just sent.
     store.saveLocalDrafts?.()
+    // Keep the usage log in step: chips were just written into the plate from
+    // ANOTHER module, so a plate already marked finished must re-reconcile —
+    // waiting for its next manual Save left cross-module uses undetected.
+    store.reconcilePlanUsage?.('plates', plate)
     return { written, overflow }
 }
 

@@ -5,6 +5,7 @@ import { db } from '../services/supabase'
 import { INSTRUMENT_CATEGORIES, mergeInstrumentGroups, isBuiltinInstrument, categoryOf } from '../utils/instruments'
 import { protocolHtml, protocolSummary } from '../utils/protocolView'
 import { getOrCreateFeedToken, rotateFeedToken, feedUrls, CalendarTokenTableMissing } from '../utils/calendarFeed'
+import TodoPlanner from './TodoPlanner.vue'
 
 const store = useLabStore()
 
@@ -64,7 +65,7 @@ async function restoreInstrument(name) {
   await loadInstruments(); store.toast('Instrument restored')
 }
 
-const view = ref('calendar') // 'calendar' | 'meetings' | 'stats' | 'logbook'
+const view = ref('calendar') // 'calendar' | 'meetings' | 'planner' | 'stats' | 'logbook'
 
 // ── Day navigation (one day per page) ──
 const currentDay = ref((() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d })())
@@ -501,12 +502,13 @@ watch(view, (v) => { if (v === 'calendar') scrollToMorning(); if (v === 'meeting
 
 <template>
   <div class="card">
-    <h2><i class="fas fa-calendar-check"></i> Instrument Booking</h2>
+    <h2><i class="fas fa-calendar-check"></i> Calendar</h2>
 
     <div class="bk-toolbar">
       <div class="scope-chips">
         <button class="scope-chip" :class="{ active: view === 'calendar' }" @click="view = 'calendar'">Instruments</button>
         <button class="scope-chip" :class="{ active: view === 'meetings' }" @click="view = 'meetings'">Meetings</button>
+        <button class="scope-chip" :class="{ active: view === 'planner' }" @click="view = 'planner'" title="Your personal day planner — todos, timeline, categories">Planner</button>
         <button class="scope-chip" :class="{ active: view === 'stats' }" @click="view = 'stats'">Statistics</button>
         <button class="scope-chip" :class="{ active: view === 'logbook' }" @click="view = 'logbook'">Logbook</button>
       </div>
@@ -610,6 +612,11 @@ watch(view, (v) => { if (v === 'calendar') scrollToMorning(); if (v === 'meeting
           </div>
         </div>
       </div>
+    </template>
+
+    <!-- ════ PLANNER — the personal Structured-style day planner ════ -->
+    <template v-else-if="view === 'planner'">
+      <TodoPlanner embedded />
     </template>
 
     <!-- ════ STATISTICS — utilization ════ -->

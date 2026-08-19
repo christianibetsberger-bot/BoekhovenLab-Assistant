@@ -20,7 +20,6 @@ import WellPlateEditor from './components/WellPlateEditor.vue'
 import ArchiveManager from './components/ArchiveManager.vue'
 import TimeTracker from './components/TimeTracker.vue'
 import InstrumentBooking from './components/InstrumentBooking.vue'
-import TodoPlanner from './components/TodoPlanner.vue'
 import TopBarClock from './components/TopBarClock.vue'
 import DashboardOverview from './components/DashboardOverview.vue'
 
@@ -46,8 +45,7 @@ const MODULE_META = {
   dataFigures:      { label: 'Data & Figures', icon: 'fa-chart-line', alpha: true, component: markRaw(DataFigures) },
   wellPlateEditor:  { label: 'Well Plate',  icon: 'fa-border-all',        component: markRaw(WellPlateEditor) },
   timeTracker:      { label: 'Time Tracker', icon: 'fa-clock',             component: markRaw(TimeTracker) },
-  instrumentBooking:{ label: 'Booking',      icon: 'fa-calendar-check',    component: markRaw(InstrumentBooking) },
-  todoPlanner:      { label: 'Planner',      icon: 'fa-calendar-day',      component: markRaw(TodoPlanner) },
+  instrumentBooking:{ label: 'Calendar',     icon: 'fa-calendar-check',    component: markRaw(InstrumentBooking) },
 }
 
 // Dashboard (home) line icon for the dock.
@@ -122,8 +120,7 @@ function getDefaultGridLayout() {
     { i: 'wellPlateEditor',   x: 0,  y: 148, w: 12, h: 28 },
     { i: 'timeTracker',       x: 0,  y: 176, w: 6,  h: 24 },
     { i: 'archiveManager',    x: 6,  y: 176, w: 6,  h: 24 },
-    { i: 'todoPlanner',       x: 0,  y: 200, w: 12, h: 30 },
-    { i: 'globalSettings',    x: 0,  y: 230, w: 12, h: 20 },
+    { i: 'globalSettings',    x: 0,  y: 200, w: 12, h: 20 },
   ]
 }
 
@@ -171,7 +168,10 @@ watch(() => store.uiSettings.showAlpha, (on) => {
 function loadGridLayout() {
   if (!GL_KEY.value) return
   const raw = localStorage.getItem(GL_KEY.value)
-  try { if (raw) { gridLayout.value = JSON.parse(raw); return } } catch {}
+  // Drop entries whose module no longer exists (e.g. modules since merged into
+  // another) — rendering an unknown id would look up MODULE_META[id].component
+  // on undefined and take the whole dashboard down.
+  try { if (raw) { gridLayout.value = JSON.parse(raw).filter(i => MODULE_META[i.i]); return } } catch {}
   // Migrate from gl2_ (60px rows → 30px rows): multiply all y and h × 2
   const rawV2 = GL_KEY_V2.value && localStorage.getItem(GL_KEY_V2.value)
   if (rawV2) {
@@ -451,9 +451,14 @@ watch(currentMobileId, () => {
   nextTick(() => setTimeout(() => window.dispatchEvent(new Event('resize')), 60))
 })
 
-// Modules removed from sidebar (can be re-added via redock panel)
+// Modules removed from sidebar (can be re-added via redock panel).
+// Filtered against MODULE_META: a user may have hidden a module that has since
+// been merged into another (Planner → Calendar, Storage → Inventory) — its
+// saved id survives in layoutMeta, and rendering it would crash the redock
+// panel (which is v-show, i.e. always rendered) and with it the whole app.
 const removedModuleIds = computed(() =>
-  Object.keys(layoutMeta.value.sidebarHidden || {}).filter(id => layoutMeta.value.sidebarHidden[id])
+  Object.keys(layoutMeta.value.sidebarHidden || {})
+    .filter(id => layoutMeta.value.sidebarHidden[id] && MODULE_META[id])
 )
 
 // Sidebar position and dock utilities
@@ -612,7 +617,13 @@ function loadSidebarGroups() {
   if (!key) return
   try {
     const raw = localStorage.getItem(key)
-    if (raw) sidebarGroups.value = JSON.parse(raw)
+    if (raw) {
+      // Drop members whose module no longer exists (merged away) and disband
+      // groups that fall under two members — stale ids must not reach templates.
+      sidebarGroups.value = JSON.parse(raw)
+        .map(g => ({ ...g, moduleIds: (g.moduleIds || []).filter(id => MODULE_META[id]) }))
+        .filter(g => g.moduleIds.length >= 2)
+    }
   } catch { sidebarGroups.value = [] }
 }
 

@@ -179,6 +179,23 @@ describe('scaling a well to a new total volume', () => {
   })
 })
 
+describe('rebuilds never destroy traceability', () => {
+  it('regression: an entry whose item is NOT in the live inventory keeps its data-inv-id', () => {
+    // Archived compound, or a colleague's private stock: the item is absent from
+    // the inventory passed in, but the chip's id is what the usage tracker keys
+    // on — the old textChip fallback silently dropped it on every rebuild.
+    const out = buildWellHtml(parseWellHtml(phaseWell('<strong>MQ H₂O:</strong> 6.33 µL<br>')), { inventory: [] })
+    expect(out).toContain('data-inv-id="i1"')
+    expect(out).toContain('data-inv-id="i4"')
+  })
+
+  it('and the round-trip through a rebuild still parses to the same ids', () => {
+    const once = buildWellHtml(parseWellHtml(phaseWell('<strong>MQ H₂O:</strong> 6.33 µL<br>')), { inventory: [] })
+    const ids = parseWellHtml(once).filter(e => e.kind === 'reagent').map(e => e.invId)
+    expect(ids).toEqual(['i1', 'i2', 'i3', 'i4'])
+  })
+})
+
 describe('the fill-up does not become a plate stock', () => {
   it('a buffer fill-up adds no row to the plate stock list', () => {
     const stocks = collectPlateStocks({

@@ -15,6 +15,27 @@ const greetingWord = computed(() => {
 })
 const today = computed(() => new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }))
 
+// ── My loaned-out chemicals ──
+// Stocks THIS user took out (Storage tab: take-out button or a Quick-take scan)
+// and hasn't returned. Return is one tap and writes straight to the item, so
+// other clients (and the Storage tab) see it flip immediately.
+const myEmail = computed(() => (store.user?.email || '').toLowerCase())
+const myLoans = computed(() => (store.inventory || [])
+  .filter(i => i.storage?.taken && String(i.storage.taken.by || '').toLowerCase() === myEmail.value)
+  .sort((a, b) => new Date(b.storage.taken.at || 0) - new Date(a.storage.taken.at || 0)))
+const loanSince = (t) => {
+  const d = new Date(t?.at || 0)
+  if (isNaN(d)) return ''
+  const days = Math.floor((Date.now() - d) / 864e5)
+  return days === 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`
+}
+const loanHome = (it) => [it.location, it.sublocation].filter(Boolean).join(' / ') || 'no recorded position'
+function returnLoan(it) {
+  delete it.storage.taken
+  store.saveItemToCloud(it)
+  store.toast?.(`[${it.code}] returned — ${loanHome(it)}`)
+}
+
 // ── Lab-wide (Global) resources ──
 const isLab = (x) => (x?.scope || 'Global') === 'Global'
 const labStocks = computed(() => (store.inventory || []).filter(isLab))
@@ -169,7 +190,7 @@ const MORE = [
       <button class="dc" style="grid-column: span 4;" @click="open('instrumentBooking')">
         <div class="dc-head">
           <span class="dc-ic" v-html="MODULE_ICONS.instrumentBooking"></span>
-          <span class="dc-title">Instrument Booking</span>
+          <span class="dc-title">Calendar — Bookings</span>
           <span class="scope-badge lab">Lab</span>
           <span class="dc-arrow">›</span>
         </div>
@@ -197,6 +218,29 @@ const MORE = [
             <span class="dc-book-when">{{ fmtWhen(m) }}</span>
           </div>
           <div v-if="!meetings.length" class="dc-empty">No upcoming meetings.</div>
+        </div>
+      </button>
+
+      <!-- My loaned-out chemicals — taken out and not yet returned -->
+      <button class="dc" style="grid-column: span 4;" @click="open('inventoryManager')">
+        <div class="dc-head">
+          <span class="dc-ic" v-html="MODULE_ICONS.inventoryManager"></span>
+          <span class="dc-title">Loaned out</span>
+          <span class="scope-badge private">You</span>
+          <span v-if="myLoans.length" class="dc-loan-count">{{ myLoans.length }}</span>
+          <span class="dc-arrow">›</span>
+        </div>
+        <div class="dc-body">
+          <div v-for="it in myLoans.slice(0, 6)" :key="it.id" class="dc-loan">
+            <span class="dc-loan-code">{{ it.code }}</span>
+            <span class="dc-loan-name">{{ it.name }}</span>
+            <span class="dc-loan-meta">{{ loanSince(it.storage.taken) }} · {{ loanHome(it) }}</span>
+            <span class="dc-loan-return" @click.stop="returnLoan(it)" title="Mark as returned to its place">
+              <i class="fas fa-rotate-left"></i> Return
+            </span>
+          </div>
+          <div v-if="myLoans.length > 6" class="dc-empty" style="padding-top: 4px;">… {{ myLoans.length - 6 }} more in Inventory → Storage</div>
+          <div v-if="!myLoans.length" class="dc-empty">Nothing loaned out. Scan a tube in Inventory → Storage → Quick take to check it out.</div>
         </div>
       </button>
 
@@ -307,6 +351,16 @@ const MORE = [
 .tt-day.is-today { color: var(--acc); font-weight: 700; }
 
 .dc-empty { font-size: 12px; color: var(--tx3); font-style: italic; }
+
+/* Loaned-out chemicals rows */
+.dc-loan { display: grid; grid-template-columns: auto 1fr auto; gap: 3px 8px; align-items: center; min-width: 0; padding: 3px 0; border-bottom: 1px solid var(--ln2, rgba(0,0,0,.06)); }
+.dc-loan:last-of-type { border-bottom: none; }
+.dc-loan-code { font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 8px; background: var(--acs, rgba(37,99,235,.12)); color: var(--acc, #2563eb); white-space: nowrap; }
+.dc-loan-name { font-size: 12px; font-weight: 600; color: var(--tx); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dc-loan-return { font-size: 11px; font-weight: 700; color: var(--acc, #2563eb); white-space: nowrap; cursor: pointer; padding: 2px 6px; border-radius: 7px; }
+.dc-loan-return:hover { background: var(--acs, rgba(37,99,235,.12)); }
+.dc-loan-meta { grid-column: 1 / 3; font-size: 10.5px; color: var(--tx3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dc-loan-count { font-size: 10.5px; font-weight: 800; background: #d97706; color: #fff; border-radius: 9px; padding: 1px 7px; }
 
 .dash-more-label { font-size: 12px; font-weight: 700; color: var(--tx2); margin: 20px 2px 10px; }
 .dash-more { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }

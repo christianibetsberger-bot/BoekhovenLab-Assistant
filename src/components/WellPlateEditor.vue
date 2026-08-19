@@ -225,6 +225,7 @@ const scaleWellTo = (plate, value) => {
     plate.wells[plate.selectedWell] = buildWellHtml(scaled, { inventory: store.inventory, showFinal: true })
     syncWellEditor(plate)
     store.saveWorkspaceState()
+    store.reconcilePlanUsage?.('plates', plate)
     store.toast?.(`Well ${plate.selectedWell} scaled to ${target} µL — same concentrations, adjusted volumes`)
 }
 
@@ -243,6 +244,8 @@ const linkPlateStock = (plate, key, inv) => {
     activeDropdown.value = null
     if (plate.selectedWell) syncWellEditor(plate)
     store.saveWorkspaceState()
+    // Linking restores data-inv-id chips — the usage log must hear about it.
+    store.reconcilePlanUsage?.('plates', plate)
     store.toast?.(`Linked ${inv.name} in ${wellsChanged} well${wellsChanged === 1 ? '' : 's'}`)
 }
 
@@ -268,6 +271,24 @@ const updateDefaultLabware = (plate) => {
     else if (plate.format === 96) plate.targetLabware = '201812181400';
     else if (plate.format === 24) plate.targetLabware = '201901101715';
     else plate.targetLabware = '';
+}
+
+// --- Well names ---
+// A well can carry a human name ("Control", "Sample 3") alongside its contents.
+// Names live in plate.wellNames — a separate map, NOT inside the well HTML, so
+// exporters, the usage tracker and the robot protocols are untouched by naming.
+const wellName = (plate, wellId) => (plate.wellNames || {})[wellId] || ''
+const setWellName = (plate, value) => {
+    if (!plate.selectedWell) return
+    if (!plate.wellNames) plate.wellNames = {}
+    const v = String(value || '').trim()
+    if (v) plate.wellNames[plate.selectedWell] = v
+    else delete plate.wellNames[plate.selectedWell]
+    store.saveWorkspaceState()
+}
+const wellTooltip = (plate, wellId) => {
+    const n = wellName(plate, wellId)
+    return n ? `${wellId} — ${n}` : wellId
 }
 
 // --- Editor Logic ---
@@ -307,6 +328,7 @@ const pasteWell = (plate) => {
     plate.wells[plate.selectedWell] = sanitize(wellClipboard.value.html)
     syncWellEditor(plate)
     store.saveWorkspaceState()
+    store.reconcilePlanUsage?.('plates', plate)
     store.toast?.(`Pasted ${wellClipboard.value.from} into ${plate.selectedWell}`)
 }
 
@@ -1278,7 +1300,8 @@ const exportAndrewPlusMulti = () => {
                          :class="['well', { 'selected': plate.selectedWell === getWellId(r-1, c-1), 'has-content': plate.wells[getWellId(r-1, c-1)] && plate.wells[getWellId(r-1, c-1)].trim() !== '' }]"
                          :style="wellColor(plate, getWellId(r-1, c-1)) ? { background: wellColor(plate, getWellId(r-1, c-1)), borderColor: wellColor(plate, getWellId(r-1, c-1)) } : {}"
                          @click="selectWell(plate, getWellId(r-1, c-1))"
-                         :title="getWellId(r-1, c-1)">
+                         :title="wellTooltip(plate, getWellId(r-1, c-1))">
+                        <span v-if="wellName(plate, getWellId(r-1, c-1))" class="well-name-dot"></span>
                     </div>
                 </template>
             </div>
@@ -1371,7 +1394,14 @@ const exportAndrewPlusMulti = () => {
 
         <div v-if="plate.selectedWell" class="well-editor-panel">
             <div style="background: var(--summary-bg); padding: 8px 15px; border-bottom: 1px solid var(--border); font-weight: bold; display: flex; justify-content: space-between; align-items: center;">
-                <span><i class="fas fa-crosshairs"></i> Editing Well: <span style="color: var(--primary); font-size: 1.1rem;">{{ plate.selectedWell }}</span></span>
+                <span style="display: flex; align-items: center; gap: 8px;">
+                    <span><i class="fas fa-crosshairs"></i> Editing Well: <span style="color: var(--primary); font-size: 1.1rem;">{{ plate.selectedWell }}</span></span>
+                    <input type="text" :value="wellName(plate, plate.selectedWell)"
+                           @change="setWellName(plate, $event.target.value)"
+                           placeholder="name this well…"
+                           title="A human name for this well (e.g. Control, Sample 3) — shown on hover over the plate; the well's contents are untouched"
+                           style="font-weight: normal; font-size: 0.8rem; padding: 3px 8px; width: 150px;">
+                </span>
                 <span style="display: flex; align-items: center; gap: 6px;">
                     <span style="font-size: 0.8rem; font-weight: normal; opacity: 0.7; margin-right: 4px;">Click any well above to edit</span>
                     <button class="pt-btn" @click="copyWell(plate)"
@@ -1494,6 +1524,12 @@ const exportAndrewPlusMulti = () => {
   font-size: 0.78rem; color: var(--tx);
 }
 .plate-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+
+/* A named well carries a small marker so names are discoverable from the grid. */
+.well-name-dot {
+  position: absolute; top: 1px; right: 1px; width: 5px; height: 5px;
+  border-radius: 50%; background: var(--acc, #2563eb); pointer-events: none;
+}
 .plate-legend-dot { width: 12px; height: 12px; border-radius: 3px; flex: none; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
 
 /* Plate toolbar ------------------------------------------------------------

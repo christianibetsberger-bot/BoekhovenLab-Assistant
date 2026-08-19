@@ -4,6 +4,7 @@ import { useLabStore } from '../stores/labStore'
 import { db } from '../services/supabase'
 import CryoLabels from './CryoLabels.vue'
 import UsageHistory from './UsageHistory.vue'
+import StorageMap from './StorageMap.vue'
 import * as XLSX from 'xlsx'
 import { jsPDF } from 'jspdf'
 import { calcSeqExtinction, calcSeqMw, calcSeqTm, calcSeqGc } from '../utils/seqUtils'
@@ -186,7 +187,10 @@ async function dismissIncoming(row) {
 
 // --- Local Computed ---
 // Scope new/imported items land in — the Archive is a view, not a real scope.
-const writeScope = computed(() => inventoryMode.value === 'Archived' ? 'Global' : inventoryMode.value)
+// Only Lab/Private are real write scopes — the Archive and Storage tabs are
+// views, and an item created while one of them is open must not inherit the
+// tab name as its scope.
+const writeScope = computed(() => inventoryMode.value === 'Personal' ? 'Personal' : 'Global')
 const filteredInventory = computed(() => {
     const term = inventorySearch.value.toLowerCase();
     return store.inventory.filter(item =>
@@ -308,6 +312,9 @@ const createAliquot = (parentItem) => {
     let newItem = JSON.parse(JSON.stringify(parentItem));
     newItem.id = 'inv_aliq_' + crypto.randomUUID();
     newItem.scope = parentItem.scope || 'Global';
+    // An aliquot is a NEW physical tube: inheriting the parent's box position
+    // would show two tubes in one cryo-box cell. It starts unplaced.
+    delete newItem.storage;
     let suffixNum = 1;
     let baseCode = parentItem.code;
     let newCode = `${baseCode}-A${suffixNum}`;
@@ -348,6 +355,11 @@ const processImports = (importedItems, sourceName) => {
                     dup.new.stock = existingItem.stock;
                     dup.new.stockUnit = existingItem.stockUnit || '';
                 }
+                // Nor a physical position: an import sheet knows nothing about the
+                // cryo box the tube already sits in, so the position always survives.
+                if (existingItem.storage) dup.new.storage = existingItem.storage;
+                if (!dup.new.location && existingItem.location) dup.new.location = existingItem.location;
+                if (!dup.new.sublocation && existingItem.sublocation) dup.new.sublocation = existingItem.sublocation;
                 store.inventory.splice(dup.existingIdx, 1, dup.new);
                 store.saveItemToCloud(dup.new);
                 replacedCount++;
@@ -1385,16 +1397,20 @@ const generateLabelsPDF = () => {
         <div class="scope-chips" style="margin-bottom: 14px;">
             <button class="scope-chip" :class="{ active: inventoryMode === 'Global' }" @click="inventoryMode = 'Global'">Lab</button>
             <button class="scope-chip" :class="{ active: inventoryMode === 'Personal' }" @click="inventoryMode = 'Personal'">Private</button>
+            <button class="scope-chip" :class="{ active: inventoryMode === 'Storage' }" @click="inventoryMode = 'Storage'" title="Where everything physically is: labs, fridges, shelves, cryo boxes — with QR scanning">Storage</button>
             <button class="scope-chip" :class="{ active: inventoryMode === 'Archived' }" @click="openArchive" title="Deleted compounds — kept with their full usage history">Archive</button>
         </div>
 
-        <div class="search-box">
+        <div v-if="inventoryMode !== 'Storage'" class="search-box">
             <i class="fas fa-search"></i>
             <input type="text" v-model="inventorySearch" placeholder="Search by name, CAS, or code...">
         </div>
 
+        <!-- ── Storage: the physical map — labs → fridges → shelves → boxes ──── -->
+        <StorageMap v-if="inventoryMode === 'Storage'" />
+
         <!-- ── Archive: the same table, showing deleted compounds ─────────────── -->
-        <template v-if="inventoryMode === 'Archived'">
+        <template v-else-if="inventoryMode === 'Archived'">
             <p style="font-size: 0.76rem; color: var(--tx2); margin: 0 0 10px;">Deleted compounds are kept here with their full data and usage history, so past experiments stay traceable. Restore one to put it back in the active inventory.</p>
             <div v-if="archiveMissing" style="font-size: 0.8rem; color: var(--tx2); padding: 14px 0;">Run <code>supabase/inventory_usage.sql</code> to enable the archive.</div>
             <div v-else-if="archiveLoading" style="font-size: 0.8rem; color: var(--tx2); padding: 14px 0;"><i class="fas fa-spinner fa-spin"></i> Loading…</div>

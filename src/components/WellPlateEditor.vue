@@ -12,6 +12,7 @@ import { parseWellHtml, buildWellHtml, withFinalConcentrations, totalVolume, fmt
 import ExpStatusPicker from './ExpStatusPicker.vue'
 import { usePlanWorkspace } from '../composables/usePlanWorkspace'
 import CloudLibraryModal from './CloudLibraryModal.vue'
+import OpentronsExportModal from './OpentronsExportModal.vue'
 
 import { BOEKHOVEN_PALETTE, assignColors } from '../utils/palette'
 
@@ -755,6 +756,17 @@ const exportAndrewPlus = (plate, excluded = null) => {
 // identical regexes), so what the dialog shows is exactly what would be pipetted.
 const onpExportModal = ref(null)   // { plateId, plateName, items: [{ key, label, isWater, volume, wells, included }] }
 
+// --- Opentrons OT-2 export ---
+// A Python protocol rather than a catalogue file: the plate's pipetting plus
+// whatever should happen after it (thermocycler, heating, shaking, sampling at
+// intervals). The configuration is kept on the plate as plate.ot2 and edited in
+// OpentronsExportModal; the generator lives in utils/opentronsExport.
+const ot2Plate = ref(null)
+const openOt2Export = (plate) => {
+    if (plate.format === 'ibidi') { alert('Ibidi chambers are not an OT-2 labware — choose a plate format the robot can hold.'); return }
+    ot2Plate.value = plate
+}
+
 const openOnpExportModal = (plate) => {
     if (plate.format === 'ibidi' || plate.format === 'pcr8') {
         alert("Robot protocol export is not available for Ibidi gamma chambers or 8 PCR strips.");
@@ -1111,6 +1123,8 @@ const exportAndrewPlusMulti = () => {
                        :items="store.cloudPlates" table="plates"
                        @close="showCloudLibrary = false" @open="loadFromCloud" />
 
+    <OpentronsExportModal v-if="ot2Plate" :plate="ot2Plate" @close="ot2Plate = null" />
+
     <!-- Single-plate .onp export: pick which compounds to pipette -->
     <div v-if="onpExportModal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 2000;">
         <div style="background: var(--surface); padding: 25px; border-radius: var(--radius); border: 1px solid var(--border); max-width: 520px; width: 90%; max-height: 80vh; overflow-y: auto;">
@@ -1277,6 +1291,7 @@ const exportAndrewPlusMulti = () => {
                 </select>
                 <button class="pt-btn" @click="savePlateToJournal(plate)" title="Log to Journal"><i class="fas fa-file-import"></i> Log</button>
                 <button class="pt-btn" @click="openOnpExportModal(plate)" title="Export Robot Protocol (.onp) — choose which compounds to pipette. Requires a valid Andrew+ license. Not affiliated with or endorsed by Waters Corporation."><i class="fas fa-robot"></i> .onp</button>
+                <button class="pt-btn" @click="openOt2Export(plate)" title="Opentrons OT-2 Python protocol: pipette this plate, then thermocycler / temperature / shaking / timed sampling steps. Upload the .py in the Opentrons App."><i class="fas fa-microchip"></i> OT-2</button>
                 <button class="pt-btn" @click="exportPlateWorkbook(plate)" title="Excel workbook: one row per compound per well with stock, pipetted volume and the concentration reached, plus a per-well summary and a readable plate map."><i class="fas fa-file-excel"></i> Excel</button>
                 <button class="pt-btn" @click="exportPlateYaml(plate)" title="YAML: the same data keyed by well — text, diffable, and readable by any script without a parser for our HTML."><i class="fas fa-file-code"></i> YAML</button>
 

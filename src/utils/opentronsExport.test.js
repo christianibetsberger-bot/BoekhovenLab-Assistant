@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   plateDemands, parseWellSelection, generateOpentronsProtocol, defaultOt2Config,
   normalizeOt2Config, newOt2Step, targetLabwareOptions, wellNamesOf, labwareByName,
-  adjacentSlots, loadVolume, opentronsFilename,
+  adjacentSlots, loadVolume, opentronsFilename, multiGroups,
 } from './opentronsExport'
 
 // The markup the planners actually write into a well (see plateExport.test.js).
@@ -149,7 +149,7 @@ describe('generateOpentronsProtocol — plain build', () => {
   it('declares liquids and loads them where the header says', () => {
     expect(code).toContain('liq_1 = protocol.define_liquid(name="MQ H₂O", description="fill-up", display_color="#0072B2")')
     expect(code).toMatch(/bulk\["A1"\]\.load_liquid\(liquid=liq_1, volume=\d+\)/)
-    expect(code).toMatch(/#   bulk {3}A1 {3}MQ H₂O/)
+    expect(code).toMatch(/#   bulk {6}A1 {3}MQ H₂O/)
   })
   it('pipettes water first, then the stocks alphabetically, each with the right pipette', () => {
     const iWater = code.indexOf('# MQ H₂O —')
@@ -209,7 +209,7 @@ describe('generateOpentronsProtocol — options', () => {
   })
   it('refuses an 8-channel pipette for single wells and says so', () => {
     const { warnings, code } = gen(smallPlate(), cfg => { cfg.pipettes = { left: 'p300_multi_gen2', right: '' } })
-    expect(warnings.some(w => /8-channel pipette cannot address single wells/.test(w))).toBe(true)
+    expect(warnings.some(w => /8-channel cannot address single wells/.test(w))).toBe(true)
     expect(code).not.toContain('build(p300m')
   })
   it('one tip per stock and distribute mode change the call, not the volumes', () => {
@@ -409,5 +409,93 @@ describe('config', () => {
   })
   it('makes a filename that survives a filesystem', () => {
     expect(opentronsFilename({ name: 'Coacervate screen / 3' }, '2026-09-03')).toBe('OT2_Coacervate_screen_3_2026-09-03.py')
+  })
+})
+
+describe('8-channel', () => {
+  // Water and RNA are the same in every well of a column; the peptide changes by column.
+  const columnPlate = () => fullPlate({ peptide: (r, c) => 5 + c, rna: () => 10, total: 80 })   // water = 65 − c per column
+  const multiCfg = (cfg) => { cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' } }
+
+  it('knows which wells an 8-channel spans', () => {
+    expect(multiGroups(96)).toHaveLength(12)
+    expect(multiGroups(96)[0]).toEqual({ address: 'A1', wells: ['A1', 'B1', 'C1', 'D1', 'E1', 'F1', 'G1', 'H1'] })
+    expect(multiGroups(384)).toHaveLength(48)
+    expect(multiGroups(384)[1].wells).toEqual(['B1', 'D1', 'F1', 'H1', 'J1', 'L1', 'N1', 'P1'])
+    expect(multiGroups(24)).toEqual([])
+    expect(multiGroups('pcr8')[0].wells).toEqual(['A1', 'B1', 'C1', 'D1', 'E1', 'F1', 'G1', 'H1'])
+  })
+  it('fills whole matching columns from the reservoir with the 8-channel and the rest with the single-channel', () => {
+    const { code, warnings, summary } = gen(columnPlate(), multiCfg)
+    expect(warnings).toEqual([])
+    expect(code).toContain('reservoir = protocol.load_labware("nest_12_reservoir_15ml", "6", label="8-channel reservoir")')
+    expect(code).toContain('p300m = protocol.load_instrument("p300_multi_gen2", "left", tip_racks=tips_p300m)')
+    expect(code).toMatch(/build\(p300m, reservoir\["A1"\], \[\s*\("A1", 64\), \("A2", 63\)/)
+    expect(code).toContain('12 columns × 8 wells, 5.62 mL (p300m, 8-channel')   // Σ (65 − c) × 8 over 12 columns
+    // 6–17 µL of peptide and 10 µL of RNA are below the multi's 20 µL minimum: single-channel, well by well.
+    expect(code).toMatch(/build\(p20, stocks\["A1"\], \[\s*\("A1", 6\), \("A2", 7\)/)
+    expect(code).not.toContain('build(p300m, stocks')
+    const water = summary.sources.find(s => s.isFill)
+    expect(water).toMatchObject({ rack: 'reservoir', well: 'A1', columns: 12 })
+    expect(summary.sources.find(s => s.name === 'K10 peptide')).toMatchObject({ rack: 'stocks', columns: 0 })
+    const multi = summary.pipettes.find(p => p.var === 'p300m')
+    expect(multi).toMatchObject({ channels: 8, tipsNeeded: 12, perRack: 12 })
+    expect(multi.tipSlots).toHaveLength(1)
+    assertPythonShape(code)
+  })
+  it('stays single-channel when the liquid is put in a tube, or when the 8-channel is switched off', () => {
+    const inTube = gen(columnPlate(), cfg => { multiCfg(cfg); cfg.compounds = { 'fill:mq h₂o': { included: true, position: 'stocks:D6' } } })
+    expect(inTube.code).not.toContain('build(p300m')
+    expect(inTube.code).toMatch(/build\(p20, stocks\["D6"\]/)
+    const off = gen(columnPlate(), cfg => { multiCfg(cfg); cfg.steps[0].multi = 'off' })
+    expect(off.code).not.toContain('build(p300m')
+    expect(off.code).not.toContain('reservoir')
+  })
+  it('a column with one differing well is not 8-channel work', () => {
+    const plate = columnPlate()
+    plate.wells.H1 = plate.wells.H1.replace('64.00 µL', '61.00 µL')   // water in H1 differs (65 − 1 = 64 → 61)
+    const { summary } = gen(plate, multiCfg)
+    expect(summary.sources.find(s => s.isFill).columns).toBe(11)
+  })
+  it('samples whole columns with the 8-channel into sample-plate columns, quench included', () => {
+    const { code, warnings } = gen(columnPlate(), cfg => {
+      multiCfg(cfg)
+      const s = newOt2Step('series'); s.count = 3; s.intervalMinutes = 10; s.wells = 'A1-H2'; s.volume = 25; s.quenchName = 'TFA'; s.quenchUl = 30
+      const one = newOt2Step('sample'); one.wells = 'A1, B2'; one.volume = 10
+      cfg.steps.push(s, one)
+    })
+    expect(warnings).toEqual([])
+    expect(code).toContain('series_wells = ["A1", "A2"]')
+    expect(code).toContain('series_dests = [col[0] for col in samples.columns()[0:6]]')
+    expect(code).toContain('        p300m.transfer(30, reservoir["A2"], dests, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first')
+    expect(code).toContain('        p300m.transfer(25, [plate[w] for w in series_wells], dests, new_tip="always", blow_out=True, blowout_location="destination well")')
+    // A partial selection after the series stays single-channel and continues after the used columns.
+    expect(code).toContain('dests = samples.wells()[48:50]')
+    expect(code).toMatch(/p20\.transfer\(10, \[plate\[w\] for w in sample_wells\], dests/)
+    assertPythonShape(code)
+  })
+  it('a single-channel quench into 8-channel columns visits every well of each column', () => {
+    const { code } = gen(columnPlate(), cfg => {
+      multiCfg(cfg)
+      const s = newOt2Step('sample'); s.wells = 'A1-H1'; s.volume = 25; s.quenchName = 'TFA'; s.quenchUl = 15
+      cfg.compounds = { 'quench:tfa': { included: true, position: 'stocks:C1' } }
+      cfg.steps.push(s)
+    })
+    expect(code).toContain('p20.transfer(15, stocks["C1"], [w for a in dests for w in samples.columns_by_name()[a.well_name[1:]]], new_tip="once"')
+    expect(code).toContain('p300m.transfer(25, [plate[w] for w in sample_wells], dests')
+  })
+  it('mixes a column with the 8-channel, and caps a mix at what the tip holds', () => {
+    const { code } = gen(columnPlate(), cfg => { multiCfg(cfg); const m = newOt2Step('mix'); m.wells = 'A3-H3'; m.reps = 2; m.volume = 40; cfg.steps.push(m) })
+    expect(code).toContain('# Step 2: mix 1 column with the 8-channel, 2 × 40 µL (p300m)')
+    expect(code).toContain('for well in ["A3"]:')
+    expect(code).toContain('p300m.mix(2, 40, plate[well])')
+    const capped = gen(smallPlate(), cfg => { cfg.pipettes = { left: '', right: 'p20_single_gen2' }; const m = newOt2Step('mix'); m.wells = 'A1'; m.volume = 40; cfg.steps.push(m) })
+    expect(capped.warnings).toContain('Mix wells: 40 µL is more than the P20 Single-Channel GEN2 can hold — mixing with 20 µL instead.')
+    expect(capped.code).toContain('p20.mix(3, 20, plate[well])')
+  })
+  it('an 8-row reservoir labware splits a load over its column', () => {
+    const { code } = gen(columnPlate(), cfg => { multiCfg(cfg); cfg.columnLabware = 'nest_96_wellplate_2ml_deep'; cfg.apiLevel = '2.24' })
+    expect(code).toMatch(/reservoir\.load_liquid\(wells=\["A1", "B1", "C1", "D1", "E1", "F1", "G1", "H1"\], volume=\d+(\.\d+)?, liquid=liq_1\)/)
+    expect(code).toMatch(/#   reservoir A1 {3}MQ H₂O.*split over A1–H1/)
   })
 })

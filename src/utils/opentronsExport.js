@@ -211,6 +211,32 @@ export const tipRackOptions = (pipetteName) => {
   return p ? p.tips.map(labwareByName).filter(Boolean) : []
 }
 
+// ── 8-channel geometry ──
+// An 8-channel pipette spans eight wells 9 mm apart: one column of a 96-format,
+// or every other row of a 384. It can only draw from somewhere all eight tips
+// reach at once — a reservoir trough, or a column of an 8-row labware.
+export const columnLabwareOptions = () => OT2_LABWARE.filter(l => l.on.includes('deck') && (l.kind === 'reservoir' || ((l.kind === 'plate' || l.kind === 'block') && l.rows === 8)))
+// Positions the 8-channel can address in such labware — like Opentrons, by the
+// A-row well of the column (a trough of a 1-row reservoir is its own well).
+export const columnPositions = (lw) => lw.rows === 1 ? wellNamesOf(lw) : Array.from({ length: lw.cols }, (_, i) => `A${i + 1}`)
+export const columnWells = (lw, address) => lw.rows === 1 ? [address] : ROWS.slice(0, lw.rows).split('').map(r => `${r}${address.slice(1)}`)
+// Two wells count as "the same volume" when they agree to the hundredth of a µL.
+export const MULTI_TOL = 0.005
+/** The groups of eight target wells an 8-channel fills in one stroke, per plate format. */
+export function multiGroups(format) {
+  if (format === 'pcr8') return [{ address: 'A1', wells: ROWS.slice(0, 8).split('').map(r => `${r}1`) }]
+  if (format === 96) return Array.from({ length: 12 }, (_, i) => ({ address: `A${i + 1}`, wells: ROWS.slice(0, 8).split('').map(r => `${r}${i + 1}`) }))
+  if (format === 384) {
+    const out = []
+    for (let c = 1; c <= 24; c++) {
+      out.push({ address: `A${c}`, wells: [0, 2, 4, 6, 8, 10, 12, 14].map(r => `${ROWS[r]}${c}`) })
+      out.push({ address: `B${c}`, wells: [1, 3, 5, 7, 9, 11, 13, 15].map(r => `${ROWS[r]}${c}`) })
+    }
+    return out
+  }
+  return []   // 24- and 48-well plates have a different pitch
+}
+
 // ── Config ───────────────────────────────────────────────────────────────────
 
 let stepSeq = 0
@@ -235,7 +261,7 @@ export const OT2_STEP_TYPES = [
 export function newOt2Step(type) {
   const base = { id: newId(), type }
   switch (type) {
-    case 'build':         return { ...base, pipette: 'auto', mode: 'transfer', newTip: 'always', mixAfterReps: 0, mixAfterUl: '', blowOut: true, touchTip: false, airGapUl: '' }
+    case 'build':         return { ...base, pipette: 'auto', multi: 'auto', mode: 'transfer', newTip: 'always', mixAfterReps: 0, mixAfterUl: '', blowOut: true, touchTip: false, airGapUl: '' }
     case 'thermocycler':  return { ...base, lid: 'close', blockTemp: '', holdMinutes: '', lidTemp: '', deactivate: false }
     case 'tc_profile':    return { ...base, profile: [{ temp: 95, seconds: 30 }, { temp: 55, seconds: 30 }, { temp: 72, seconds: 60 }], cycles: 30, lidTemp: 105, blockMaxUl: '', finalTemp: '' }
     case 'temperature':   return { ...base, temp: 4, deactivate: false }
@@ -263,9 +289,10 @@ export function defaultOt2Config(plate) {
     flowRates: { left: { aspirate: '', dispense: '' }, right: { aspirate: '', dispense: '' } },
     target: { on: 'deck', slot: '1', labware: defaultTargetLabware(plate?.format) },
     modules: { thermocycler: 'thermocyclerModuleV1', temperature: 'temperature module gen2', heaterShaker: 'heaterShakerModuleV1', magnetic: 'magnetic module gen2' },
-    deck: { stocks: '4', bulk: '5', samples: '2', temperature: '9', heaterShaker: '10', magnetic: '6' },
+    deck: { stocks: '4', bulk: '5', samples: '2', column: '6', temperature: '9', heaterShaker: '10', magnetic: '3' },
     stocksLabware: 'opentrons_24_tuberack_nest_1.5ml_snapcap',
     bulkLabware: 'opentrons_15_tuberack_falcon_15ml_conical',
+    columnLabware: 'nest_12_reservoir_15ml',           // where the 8-channel draws from
     samplesLabware: 'nest_96_wellplate_100ul_pcr_full_skirt',
     headroomPct: 20,
     compounds: {},                              // key -> { included, position: 'stocks:A1' | 'bulk:A1' | '' }
@@ -432,6 +459,8 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   if (format === 'ibidi') {
     return { code: '', warnings: ['Ibidi chambers are not an OT-2 labware — choose a plate format the robot can hold.'], summary: null }
   }
+  // Target well naming: identity, except the 8-strip which lives in column 1.
+  const targetWell = (wellId) => format === 'pcr8' ? `${ROWS[Number(wellId.slice(1)) - 1]}1` : wellId
 
   // ── Pipettes ──
   const pipettes = []
@@ -449,6 +478,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     p.tipVar = `tips_${p.var}`
   }
   const singles = pipettes.filter(p => p.def.channels === 1)
+  const multis = pipettes.filter(p => p.def.channels === 8)
 
   // Volumes a loaded pipette cannot do in one accurate stroke are tallied per
   // liquid rather than reported per well: "32 wells get 22.5–30 µL" is something
@@ -460,10 +490,12 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     t.n++; t.lo = Math.min(t.lo, volume); t.hi = Math.max(t.hi, volume)
     tallies.set(k, t)
   }
-  const choosePipette = (volume, pref, what) => {
-    const pool = (pref && pref !== 'auto') ? singles.filter(p => p.mount === pref) : singles
+  const choosePipette = (volume, pref, what, { multi = false, noSplit = false } = {}) => {
+    const kind = multi ? multis : singles
+    const pool = (pref && pref !== 'auto') ? kind.filter(p => p.mount === pref) : kind
     if (!pool.length) {
-      if (pipettes.length && !singles.length) warn(`${what}: needs a single-channel pipette — an 8-channel pipette cannot address single wells. Load one on a mount.`)
+      if (multi) return null   // callers only ask for an 8-channel when one is loaded
+      if (pipettes.length && !singles.length) warn(`${what}: needs a single-channel pipette for wells that are not whole matching columns — an 8-channel cannot address single wells. Load one on the other mount.`)
       else if (pipettes.length) warn(`${what}: no single-channel pipette on the ${pref} mount.`)
       return null
     }
@@ -471,16 +503,17 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     if (fits.length) return fits[0]
     // Too much for the pipettes below it and too little for the ones above: the
     // largest of the small ones does it in several strokes — slower, still accurate.
-    // (transfer() splits any volume above the pipette's maximum by itself.)
+    // (transfer() splits any volume above the pipette's maximum by itself; mix()
+    // does not, so a caller that cannot split says so and gets no tally.)
     const tooSmall = pool.filter(p => volume > p.def.max).sort((a, b) => b.def.max - a.def.max)
-    if (tooSmall.length) { tally('split', what, tooSmall[0], volume); return tooSmall[0] }
+    if (tooSmall.length) { if (!noSplit) tally('split', what, tooSmall[0], volume); return tooSmall[0] }
     const smallest = pool.slice().sort((a, b) => a.def.min - b.def.min)[0]
     tally('low', what, smallest, volume)
     return smallest
   }
   const flushTallies = () => {
     const range = (t) => `${pyNum(t.lo)}${t.lo !== t.hi ? '–' + pyNum(t.hi) : ''} µL`
-    const covering = (t) => OT2_PIPETTES.find(p => p.channels === 1 && p.gen === 2 && t.lo >= p.min && t.hi <= p.max && !pipettes.some(q => q.def.name === p.name))
+    const covering = (t) => OT2_PIPETTES.find(p => p.channels === t.p.def.channels && p.gen === 2 && t.lo >= p.min && t.hi <= p.max && !pipettes.some(q => q.def.name === p.name))
     for (const t of tallies.values()) {
       const n = `${t.n} transfer${t.n === 1 ? '' : 's'}`
       const hint = covering(t)
@@ -544,43 +577,101 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   const targetSlot = targetOn === 'deck' ? String(cfg.target.slot || '1') : null
   if (targetSlot) occupy(targetSlot, `the plate "${plate?.name || 'plate'}"`, { lw: targetLw })
 
-  // Sources: which rack, which well. Manual positions first, then auto-fill.
+  // ── What the 8-channel can take over ──
+  // A column is one stroke when all eight of its wells get the same liquid at
+  // the same volume; a selection is 8-channel work when it is whole columns.
+  // Volumes below every 8-channel's minimum stay with the single-channel, which
+  // does them accurately.
+  const groups = multiGroups(format)
+  const mountIsSingle = (pref) => pref !== 'auto' && singles.some(p => p.mount === pref)
+  const mountIsMulti = (pref) => pref !== 'auto' && multis.some(p => p.mount === pref)
+  const multiCanDo = (vol) => multis.some(p => vol >= p.def.min)
+  const buildMultiOn = multis.length > 0 && stepsOf('build').some(s => s.multi !== 'off' && !mountIsSingle(s.pipette))
+  for (const d of included) {
+    const byT = new Map()
+    for (const t of d.transfers) { const w = targetWell(t.well); byT.set(w, round2((byT.get(w) || 0) + t.volume)) }
+    d.byTarget = byT
+    d.columnGroups = buildMultiOn
+      ? groups.filter(g => g.wells.every(w => byT.has(w)) && g.wells.every(w => Math.abs(byT.get(w) - byT.get(g.wells[0])) < MULTI_TOL) && multiCanDo(byT.get(g.wells[0])))
+      : []
+    d.wantsColumn = d.columnGroups.length > 0
+  }
+
+  const wellList = (sel, what) => {
+    const { wells, unknown } = parseWellSelection(sel, plate)
+    if (unknown.length) warn(`${what}: could not read well${unknown.length > 1 ? 's' : ''} ${unknown.join(', ')} — use ids like A1, a run like A1-A6, or "all".`)
+    if (!wells.length) warn(`${what}: no wells selected (and the plate has no filled wells to fall back on).`)
+    return wells
+  }
+  const samplesLw = usesSamples ? (labwareByName(cfg.samplesLabware) || labwareByName('nest_96_wellplate_100ul_pcr_full_skirt')) : null
+  const selectionPre = new Map()   // step id -> { wells, groups } for sampling and mixing
+  for (const s of stepsOf('sample', 'series', 'mix')) {
+    const label = s.type === 'series' ? 'Sampling series' : s.type === 'sample' ? 'Take samples' : 'Mix wells'
+    const wells = wellList(s.wells, label)
+    const tw = new Set(wells.map(targetWell))
+    let mg = []
+    if (multis.length && !mountIsSingle(s.pipette)) {
+      mg = groups.filter(g => g.wells.every(w => tw.has(w)))
+      if (mg.length * 8 !== tw.size) mg = []                       // only whole columns, nothing left over
+      const vol = num(s.volume)
+      if (mg.length && vol > 0 && !multiCanDo(vol)) mg = []
+      if (mg.length && s.type !== 'mix' && samplesLw && samplesLw.rows !== 8) {
+        warn(`${label}: the 8-channel needs an 8-row sample labware and ${samplesLw.label} is not one — the single-channel takes these samples.`)
+        mg = []
+      }
+    }
+    selectionPre.set(s.id, { wells, groups: mg })
+    if (mg.length && s.type !== 'mix') {
+      const qn = String(s.quenchName || '').trim()
+      const q = qn ? quenchDemands.get('quench:' + qn.toLowerCase()) : null
+      if (q) q.wantsColumn = true
+    }
+  }
+
+  // Sources: which rack, which well. Manual positions first, then auto-fill;
+  // a liquid the 8-channel will use goes to the reservoir when it has room.
   const stocksLw = labwareByName(cfg.stocksLabware) || labwareByName('opentrons_24_tuberack_nest_1.5ml_snapcap')
   const bulkLw = labwareByName(cfg.bulkLabware) || labwareByName('opentrons_15_tuberack_falcon_15ml_conical')
-  const racks = { stocks: { lw: stocksLw, var: 'stocks', slot: String(cfg.deck.stocks || '4'), used: new Set(), any: false },
-                 bulk:   { lw: bulkLw,   var: 'bulk',   slot: String(cfg.deck.bulk || '5'),   used: new Set(), any: false } }
+  const columnLw = labwareByName(cfg.columnLabware) || labwareByName('nest_12_reservoir_15ml')
+  const racks = { stocks:    { lw: stocksLw, var: 'stocks',    slot: String(cfg.deck.stocks || '4'), used: new Set(), any: false, positions: wellNamesOf(stocksLw), label: 'the stock rack' },
+                 bulk:      { lw: bulkLw,   var: 'bulk',      slot: String(cfg.deck.bulk || '5'),   used: new Set(), any: false, positions: wellNamesOf(bulkLw), label: 'the bulk-liquid rack' },
+                 reservoir: { lw: columnLw, var: 'reservoir', slot: String(cfg.deck.column || '6'), used: new Set(), any: false, positions: columnPositions(columnLw), label: 'the 8-channel reservoir' } }
+  // One reservoir position is a trough, or a whole column of an 8-row labware.
+  const rackCapacity = (r) => r.var === 'reservoir' ? r.lw.maxUl * columnWells(r.lw, r.positions[0]).length : r.lw.maxUl
   for (const d of sources) {
     d.loadUl = loadVolume(d.totalUl, cfg.headroomPct)
-    const m = /^(stocks|bulk):([A-P]\d{1,2})$/i.exec(String(d.position || '').trim())
+    const m = /^(stocks|bulk|reservoir):([A-P]\d{1,2})$/i.exec(String(d.position || '').trim())
     if (m) {
       const rack = racks[m[1].toLowerCase()]
       const well = m[2].toUpperCase()
-      if (!wellNamesOf(rack.lw).includes(well)) warn(`${d.name}: ${rack.lw.label} has no well ${well}.`)
+      if (!rack.positions.includes(well)) warn(`${d.name}: ${rack.lw.label} has no position ${well}.`)
       else if (rack.used.has(well)) warn(`${d.name}: ${rack.var} ${well} is already taken by another stock.`)
       else { rack.used.add(well); d.rack = rack.var; d.well = well }
     }
   }
   for (const d of sources) {
     if (d.rack) continue
-    const order = d.loadUl > stocksLw.maxUl ? ['bulk', 'stocks'] : ['stocks', 'bulk']
+    const tubes = d.loadUl > stocksLw.maxUl ? ['bulk', 'stocks'] : ['stocks', 'bulk']
+    const order = d.wantsColumn ? ['reservoir', ...tubes] : tubes
     for (const r of order) {
       const rack = racks[r]
-      const free = wellNamesOf(rack.lw).find(w => !rack.used.has(w))
+      const free = rack.positions.find(w => !rack.used.has(w))
       if (free) { rack.used.add(free); d.rack = r; d.well = free; break }
     }
     if (!d.rack) warn(`${d.name}: no free position left in the stock or bulk labware — choose racks with more positions.`)
+    else if (d.wantsColumn && d.rack !== 'reservoir') warn(`${d.name}: no free position in the 8-channel reservoir, so the single-channel pipettes it well by well.`)
   }
   for (const d of sources) {
     if (!d.rack) continue
     racks[d.rack].any = true
-    const cap = racks[d.rack].lw.maxUl
-    d.capacityUl = cap
-    d.overCapacity = d.loadUl > cap
-    if (d.overCapacity) warn(`${d.name} needs about ${fmtUl(d.loadUl)} but one ${racks[d.rack].lw.label} position holds ${fmtUl(cap)} — put it in the bulk labware, or choose a larger one.`)
+    d.capacityUl = rackCapacity(racks[d.rack])
+    d.overCapacity = d.loadUl > d.capacityUl
+    // Eight tips can only dip into the reservoir; anywhere else is single-channel work.
+    if (d.rack !== 'reservoir') d.columnGroups = []
+    d.useMulti = d.rack === 'reservoir'
+    if (d.overCapacity) warn(`${d.name} needs about ${fmtUl(d.loadUl)} but one ${racks[d.rack].lw.label} position holds ${fmtUl(d.capacityUl)} — put it in the bulk labware, or choose a larger one.`)
   }
-  for (const r of Object.values(racks)) if (r.any) occupy(r.slot, r.var === 'stocks' ? 'the stock rack' : 'the bulk-liquid rack', { lw: r.lw })
-
-  const samplesLw = usesSamples ? (labwareByName(cfg.samplesLabware) || labwareByName('nest_96_wellplate_100ul_pcr_full_skirt')) : null
+  for (const r of Object.values(racks)) if (r.any) occupy(r.slot, r.label, { lw: r.lw })
   if (samplesLw) occupy(String(cfg.deck.samples || '2'), 'the sample labware', { lw: samplesLw })
 
   // What the Heater-Shaker's neighbours may be — the robot refuses the rest at load time.
@@ -596,74 +687,99 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   }
 
   // ── Steps: dry run to count tips and sample wells ──
-  const wellList = (sel, what) => {
-    const { wells, unknown } = parseWellSelection(sel, plate)
-    if (unknown.length) warn(`${what}: could not read well${unknown.length > 1 ? 's' : ''} ${unknown.join(', ')} — use ids like A1, a run like A1-A6, or "all".`)
-    if (!wells.length) warn(`${what}: no wells selected (and the plate has no filled wells to fall back on).`)
-    return wells
-  }
+  // Tips are counted in pickups: an 8-channel takes a whole column of tips each time.
   const tipCount = (p, n) => { if (p) p.tipsNeeded += n }
 
-  // Target well naming: identity, except the 8-strip which lives in column 1.
-  const targetWell = (wellId) => format === 'pcr8' ? `${ROWS[Number(wellId.slice(1)) - 1]}1` : wellId
-
-  // Build: split each source's transfers by the pipette that handles the volume.
-  const buildPlans = []   // per build step: [{ src, pip, transfers }]
+  // Build: whole matching columns go to the 8-channel; everything left is split
+  // by the single-channel that handles each volume.
+  const buildPlans = []   // per build step: [{ src, pip, multi, transfers: [{ target, volume, wells }] }]
   for (const s of stepsOf('build')) {
     const plan = []
+    const stepMulti = s.multi !== 'off' && !mountIsSingle(s.pipette)
+    const prefSingle = mountIsMulti(s.pipette) ? 'auto' : s.pipette
+    let columns = 0
     for (const d of included) {
       if (!d.rack) continue
+      const covered = new Set()
+      if (stepMulti && d.useMulti && d.columnGroups.length) {
+        const byPip = new Map()
+        for (const g of d.columnGroups) {
+          const vol = d.byTarget.get(g.wells[0])
+          const p = choosePipette(vol, s.pipette, d.name, { multi: true })
+          if (!p) continue
+          if (!byPip.has(p)) byPip.set(p, [])
+          byPip.get(p).push({ target: g.address, volume: vol, wells: g.wells.length })
+          g.wells.forEach(w => covered.add(w))
+        }
+        for (const [p, transfers] of byPip) {
+          plan.push({ src: d, pip: p, multi: true, transfers })
+          columns += transfers.length
+          tipCount(p, s.newTip === 'always' && s.mode !== 'distribute' ? transfers.length : 1)
+        }
+      }
       const byPip = new Map()
       for (const t of d.transfers) {
-        const p = choosePipette(t.volume, s.pipette, d.name)
+        if (covered.has(targetWell(t.well))) continue
+        const p = choosePipette(t.volume, prefSingle, d.name)
         if (!p) continue
         if (!byPip.has(p)) byPip.set(p, [])
-        byPip.get(p).push(t)
+        byPip.get(p).push({ target: targetWell(t.well), volume: t.volume, wells: 1 })
       }
       for (const [p, transfers] of byPip) {
-        plan.push({ src: d, pip: p, transfers })
+        plan.push({ src: d, pip: p, multi: false, transfers })
         tipCount(p, s.newTip === 'always' && s.mode !== 'distribute' ? transfers.length : 1)
       }
     }
     if (!plan.length) warn('Build plate: nothing to pipette — the plate has no included stocks with volumes.')
     // Reservoirs refuse touch_tip outright (a labware quirk the robot enforces).
     if (s.touchTip && plan.some(b => racks[b.src.rack].lw.kind === 'reservoir')) warn('Build plate: touch tip is not allowed on reservoirs — the robot refuses it. Untick touch tip, or keep those liquids in tube racks.')
+    plan.columns = columns
     buildPlans.push(plan)
   }
 
-  // Sampling: destinations are handed out column by column, continuing across steps.
+  // Sampling: destinations are handed out column by column, continuing across
+  // steps. 8-channel sampling starts on a fresh column of the sample labware.
   let sampleCursor = 0
   const samplePlans = new Map()
   for (const s of stepsOf('sample', 'series')) {
     const label = s.type === 'series' ? 'Sampling series' : 'Take samples'
-    const wells = wellList(s.wells, label)
+    const pre = selectionPre.get(s.id)
+    const multi = pre.groups.length > 0
+    const units = multi ? pre.groups.map(g => g.address) : pre.wells.map(targetWell)
     const vol = num(s.volume) || 0
     if (!(vol > 0)) warn(`${label}: sample volume must be a positive number of µL.`)
     const count = s.type === 'series' ? Math.max(1, Math.floor(Number(s.count) || 0)) : 1
-    const p = vol > 0 ? choosePipette(vol, s.pipette, `${label} (${pyNum(vol)} µL)`) : null
-    const start = sampleCursor
-    const need = wells.length * count
-    sampleCursor += need
+    const pref = multi ? s.pipette : (mountIsMulti(s.pipette) ? 'auto' : s.pipette)
+    const p = vol > 0 ? choosePipette(vol, pref, `${label} (${pyNum(vol)} µL)`, { multi }) : null
+    const start = multi ? Math.ceil(sampleCursor / 8) * 8 : sampleCursor
+    const need = units.length * (multi ? 8 : 1) * count
+    sampleCursor = start + need
     const capacity = samplesLw ? samplesLw.rows * samplesLw.cols : 0
-    if (sampleCursor > capacity) warn(`${label}: needs ${need} sample wells (${wells.length} wells × ${count} time point${count > 1 ? 's' : ''}) but only ${Math.max(0, capacity - start)} are left on the ${samplesLw?.label || 'sample labware'}. Reduce the count, sample fewer wells, or choose a larger labware.`)
+    if (sampleCursor > capacity) warn(`${label}: needs ${need} sample wells (${units.length * (multi ? 8 : 1)} wells × ${count} time point${count > 1 ? 's' : ''}) but only ${Math.max(0, capacity - start)} are left on the ${samplesLw?.label || 'sample labware'}. Reduce the count, sample fewer wells, or choose a larger labware.`)
     if (samplesLw && vol > samplesLw.maxUl) warn(`${label}: ${pyNum(vol)} µL exceeds a ${samplesLw.label} well (${samplesLw.maxUl} µL).`)
     const qv = num(s.quenchUl), qn = String(s.quenchName || '').trim()
     const quench = qn && qv > 0 ? quenchDemands.get('quench:' + qn.toLowerCase()) : null
-    const qp = quench ? choosePipette(qv, 'auto', `${label}: quench "${qn}"`) : null
-    tipCount(p, s.newTip === 'once' ? count : wells.length * count)
+    const qMulti = !!(multi && quench?.useMulti)
+    const qp = quench ? choosePipette(qv, 'auto', `${label}: quench "${qn}"`, { multi: qMulti }) : null
+    tipCount(p, s.newTip === 'once' ? count : units.length * count)
     if (quench) tipCount(qp, count)
     if (s.type === 'series') {
       const iv = num(s.intervalMinutes)
       if (!(iv > 0)) warn('Sampling series: the interval must be a positive number of minutes.')
     }
-    samplePlans.set(s.id, { wells, vol, count, pip: p, start, quench, qp, qv })
+    samplePlans.set(s.id, { wells: pre.wells, units, multi, vol, count, pip: p, start, quench, qp, qv, qMulti })
   }
   for (const s of stepsOf('mix')) {
-    const wells = wellList(s.wells, 'Mix wells')
+    const pre = selectionPre.get(s.id)
+    const multi = pre.groups.length > 0
+    const units = multi ? pre.groups.map(g => g.address) : pre.wells.map(targetWell)
     const vol = num(s.volume)
-    const p = choosePipette(vol > 0 ? vol : 10, s.pipette, 'Mix wells')
-    tipCount(p, s.newTip === 'once' ? 1 : wells.length)
-    samplePlans.set(s.id, { wells, vol, pip: p })
+    const pref = multi ? s.pipette : (mountIsMulti(s.pipette) ? 'auto' : s.pipette)
+    const p = choosePipette(vol > 0 ? vol : (Number(plate?.targetVolume) || 20) / 2, pref, 'Mix wells', { multi, noSplit: true })
+    // mix() aspirates the whole volume in one stroke, so it is capped at what the tip holds.
+    if (p && vol > p.def.max) warn(`Mix wells: ${pyNum(vol)} µL is more than the ${p.def.label} can hold — mixing with ${p.def.max} µL instead.`)
+    tipCount(p, s.newTip === 'once' ? 1 : units.length)
+    samplePlans.set(s.id, { wells: pre.wells, units, multi, vol: p ? Math.min(vol, p.def.max) : vol, pip: p })
   }
   flushTallies()
 
@@ -677,7 +793,8 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     return [...free.filter(s => !hsNeighbours.includes(s)), ...free.filter(s => hsNeighbours.includes(s))]
   }
   for (const p of pipettes) {
-    const racksNeeded = Math.max(1, Math.ceil(p.tipsNeeded / 96))
+    p.perRack = p.def.channels === 8 ? 12 : 96     // an 8-channel empties a rack in 12 pickups
+    const racksNeeded = Math.max(1, Math.ceil(p.tipsNeeded / p.perRack))
     p.tipSlots = []
     for (let i = 0; i < racksNeeded; i++) {
       const slot = freeSlots(p.tipLw)[0]
@@ -685,9 +802,10 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
       occupancy[slot] = { what: `${p.tipLw?.label || p.tipName} (${p.var})`, lw: p.tipLw }
       p.tipSlots.push(slot)
     }
-    p.tipCapacity = p.tipSlots.length * 96
+    p.tipCapacity = p.tipSlots.length * p.perRack
     if (p.tipSlots.length < racksNeeded) {
-      warn(`${p.def.label} needs ${p.tipsNeeded} tips (${racksNeeded} racks) but only ${p.tipSlots.length} rack${p.tipSlots.length === 1 ? '' : 's'} fit on the deck — the run will pause ${Math.ceil(p.tipsNeeded / Math.max(96, p.tipCapacity)) - 1}× for you to refill them. "One tip per stock" needs far fewer.`)
+      const unit = p.def.channels === 8 ? 'tip columns' : 'tips'
+      warn(`${p.def.label} needs ${p.tipsNeeded} ${unit} (${racksNeeded} racks) but only ${p.tipSlots.length} rack${p.tipSlots.length === 1 ? '' : 's'} fit on the deck — the run will pause ${Math.ceil(p.tipsNeeded / Math.max(p.perRack, p.tipCapacity)) - 1}× for you to refill them. "One tip per stock" needs far fewer.`)
     }
   }
   // When any pipette will run dry, the protocol keeps its own count and pauses
@@ -740,7 +858,9 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     for (const d of sources) {
       if (!d.rack) continue
       const desc = `${d.code ? '[' + d.code + '] ' : ''}${d.name}${d.stock != null ? ` (${pyNum(d.stock)} ${d.unit})` : ''}`
-      H.push(`#   ${d.rack.padEnd(6)} ${d.well.padEnd(4)} ${oneLine(desc).padEnd(44)} ≥ ${fmtUl(d.loadUl).padStart(9)}   (${fmtUl(d.totalUl)} into ${d.isQuench ? 'sample wells' : `${d.transfers.length} well${d.transfers.length === 1 ? '' : 's'}`})`)
+      const cw = d.rack === 'reservoir' ? columnWells(columnLw, d.well) : [d.well]
+      const spread = cw.length > 1 ? ` — split over ${cw[0]}–${cw[cw.length - 1]}, ≥ ${fmtUl(d.loadUl / cw.length)} each` : ''
+      H.push(`#   ${d.rack.padEnd(9)} ${d.well.padEnd(4)} ${oneLine(desc).padEnd(44)} ≥ ${fmtUl(d.loadUl).padStart(9)}   (${fmtUl(d.totalUl)} into ${d.isQuench ? 'sample wells' : `${d.transfers.length} well${d.transfers.length === 1 ? '' : 's'}`})${spread}`)
     }
   }
   if (warnings.length) {
@@ -786,9 +906,10 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
                      heater_shaker: `hs.load_labware(${py(targetLw.name)}, label=${py(targetLabel)})` }[targetOn]
     emit(`plate = ${loader}`)
   }
-  for (const r of ['stocks', 'bulk']) {
+  for (const r of ['stocks', 'bulk', 'reservoir']) {
     if (!racks[r].any) continue
-    emit(`${racks[r].var} = protocol.load_labware(${py(racks[r].lw.name)}, ${py(racks[r].slot)}, label=${py(uniqueLabel(r === 'stocks' ? 'Stocks' : 'Bulk liquids'))})`)
+    const label = { stocks: 'Stocks', bulk: 'Bulk liquids', reservoir: '8-channel reservoir' }[r]
+    emit(`${racks[r].var} = protocol.load_labware(${py(racks[r].lw.name)}, ${py(racks[r].slot)}, label=${py(uniqueLabel(label))})`)
   }
   if (samplesLw) emit(`samples = protocol.load_labware(${py(samplesLw.name)}, ${py(String(cfg.deck.samples || '2'))}, label=${py(uniqueLabel('Samples'))})`)
   for (const p of pipettes) {
@@ -815,10 +936,12 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     liquidSources.forEach((d, i) => {
       const desc = [d.code ? `[${d.code}]` : '', d.stock != null ? `${pyNum(d.stock)} ${d.unit}` : '', d.isFill ? 'fill-up' : '', d.isQuench ? 'quench' : ''].filter(Boolean).join(' ')
       emit(`liq_${i + 1} = protocol.define_liquid(name=${py(oneLine(d.name))}, description=${py(desc)}, display_color=${py(colors[d.key] || '#0072B2')})`)
-      const vol = pyNum(Math.min(d.loadUl, d.capacityUl || d.loadUl))
+      // A reservoir column of an 8-row labware is eight wells sharing the load.
+      const cw = d.rack === 'reservoir' ? columnWells(columnLw, d.well) : [d.well]
+      const vol = pyNum(Math.min(d.loadUl, d.capacityUl || d.loadUl) / cw.length)
       // Well.load_liquid was deprecated in 2.22 in favour of the labware-level call.
-      if (apiAtLeast(cfg.apiLevel, '2.22')) emit(`${d.rack}.load_liquid(wells=[${py(d.well)}], volume=${vol}, liquid=liq_${i + 1})`)
-      else emit(`${d.rack}[${py(d.well)}].load_liquid(liquid=liq_${i + 1}, volume=${vol})`)
+      if (apiAtLeast(cfg.apiLevel, '2.22')) emit(`${d.rack}.load_liquid(wells=[${cw.map(py).join(', ')}], volume=${vol}, liquid=liq_${i + 1})`)
+      else for (const w of cw) emit(`${d.rack}[${py(w)}].load_liquid(liquid=liq_${i + 1}, volume=${vol})`)
     })
     emit()
   }
@@ -892,11 +1015,14 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     switch (s.type) {
       case 'build': {
         const plan = buildPlans.shift() || []
-        emit(`# Step ${n}: build the plate — ${plan.reduce((a, b) => a + b.transfers.length, 0)} transfers from ${new Set(plan.map(b => b.src.key)).size} liquids`)
+        const fills = plan.reduce((a, b) => a + b.transfers.reduce((x, t) => x + t.wells, 0), 0)
+        emit(`# Step ${n}: build the plate — ${fills} well fills from ${new Set(plan.map(b => b.src.key)).size} liquids${plan.columns ? `, ${plan.columns} column${plan.columns === 1 ? '' : 's'} by 8-channel` : ''}`)
         const restore = beforePipetting()
         for (const b of plan) {
           const desc = `${b.src.code ? '[' + b.src.code + '] ' : ''}${b.src.name}${b.src.stock != null ? ` ${pyNum(b.src.stock)} ${b.src.unit}` : ''}`
-          emit(`# ${oneLine(desc)} — ${b.transfers.length} well${b.transfers.length === 1 ? '' : 's'}, ${fmtUl(b.transfers.reduce((a, t) => a + t.volume, 0))} (${b.pip.var})`)
+          const total = b.transfers.reduce((a, t) => a + t.volume * t.wells, 0)
+          const what = b.multi ? `${b.transfers.length} column${b.transfers.length === 1 ? '' : 's'} × 8 wells` : `${b.transfers.length} well${b.transfers.length === 1 ? '' : 's'}`
+          emit(`# ${oneLine(desc)} — ${what}, ${fmtUl(total)} (${b.pip.var}${b.multi ? ', 8-channel: a well name means its whole column' : ''})`)
           const kw = transferKwargs(s).map(k => k.replace('MIX_VOLUME', pyNum(Math.min(b.pip.def.max, Math.max(b.pip.def.min, b.transfers[0].volume)))))
           const oneTip = s.mode === 'distribute' || s.newTip === 'once'
           for (const chunk of chunked(b.transfers, oneTip ? b.transfers.length : Math.max(1, b.pip.tipCapacity))) {
@@ -906,11 +1032,11 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
               const kwd = kw.filter(k => !k.startsWith('blowout_location') && !k.startsWith('mix_after') && !k.startsWith('new_tip'))
               kwd.unshift('new_tip="once"'); kwd.push(`disposal_volume=${pyNum(b.pip.def.min)}`)
               emit(`build(${b.pip.var}, ${b.src.rack}[${py(b.src.well)}], [`)
-              for (const line of pyList(chunk.map(t => `(${py(targetWell(t.well))}, ${pyNum(t.volume)})`), 8)) emit(line)
+              for (const line of pyList(chunk.map(t => `(${py(t.target)}, ${pyNum(t.volume)})`), 8)) emit(line)
               emit(`], mode="distribute", ${kwd.join(', ')})`)
             } else {
               emit(`build(${b.pip.var}, ${b.src.rack}[${py(b.src.well)}], [`)
-              for (const line of pyList(chunk.map(t => `(${py(targetWell(t.well))}, ${pyNum(t.volume)})`), 8)) emit(line)
+              for (const line of pyList(chunk.map(t => `(${py(t.target)}, ${pyNum(t.volume)})`), 8)) emit(line)
               emit(`], ${kw.join(', ')})`)
             }
           }
@@ -1011,12 +1137,13 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
       }
       case 'mix': {
         const pl = samplePlans.get(s.id)
-        if (!pl || !pl.pip || !pl.wells.length) break
+        if (!pl || !pl.pip || !pl.units.length) break
         const vol = pl.vol > 0 ? pl.vol : Math.min(pl.pip.def.max, Math.max(pl.pip.def.min, (Number(plate?.targetVolume) || 20) / 2))
-        emit(`# Step ${n}: mix ${pl.wells.length} well${pl.wells.length === 1 ? '' : 's'}, ${Math.max(1, Math.floor(Number(s.reps) || 1))} × ${pyNum(vol)} µL (${pl.pip.var})`)
+        const what = pl.multi ? `${pl.units.length} column${pl.units.length === 1 ? '' : 's'} with the 8-channel` : `${pl.units.length} well${pl.units.length === 1 ? '' : 's'}`
+        emit(`# Step ${n}: mix ${what}, ${Math.max(1, Math.floor(Number(s.reps) || 1))} × ${pyNum(vol)} µL (${pl.pip.var})`)
         const restore = beforePipetting()
         if (s.newTip === 'once') tipCall(pl.pip, 1)
-        emit(`for well in [${pl.wells.map(w => py(targetWell(w))).join(', ')}]:`)
+        emit(`for well in [${pl.units.map(py).join(', ')}]:`)
         if (s.newTip === 'once') { emit(`    if not ${pl.pip.var}.has_tip:`); emit(`        ${pl.pip.var}.pick_up_tip()`) }
         else { tipCall(pl.pip, 1, '    '); emit(`    ${pl.pip.var}.pick_up_tip()`) }
         emit(`    ${pl.pip.var}.mix(${Math.max(1, Math.floor(Number(s.reps) || 1))}, ${pyNum(vol)}, plate[well])`)
@@ -1030,47 +1157,57 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
       case 'sample':
       case 'series': {
         const pl = samplePlans.get(s.id)
-        if (!pl || !pl.pip || !pl.wells.length || !(pl.vol > 0)) break
+        if (!pl || !pl.pip || !pl.units.length || !(pl.vol > 0)) break
         const isSeries = s.type === 'series'
-        const nW = pl.wells.length
+        const nU = pl.units.length
         const kw = [`new_tip=${py(s.newTip === 'once' ? 'once' : 'always')}`, 'blow_out=True', 'blowout_location="destination well"']
         const mb = Math.floor(Number(s.mixBeforeReps) || 0)
         if (mb > 0) kw.push(`mix_before=(${mb}, ${isSet(s.mixBeforeUl) ? pyNum(s.mixBeforeUl) : pyNum(Math.min(pl.pip.def.max, Math.max(pl.pip.def.min, pl.vol)))})`)
         const srcList = `[plate[w] for w in ${isSeries ? 'series_wells' : 'sample_wells'}]`
+        const fromWhat = pl.multi ? `${nU} column${nU === 1 ? '' : 's'} (${nU * 8} wells) with the 8-channel` : `${nU} well${nU === 1 ? '' : 's'}`
+        // With the 8-channel, destinations are whole columns of the sample labware.
+        const col0 = pl.start / 8
+        const destsExpr = (count) => pl.multi
+          ? `[col[0] for col in samples.columns()[${col0}:${col0 + nU * count}]]`
+          : `samples.wells()[${pl.start}:${pl.start + nU * count}]`
+        // A single-channel quench into 8-channel destinations must visit every well of each column.
+        const quenchDests = pl.multi && !pl.qMulti ? '[w for a in dests for w in samples.columns_by_name()[a.well_name[1:]]]' : 'dests'
         if (isSeries) {
           const iv = num(s.intervalMinutes) || 0
           const count = pl.count
-          emit(`# Step ${n}: sampling series — ${count} time points every ${pyNum(iv)} min, ${pyNum(pl.vol)} µL from ${nW} well${nW === 1 ? '' : 's'} (${pl.pip.var})`)
-          emit(`#   time point i fills samples wells [${pl.start} + i*${nW} : ${pl.start} + (i+1)*${nW}] in column order (A1, B1, … H1, A2, …)`)
-          emit(`series_wells = [${pl.wells.map(w => py(targetWell(w))).join(', ')}]`)
-          emit(`series_dests = samples.wells()[${pl.start}:${pl.start + nW * count}]`)
+          emit(`# Step ${n}: sampling series — ${count} time points every ${pyNum(iv)} min, ${pyNum(pl.vol)} µL from ${fromWhat} (${pl.pip.var})`)
+          if (pl.multi) emit(`#   time point i fills samples columns ${col0 + 1} + i*${nU} … (a well name below means its whole column)`)
+          else emit(`#   time point i fills samples wells [${pl.start} + i*${nU} : ${pl.start} + (i+1)*${nU}] in column order (A1, B1, … H1, A2, …)`)
+          emit(`series_wells = [${pl.units.map(py).join(', ')}]`)
+          emit(`series_dests = ${destsExpr(count)}`)
           emit(`series_t0 = time.monotonic()`)
           emit(`for i in range(${count}):`)
           const firstAtZero = s.firstAtZero !== false
           emit(`    wait_until(series_t0 + ${firstAtZero ? 'i' : '(i + 1)'} * ${pyNum(iv)} * 60)`)
           emit(`    protocol.comment(f"Time point {i + 1}/${count} at t = {${firstAtZero ? 'i' : '(i + 1)'} * ${pyNum(iv)}} min")`)
-          emit(`    dests = series_dests[i * ${nW}:(i + 1) * ${nW}]`)
+          emit(`    dests = series_dests[i * ${nU}:(i + 1) * ${nU}]`)
           // Everything inside the loop is one level deeper: emit, then indent.
           const loopStart = L.length
           const restore = beforePipetting()
           if (pl.quench && pl.qp) {
             tipCall(pl.qp, 1)
-            emit(`${pl.qp.var}.transfer(${pyNum(pl.qv)}, ${pl.quench.rack}[${py(pl.quench.well)}], dests, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first`)
+            emit(`${pl.qp.var}.transfer(${pyNum(pl.qv)}, ${pl.quench.rack}[${py(pl.quench.well)}], ${quenchDests}, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first`)
           }
-          tipCall(pl.pip, s.newTip === 'once' ? 1 : nW)
+          tipCall(pl.pip, s.newTip === 'once' ? 1 : nU)
           emit(`${pl.pip.var}.transfer(${pyNum(pl.vol)}, ${srcList}, dests, ${kw.join(', ')})`)
           restore()
           for (let k = loopStart; k < L.length; k++) L[k] = '    ' + L[k]
         } else {
-          emit(`# Step ${n}: take ${pyNum(pl.vol)} µL from ${nW} well${nW === 1 ? '' : 's'} into samples wells ${pl.start}–${pl.start + nW - 1} (${pl.pip.var})`)
-          emit(`sample_wells = [${pl.wells.map(w => py(targetWell(w))).join(', ')}]`)
-          emit(`dests = samples.wells()[${pl.start}:${pl.start + nW}]`)
+          const into = pl.multi ? `samples columns ${col0 + 1}–${col0 + nU}` : `samples wells ${pl.start}–${pl.start + nU - 1}`
+          emit(`# Step ${n}: take ${pyNum(pl.vol)} µL from ${fromWhat} into ${into} (${pl.pip.var})`)
+          emit(`sample_wells = [${pl.units.map(py).join(', ')}]`)
+          emit(`dests = ${destsExpr(1)}`)
           const restore = beforePipetting()
           if (pl.quench && pl.qp) {
             tipCall(pl.qp, 1)
-            emit(`${pl.qp.var}.transfer(${pyNum(pl.qv)}, ${pl.quench.rack}[${py(pl.quench.well)}], dests, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first`)
+            emit(`${pl.qp.var}.transfer(${pyNum(pl.qv)}, ${pl.quench.rack}[${py(pl.quench.well)}], ${quenchDests}, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first`)
           }
-          tipCall(pl.pip, s.newTip === 'once' ? 1 : nW)
+          tipCall(pl.pip, s.newTip === 'once' ? 1 : nU)
           emit(`${pl.pip.var}.transfer(${pyNum(pl.vol)}, ${srcList}, dests, ${kw.join(', ')})`)
           restore()
         }
@@ -1101,9 +1238,11 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     deck: deckRows.map(([slot, what]) => ({ slot, what })),
     sources: sources.map(d => ({ key: d.key, name: d.name, code: d.code, stock: d.stock, unit: d.unit, isFill: d.isFill, isQuench: !!d.isQuench,
                                  linked: d.linked, unlinked: !!d.unlinked, included: d.included !== false, rack: d.rack || '', well: d.well || '',
-                                 demandUl: round2(d.totalUl), loadUl: d.loadUl, wells: d.transfers.length, overCapacity: !!d.overCapacity })),
+                                 demandUl: round2(d.totalUl), loadUl: d.loadUl, wells: d.transfers.length, overCapacity: !!d.overCapacity,
+                                 columns: d.columnGroups?.length || 0 })),
     excluded: demands.filter(d => !d.included).map(d => ({ key: d.key, name: d.name })),
-    pipettes: pipettes.map(p => ({ mount: p.mount, name: p.def.name, var: p.var, tipsNeeded: p.tipsNeeded, tipSlots: p.tipSlots, tipRack: p.tipName })),
+    pipettes: pipettes.map(p => ({ mount: p.mount, name: p.def.name, var: p.var, channels: p.def.channels, tipsNeeded: p.tipsNeeded, perRack: p.perRack, tipSlots: p.tipSlots, tipRack: p.tipName })),
+    columnLabware: columnLw?.name || '',
     sampleWellsUsed: sampleCursor,
     sampleCapacity: samplesLw ? samplesLw.rows * samplesLw.cols : 0,
     modules: { thermocycler: usesTC, temperature: usesTemp, heaterShaker: usesHS, magnetic: usesMag },

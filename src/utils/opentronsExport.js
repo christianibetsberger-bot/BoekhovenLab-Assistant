@@ -565,17 +565,17 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     occupancy[s] = { what, ...meta }
   }
 
-  if (usesTC) for (const s of TC_SLOTS) occupy(s, 'the Thermocycler', { module: true })
-  if (usesTemp) occupy(cfg.deck.temperature, 'the Temperature Module', { module: true })
+  if (usesTC) for (const s of TC_SLOTS) occupy(s, 'the Thermocycler', { module: true, moduleType: 'thermocycler', anchor: s === '7', onModule: targetOn === 'thermocycler' ? targetLw : null })
+  if (usesTemp) occupy(cfg.deck.temperature, 'the Temperature Module', { module: true, moduleType: 'temperature', onModule: targetOn === 'temperature' ? targetLw : null })
   const hsSlot = usesHS ? String(cfg.deck.heaterShaker) : null
   if (usesHS) {
-    occupy(hsSlot, 'the Heater-Shaker', { module: true })
+    occupy(hsSlot, 'the Heater-Shaker', { module: true, moduleType: 'heater_shaker', onModule: targetOn === 'heater_shaker' ? targetLw : null })
     if (hsSlot === '9') warn('The Heater-Shaker cannot go in slot 9 — the fixed trash blocks its locking screw.')
     else if (!OT2_MODULES.heater_shaker.slots.includes(hsSlot)) warn(`Opentrons recommends slots 1, 3, 4, 6, 7 or 10 for the Heater-Shaker on an OT-2 (never 9); slot ${hsSlot} loads, but check the pipette can reach everything around it.`)
   }
-  if (usesMag) occupy(cfg.deck.magnetic, 'the Magnetic Module', { module: true })
+  if (usesMag) occupy(cfg.deck.magnetic, 'the Magnetic Module', { module: true, moduleType: 'magnetic' })
   const targetSlot = targetOn === 'deck' ? String(cfg.target.slot || '1') : null
-  if (targetSlot) occupy(targetSlot, `the plate "${plate?.name || 'plate'}"`, { lw: targetLw })
+  if (targetSlot) occupy(targetSlot, `the plate "${plate?.name || 'plate'}"`, { lw: targetLw, role: 'plate' })
 
   // ── What the 8-channel can take over ──
   // A column is one stroke when all eight of its wells get the same liquid at
@@ -671,8 +671,8 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     d.useMulti = d.rack === 'reservoir'
     if (d.overCapacity) warn(`${d.name} needs about ${fmtUl(d.loadUl)} but one ${racks[d.rack].lw.label} position holds ${fmtUl(d.capacityUl)} — put it in the bulk labware, or choose a larger one.`)
   }
-  for (const r of Object.values(racks)) if (r.any) occupy(r.slot, r.label, { lw: r.lw })
-  if (samplesLw) occupy(String(cfg.deck.samples || '2'), 'the sample labware', { lw: samplesLw })
+  for (const r of Object.values(racks)) if (r.any) occupy(r.slot, r.label, { lw: r.lw, role: r.var })
+  if (samplesLw) occupy(String(cfg.deck.samples || '2'), 'the sample labware', { lw: samplesLw, role: 'samples' })
 
   // What the Heater-Shaker's neighbours may be — the robot refuses the rest at load time.
   if (usesHS) {
@@ -799,7 +799,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     for (let i = 0; i < racksNeeded; i++) {
       const slot = freeSlots(p.tipLw)[0]
       if (!slot) break
-      occupancy[slot] = { what: `${p.tipLw?.label || p.tipName} (${p.var})`, lw: p.tipLw }
+      occupancy[slot] = { what: `${p.tipLw?.label || p.tipName} (${p.var})`, lw: p.tipLw, role: 'tips', pipette: p.var }
       p.tipSlots.push(slot)
     }
     p.tipCapacity = p.tipSlots.length * p.perRack
@@ -849,7 +849,8 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   H.push(`# Generated ${stamp} by the Boekhoven Lab Assistant from the well plate "${oneLine(plate?.name || '')}" (${format}-well).`)
   H.push('#')
   H.push('# DECK')
-  const deckRows = Object.entries(occupancy).sort((a, b) => Number(a[0]) - Number(b[0])).map(([slot, o]) => [slot, o.what])
+  const deckEntries = Object.entries(occupancy).sort((a, b) => Number(a[0]) - Number(b[0]))
+  const deckRows = deckEntries.map(([slot, o]) => [slot, o.what])
   for (const [slot, what] of deckRows) H.push(`#   slot ${slot.padStart(2)}  ${what}`)
   H.push('#   slot 12  fixed trash')
   if (sources.length) {
@@ -1235,7 +1236,12 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   const code = [...H, ...L].join('\n') + '\n'
 
   const summary = {
-    deck: deckRows.map(([slot, what]) => ({ slot, what })),
+    // One row per occupied slot, with enough about what sits there to draw it.
+    deck: deckEntries.map(([slot, o]) => ({
+      slot, what: o.what, role: o.role || (o.module ? 'module' : ''), moduleType: o.moduleType || '', anchor: o.anchor !== false,
+      kind: o.lw?.kind || '', name: o.lw?.name || '', label: o.lw?.label || '', rows: o.lw?.rows || 0, cols: o.lw?.cols || 0, pipette: o.pipette || '',
+      onModule: o.onModule ? { kind: o.onModule.kind, name: o.onModule.name, label: o.onModule.label, rows: o.onModule.rows, cols: o.onModule.cols } : null,
+    })),
     sources: sources.map(d => ({ key: d.key, name: d.name, code: d.code, stock: d.stock, unit: d.unit, isFill: d.isFill, isQuench: !!d.isQuench,
                                  linked: d.linked, unlinked: !!d.unlinked, included: d.included !== false, rack: d.rack || '', well: d.well || '',
                                  demandUl: round2(d.totalUl), loadUl: d.loadUl, wells: d.transfers.length, overCapacity: !!d.overCapacity,

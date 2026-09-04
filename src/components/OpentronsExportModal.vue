@@ -13,6 +13,7 @@
 // are about where things sit and how much of what is needed.
 import { computed, reactive, ref, watch, onBeforeUnmount } from 'vue'
 import { useLabStore } from '../stores/labStore'
+import OtDeckMap from './OtDeckMap.vue'
 import {
   generateOpentronsProtocol, normalizeOt2Config, newOt2Step, plateDemands, wellNamesOf,
   labwareByName, targetLabwareOptions, defaultTargetLabware, sourceLabwareOptions, sampleLabwareOptions,
@@ -20,7 +21,7 @@ import {
   OT2_PIPETTES, OT2_API_LEVELS, OT2_SLOTS, OT2_MODULES, OT2_STEP_TYPES,
 } from '../utils/opentronsExport'
 
-const props = defineProps({ plate: { type: Object, required: true } })
+const props = defineProps({ plate: { type: Object, required: true }, initialTab: { type: String, default: 'steps' } })
 const emit = defineEmits(['close'])
 const store = useLabStore()
 
@@ -48,7 +49,7 @@ const TABS = [
   { id: 'steps', label: 'Steps', icon: 'fa-list-ol' },
   { id: 'code', label: 'Python', icon: 'fa-code' },
 ]
-const tab = ref('steps')
+const tab = ref(TABS.some(t => t.id === props.initialTab) ? props.initialTab : 'steps')
 
 // ── Catalogue views ──
 const pipetteChoices = [{ name: '', label: '— none —' }, ...OT2_PIPETTES]
@@ -103,39 +104,7 @@ const positionOptions = computed(() => {
 const setLiquid = (key, patch) => { cfg.compounds[key] = { ...(cfg.compounds[key] || {}), ...patch } }
 const rackShort = { stocks: 'stocks', bulk: 'bulk', reservoir: 'reservoir' }
 
-// ── Deck map ──
-const DECK_ROWS = [['10', '11', '12'], ['7', '8', '9'], ['4', '5', '6'], ['1', '2', '3']]
-const deckWhat = computed(() => {
-  const out = {}
-  for (const d of summary.value?.deck || []) out[d.slot] = d.what
-  return out
-})
-const deckLabel = (slot) => {
-  if (slot === '12') return 'trash'
-  const w = deckWhat.value[slot]
-  if (!w) return ''
-  if (/^the plate/.test(w)) return 'plate'
-  if (/Thermocycler/.test(w)) return 'thermo-cycler'
-  if (/Temperature/.test(w)) return 'temp module'
-  if (/Heater-Shaker/.test(w)) return 'heater-shaker'
-  if (/Magnetic/.test(w)) return 'magnet'
-  if (/stock rack/.test(w)) return 'stocks'
-  if (/bulk/.test(w)) return 'bulk'
-  if (/reservoir/.test(w)) return 'reservoir'
-  if (/sample/.test(w)) return 'samples'
-  const m = /\((\w+)\)$/.exec(w)
-  return m ? `tips ${m[1]}` : w
-}
-const deckKind = (slot) => {
-  const l = deckLabel(slot)
-  if (!l) return ''
-  if (l === 'plate') return 'plate'
-  if (l === 'trash') return 'trash'
-  if (l === 'samples') return 'samples'
-  if (/tips/.test(l)) return 'tips'
-  if (/stocks|bulk|reservoir/.test(l)) return 'source'
-  return 'module'
-}
+// ── Deck map ── drawn by OtDeckMap from summary.deck
 
 // ── Steps ──
 const collapsed = reactive({})
@@ -577,15 +546,8 @@ const download = () => {
 
         <!-- ── Rail: the deck and the run at a glance ── -->
         <aside class="ot-rail">
-          <div class="ot-rail-title">Deck</div>
-          <div class="ot-deck">
-            <div v-for="row in DECK_ROWS" :key="row[0]" class="ot-deck-row">
-              <div v-for="s in row" :key="s" class="ot-slot" :class="deckKind(s)" :title="deckWhat[s] || (s === '12' ? 'Fixed trash' : 'empty')">
-                <span class="ot-slot-n">{{ s }}</span>
-                <span class="ot-slot-l">{{ deckLabel(s) }}</span>
-              </div>
-            </div>
-          </div>
+          <div class="ot-rail-title">Deck <span class="ot-rail-sub">front of the robot is at the bottom</span></div>
+          <OtDeckMap :deck="summary?.deck || []" />
           <div class="ot-legend">
             <span><i class="plate"></i>plate</span><span><i class="source"></i>liquids</span><span><i class="samples"></i>samples</span><span><i class="module"></i>modules</span><span><i class="tips"></i>tips</span>
           </div>
@@ -647,9 +609,10 @@ const download = () => {
 .ot-head > .ot-btn { justify-self: end; }
 
 /* Body: main + rail */
-.ot-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 300px; }
+.ot-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 340px; }
 .ot-main { overflow-y: auto; padding: 14px 16px; min-width: 0; }
 .ot-rail { overflow-y: auto; padding: 14px; border-left: 1px solid var(--ln2); background: var(--fl); display: flex; flex-direction: column; gap: 10px; }
+.ot-rail-sub { font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--tx3); margin-left: 4px; }
 .ot-rail-title { font-size: .66rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--tx3); }
 .ot-stack { display: flex; flex-direction: column; gap: 12px; }
 .ot-card { border: 1px solid var(--ln2); border-radius: var(--rc, 10px); background: var(--cd); padding: 12px 14px; }
@@ -666,9 +629,13 @@ const download = () => {
 .ot-src { display: grid; grid-template-columns: 1fr 90px; gap: 10px; }
 .ot-hint { font-size: .7rem; color: var(--tx2); margin: 4px 0 8px; line-height: 1.45; }
 .ot-hint code, .ot-ok code { font-size: .68rem; background: var(--fl); padding: 0 4px; border-radius: 4px; color: var(--tx); }
-.ot-checks { display: flex; gap: 12px; align-items: flex-end; padding-bottom: 7px; font-weight: 500; }
-.ot-checks span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.ot-checks input { width: 14px; height: 14px; margin: 0; }
+/* Checkbox groups sit on the input row of the grid they share with text
+   fields: same height as an input, bottom-aligned, so the boxes line up with
+   the fields beside them instead of with their captions. (Specificity matches
+   the generic card label rule above, which would otherwise win.) */
+.ot-card label.ot-checks { display: flex; align-items: center; gap: 16px; align-self: end; height: 34px; margin-bottom: 8px; font-weight: 500; color: var(--tx); }
+.ot-card label.ot-checks span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ot-card label.ot-checks input { width: 14px; height: 14px; margin: 0; }
 .ot-chip { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 9px; background: var(--fl); color: var(--tx2); font-size: .64rem; font-weight: 700; white-space: nowrap; }
 .ot-chip.acc { background: var(--acs); color: var(--acc); }
 
@@ -697,19 +664,6 @@ const download = () => {
 .ot-mini:disabled { opacity: .3; cursor: default; }
 .ot-mini.danger:hover:not(:disabled) { background: var(--danger-bg); color: var(--danger-color); }
 
-/* Deck map — 10 11 12 at the back, 1 2 3 at the front, as the robot sees it */
-.ot-deck { display: flex; flex-direction: column; gap: 5px; }
-.ot-deck-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
-.ot-slot { height: 50px; border-radius: 9px; border: 1px dashed var(--ln2); display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: .64rem; color: var(--tx3); line-height: 1.15; text-align: center; padding: 3px; background: var(--cd); }
-.ot-slot-n { font-weight: 700; font-size: .7rem; }
-.ot-slot-l { color: var(--tx2); }
-.ot-slot.plate { border-style: solid; background: var(--acs); border-color: var(--acc); color: var(--acc); }
-.ot-slot.plate .ot-slot-l { color: var(--acc); font-weight: 700; }
-.ot-slot.module { border-style: solid; background: rgba(230,159,0,.16); border-color: #E69F00; }
-.ot-slot.source { border-style: solid; background: rgba(0,158,115,.14); border-color: #009E73; }
-.ot-slot.samples { border-style: solid; background: rgba(204,121,167,.16); border-color: #CC79A7; }
-.ot-slot.tips { border-style: solid; background: var(--fl); }
-.ot-slot.trash { background: transparent; }
 .ot-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: .64rem; color: var(--tx2); }
 .ot-legend span { display: inline-flex; align-items: center; gap: 4px; }
 .ot-legend i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }

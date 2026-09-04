@@ -168,6 +168,9 @@ const download = () => {
 </script>
 
 <template>
+  <!-- Teleported to <body>: inside a blurred card, position: fixed would be
+       measured from the card, and the shell's dock and toolbar sit above 2000. -->
+  <Teleport to="body">
   <div class="ot-overlay" @click.self="emit('close')">
     <div class="ot-modal">
 
@@ -583,10 +586,11 @@ const download = () => {
       </footer>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>
-.ot-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 14px; }
+.ot-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 12000; padding: 14px; font-size: 14px; line-height: 1.4; }
 .ot-modal {
   width: min(1360px, 100%); height: min(94vh, 1020px);
   background: var(--modal, var(--surface)); color: var(--tx, inherit);
@@ -597,6 +601,7 @@ const download = () => {
 /* Header */
 .ot-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--ln2); }
 .ot-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ot-title > div { min-width: 0; }   /* lets a long plate name clip instead of running under the tabs */
 .ot-title-ic { width: 34px; height: 34px; border-radius: 10px; background: var(--acc); color: #fff; display: flex; align-items: center; justify-content: center; flex: none; box-shadow: 0 3px 10px var(--acsh); }
 .ot-title-name { font-weight: 700; font-size: .95rem; color: var(--tx); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ot-title-sub { font-size: .7rem; color: var(--tx2); }

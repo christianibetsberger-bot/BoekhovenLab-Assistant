@@ -687,8 +687,12 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   }
 
   // ── Steps: dry run to count tips and sample wells ──
-  // Tips are counted in pickups: an 8-channel takes a whole column of tips each time.
+  // Tips are counted in pickups: an 8-channel takes a whole column of tips each
+  // time, and a volume above the pipette's maximum is several strokes — with a
+  // new tip per well, transfer() takes a fresh tip for every stroke.
   const tipCount = (p, n) => { if (p) p.tipsNeeded += n }
+  const strokes = (p, vol) => Math.max(1, Math.ceil((Number(vol) || 0) / p.def.max - 1e-9))
+  const tipsFor = (p, transfers, always) => always ? transfers.reduce((a, t) => a + strokes(p, t.volume), 0) : 1
 
   // Build: whole matching columns go to the 8-channel; everything left is split
   // by the single-channel that handles each volume.
@@ -714,7 +718,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         for (const [p, transfers] of byPip) {
           plan.push({ src: d, pip: p, multi: true, transfers })
           columns += transfers.length
-          tipCount(p, s.newTip === 'always' && s.mode !== 'distribute' ? transfers.length : 1)
+          tipCount(p, tipsFor(p, transfers, s.newTip === 'always' && s.mode !== 'distribute'))
         }
       }
       const byPip = new Map()
@@ -727,7 +731,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
       }
       for (const [p, transfers] of byPip) {
         plan.push({ src: d, pip: p, multi: false, transfers })
-        tipCount(p, s.newTip === 'always' && s.mode !== 'distribute' ? transfers.length : 1)
+        tipCount(p, tipsFor(p, transfers, s.newTip === 'always' && s.mode !== 'distribute'))
       }
     }
     if (!plan.length) warn('Build plate: nothing to pipette — the plate has no included stocks with volumes.')
@@ -761,13 +765,14 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     const quench = qn && qv > 0 ? quenchDemands.get('quench:' + qn.toLowerCase()) : null
     const qMulti = !!(multi && quench?.useMulti)
     const qp = quench ? choosePipette(qv, 'auto', `${label}: quench "${qn}"`, { multi: qMulti }) : null
-    tipCount(p, s.newTip === 'once' ? count : units.length * count)
+    const tipsPerPoint = p ? (s.newTip === 'once' ? 1 : units.length * strokes(p, vol)) : 0
+    tipCount(p, tipsPerPoint * count)
     if (quench) tipCount(qp, count)
     if (s.type === 'series') {
       const iv = num(s.intervalMinutes)
       if (!(iv > 0)) warn('Sampling series: the interval must be a positive number of minutes.')
     }
-    samplePlans.set(s.id, { wells: pre.wells, units, multi, vol, count, pip: p, start, quench, qp, qv, qMulti })
+    samplePlans.set(s.id, { wells: pre.wells, units, multi, vol, count, pip: p, start, quench, qp, qv, qMulti, tipsPerPoint })
   }
   for (const s of stepsOf('mix')) {
     const pre = selectionPre.get(s.id)
@@ -812,10 +817,18 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   // for a refill just before the step that would fail.
   const needRefill = pipettes.some(p => p.tipsNeeded > p.tipCapacity)
   const tipCall = (p, n, indent = '') => { if (needRefill && p && n > 0) emit(`${indent}need_tips(${p.var}, ${n})`) }
-  const chunked = (items, size) => {
-    if (!needRefill || items.length <= size) return [items]
+  // Split a transfer list so no chunk costs more tips than the loaded racks hold.
+  const chunked = (items, p, always) => {
+    if (!needRefill || !always) return [{ items, tips: always ? tipsFor(p, items, true) : 1 }]
+    const cap = Math.max(1, p.tipCapacity)
     const out = []
-    for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
+    let cur = [], cost = 0
+    for (const it of items) {
+      const c = strokes(p, it.volume)
+      if (cur.length && cost + c > cap) { out.push({ items: cur, tips: cost }); cur = []; cost = 0 }
+      cur.push(it); cost += c
+    }
+    if (cur.length) out.push({ items: cur, tips: cost })
     return out
   }
 
@@ -1026,8 +1039,8 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
           emit(`# ${oneLine(desc)} — ${what}, ${fmtUl(total)} (${b.pip.var}${b.multi ? ', 8-channel: a well name means its whole column' : ''})`)
           const kw = transferKwargs(s).map(k => k.replace('MIX_VOLUME', pyNum(Math.min(b.pip.def.max, Math.max(b.pip.def.min, b.transfers[0].volume)))))
           const oneTip = s.mode === 'distribute' || s.newTip === 'once'
-          for (const chunk of chunked(b.transfers, oneTip ? b.transfers.length : Math.max(1, b.pip.tipCapacity))) {
-            tipCall(b.pip, oneTip ? 1 : chunk.length)
+          for (const { items: chunk, tips } of chunked(b.transfers, b.pip, !oneTip)) {
+            tipCall(b.pip, tips)
             if (s.mode === 'distribute') {
               // One aspirate feeds several wells; the tip never re-enters the wells.
               const kwd = kw.filter(k => !k.startsWith('blowout_location') && !k.startsWith('mix_after') && !k.startsWith('new_tip'))
@@ -1194,7 +1207,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
             tipCall(pl.qp, 1)
             emit(`${pl.qp.var}.transfer(${pyNum(pl.qv)}, ${pl.quench.rack}[${py(pl.quench.well)}], ${quenchDests}, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first`)
           }
-          tipCall(pl.pip, s.newTip === 'once' ? 1 : nU)
+          tipCall(pl.pip, pl.tipsPerPoint)
           emit(`${pl.pip.var}.transfer(${pyNum(pl.vol)}, ${srcList}, dests, ${kw.join(', ')})`)
           restore()
           for (let k = loopStart; k < L.length; k++) L[k] = '    ' + L[k]
@@ -1208,7 +1221,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
             tipCall(pl.qp, 1)
             emit(`${pl.qp.var}.transfer(${pyNum(pl.qv)}, ${pl.quench.rack}[${py(pl.quench.well)}], ${quenchDests}, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first`)
           }
-          tipCall(pl.pip, s.newTip === 'once' ? 1 : nU)
+          tipCall(pl.pip, pl.tipsPerPoint)
           emit(`${pl.pip.var}.transfer(${pyNum(pl.vol)}, ${srcList}, dests, ${kw.join(', ')})`)
           restore()
         }

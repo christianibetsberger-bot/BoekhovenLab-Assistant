@@ -171,7 +171,10 @@ const tcCell = computed(() => {
 </template>
 
 <style scoped>
-.deck { width: 100%; height: auto; display: block; font-family: inherit; }
+/* The aspect ratio is stated explicitly: a browser that does not derive it
+   from the viewBox would give the SVG a default height and let it paint over
+   whatever follows. */
+.deck { width: 100%; height: auto; aspect-ratio: 416 / 384; display: block; overflow: hidden; font-family: inherit; }
 
 .base { fill: var(--cd); stroke: var(--ln2); stroke-width: 1; }
 .slot.empty .base { stroke-dasharray: 3 3; fill: transparent; }

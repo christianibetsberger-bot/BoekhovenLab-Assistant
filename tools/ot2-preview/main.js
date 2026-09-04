@@ -50,10 +50,17 @@ if (which === 'multi') {
   const d = newOt2Step('delay'); d.minutes = 30
   cfg.steps = [newOt2Step('build'), d, newOt2Step('sample')]
 }
+if (params.get('name')) plate.name = params.get('name')
+if (params.get('pipettes') === 'p20') cfg.pipettes = { left: '', right: 'p20_single_gen2' }
 plate.ot2 = cfg
 
 const pinia = createPinia()
-const app = createApp({ render: () => h(Modal, { plate, initialTab: params.get('tab') || 'steps', onClose: () => {} }) })
+// Mounted inside a blurred .card like the real Well Plate editor, so the dialog
+// is exercised with the same containing-block trap the app has.
+const app = createApp({ render: () => h('div', { class: 'card', style: 'margin: 40px; min-height: 200px;' }, [
+  h('h2', 'Well Plate (preview shell)'),
+  h(Modal, { plate, initialTab: params.get('tab') || 'steps', onClose: () => {} }),
+]) })
 app.use(pinia)
 const store = useLabStore()
 store.user = { id: 'preview', email: 'preview@example.com' }

@@ -499,3 +499,32 @@ describe('8-channel', () => {
     expect(code).toMatch(/#   reservoir A1 {3}MQ H₂O.*split over A1–H1/)
   })
 })
+
+describe('tip accounting', () => {
+  // A volume above the pipette's maximum is several strokes, and with a new tip
+  // per well the robot re-tips for every stroke — the count must say so, or the
+  // run dies with OutOfTipsError halfway through the plate.
+  it('counts one tip per stroke when volumes exceed the pipette maximum', () => {
+    // Water 67 µL everywhere → 4 strokes on a P20; the Thermocycler takes four
+    // slots, so only five racks (480 tips) fit and the run must pause to refill.
+    const plate = fullPlate({ peptide: () => 5, rna: () => 10, total: 82 })
+    const { summary, warnings, code } = gen(plate, cfg => {
+      cfg.pipettes = { left: '', right: 'p20_single_gen2' }
+      cfg.target = { on: 'thermocycler', labware: 'nest_96_wellplate_100ul_pcr_full_skirt' }
+    })
+    const p20 = summary.pipettes[0]
+    expect(p20.tipsNeeded).toBe(96 * 4 + 96 + 96)      // water 4 tips/well, peptide 1, RNA 1
+    expect(p20.tipSlots).toHaveLength(5)
+    expect(warnings.some(w => /needs 576 tips \(6 racks\) but only 5 racks fit/.test(w))).toBe(true)
+    // The refill helper accounts in strokes too: no chunk asks for more than the racks hold.
+    const calls = [...code.matchAll(/need_tips\(p20, (\d+)\)/g)].map(m => Number(m[1]))
+    expect(calls.length).toBeGreaterThan(1)
+    expect(Math.max(...calls)).toBeLessThanOrEqual(480)
+    expect(calls.reduce((a, b) => a + b, 0)).toBe(576)
+  })
+  it('one tip per stock is one tip however many strokes', () => {
+    const plate = fullPlate({ peptide: () => 5, rna: () => 10, total: 82 })
+    const { summary } = gen(plate, cfg => { cfg.pipettes = { left: '', right: 'p20_single_gen2' }; cfg.steps[0].newTip = 'once' })
+    expect(summary.pipettes[0].tipsNeeded).toBe(3)
+  })
+})

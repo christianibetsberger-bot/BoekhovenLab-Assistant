@@ -16,7 +16,11 @@ import { invChip, textChip } from './invChip'
 
 // Chip text is `[CODE] Name (value unit)`; the volume follows the chip as plain text.
 // Written by invChip/textChip, parsed here and by the .onp exporters — keep in step.
-const CHIP_RE = /<span class="inv-ref"[^>]*>([\s\S]*?)<\/span>\s*(?:&nbsp;)?\s*([\d.,]+)\s*(µL|uL|mL|L)?/gi
+// A chip may be preceded, on its own line, by a bare label the producer wrote —
+// Matrix's `Row:` / `Col:`, Lida's strand roles `A [L1]:` — which is kept and
+// re-emitted with the chip. The chip body is tempered so a chip without a volume
+// can never swallow the next chip.
+const CHIP_RE = /(?:<strong>\s*([^<:]{1,40}?)\s*:\s*<\/strong>(?:\s|&nbsp;)*)?<span class="inv-ref"[^>]*>((?:(?!<\/span>)[\s\S])*?)<\/span>\s*(?:&nbsp;)?\s*([\d.,]+)\s*(µL|uL|mL|L)?/gi
 const WATER_RE = /<strong>\s*(?:MQ\s*H₂O|MQ\s*Water)\s*:?\s*<\/strong>\s*(?:&nbsp;)?\s*([\d.,]+)\s*(µL|uL|mL|L)?/i
 
 // The fill-up is not always water. A plate made up with buffer is written
@@ -60,9 +64,10 @@ const stripTags = (html) => String(html || '').replace(/<[^>]*>/g, '').replace(/
 
 /**
  * Structured entries for one well's HTML.
- * Each reagent entry: { kind:'reagent', invId, code, name, stock, unit, volume }
- * The water entry:    { kind:'water', volume }
- * Unparseable content is left alone — see `extra`, which is preserved on rebuild.
+ * Each reagent entry: { kind:'reagent', invId, code, name, label, stock, unit, volume }
+ * The water entry:    { kind:'water', name, volume }
+ * Content this does not model is not lost: wellExtras() returns it, and
+ * buildWellHtml({ extra }) writes it back.
  */
 export function parseWellHtml(html) {
   const src = String(html || '')
@@ -72,26 +77,32 @@ export function parseWellHtml(html) {
   let m
   while ((m = CHIP_RE.exec(src)) !== null) {
     const chipHtml = m[0]
-    const label = stripTags(m[1])
+    const lineLabel = m[1] ? stripTags(m[1]) : ''
+    const label = stripTags(m[2])
     const idMatch = chipHtml.match(/data-inv-id="([^"]*)"/)
     const labwareMatch = chipHtml.match(/data-labware="([^"]*)"/)
     const codeMatch = label.match(/\[(.*?)\]/)
-    // Name is what sits between the code and the concentration — the same slice the
-    // .onp exporter takes, so both agree on what the compound is called.
-    const nameMatch = label.match(/\]\s*(.*?)\s*\(/)
-    const concMatch = label.match(/\(([\d.,]+)\s*([^)]*)\)/)
-    const name = nameMatch ? nameMatch[1].trim()
+    // The stock is the LAST parenthesis, which invChip always writes at the end, so
+    // a name that itself contains parentheses ("Poly(U) RNA") keeps them. The .onp
+    // exporters slice the name the same way.
+    const tail = label.match(/\]\s*(.*?)\s*\(([\d.,]+)\s*([^)]*)\)\s*$/)
+    const nameMatch = tail ? null : label.match(/\]\s*(.*?)\s*\(/)
+    const concMatch = tail ? [null, tail[2], tail[3]] : label.match(/\(([\d.,]+)\s*([^)]*)\)/)
+    const code = codeMatch ? codeMatch[1].trim() : ''
+    const name = tail ? tail[1].trim() : nameMatch ? nameMatch[1].trim()
       : label.replace(/\[.*?\]/, '').replace(/\(.*?\)/, '').trim()
-    if (!name) continue
+    // A chip with a code but no name is still a chip (its code is its name).
+    if (!name && !code) continue
     entries.push({
       kind: 'reagent',
       invId: idMatch ? idMatch[1] : '',
       labware: labwareMatch ? labwareMatch[1] : '',
-      code: codeMatch ? codeMatch[1].trim() : '',
-      name,
+      code,
+      name: name || code,
+      label: lineLabel,
       stock: concMatch ? num(concMatch[1]) : null,
       unit: concMatch ? (concMatch[2] || '').trim().replace(/^u/, 'µ') : '',
-      volume: toUL(m[2], m[3]),
+      volume: toUL(m[3], m[4]),
     })
   }
 
@@ -137,6 +148,41 @@ export function unlinkedVolumes(html) {
   return out
 }
 
+/**
+ * Everything in a well the parser does not model, kept verbatim across a
+ * rebuild: unlinked reagent lines (`<strong>EDC:</strong> 4.00 µL (10 mM)`),
+ * the headers Matrix and Screening write, free-text notes. Removed here is
+ * exactly what buildWellHtml re-emits — each chip with its volume, any "→ final"
+ * annotation or target concentration after it, the fill-up line, the Σ line —
+ * so editing one component never deletes another that has no chip.
+ */
+export function wellExtras(html) {
+  let src = String(html || '')
+  if (!src.trim()) return ''
+  // A chip line: optional bare label, the chip, its volume, then only what a
+  // producer writes after it — a target "(5 mM)", "(Fixed)", Screening's
+  // "(5 µL (Fixed))" — and the "→ final" annotation. A typed note in
+  // parentheses is not a target and stays.
+  src = src.replace(/(?:<strong>\s*[^<:]{1,40}?\s*:\s*<\/strong>(?:\s|&nbsp;)*)?(?:&nbsp;|\s)*<span class="inv-ref"[^>]*>(?:(?!<\/span>)[\s\S])*?<\/span>\s*(?:&nbsp;)?\s*[\d.,]+\s*(?:µL|uL|mL|L)?(?:\s*\((?:[\d.,]+\s*[^()<]*(?:\([^()<]*\))?|Fixed)\))?(?:\s*<span class="well-final"[^>]*>[\s\S]*?<\/span>)?\s*(?:<br\s*\/?>)?/gi, '\n')
+  src = src.replace(/<span class="well-total"[^>]*>[\s\S]*?<\/span>\s*(?:<br\s*\/?>)?/gi, '\n')
+  const w = src.match(WATER_RE)
+  if (w) src = src.replace(w[0], '\n')
+  else {
+    FILLUP_RE.lastIndex = 0
+    let f, last = null
+    while ((f = FILLUP_RE.exec(src)) !== null) last = f
+    if (last) src = src.slice(0, last.index) + '\n' + src.slice(last.index + last[0].length).replace(/^\s*<\/span>/, '')
+  }
+  // Collapse what the removals left behind — runs of breaks and stray spaces —
+  // in one pass, so one rebuild is already a fixed point; and a note that was
+  // typed after a chip's volume loses the punctuation that joined it.
+  src = src.replace(/(?:\n\s*(?:<br\s*\/?>)?)+/g, '<br>')
+  src = src.replace(/(?:\s|&nbsp;)*<br\s*\/?>(?:\s|&nbsp;)*/gi, '<br>').replace(/(<br>){2,}/g, '<br>')
+    .replace(/<br>[\s,;:–-]+(?=[^<\s])/g, '<br>')
+    .replace(/^(?:\s|&nbsp;|<br>)+|(?:\s|&nbsp;|<br>)+$/g, '')
+  return stripTags(src) ? src : ''
+}
+
 /** Total volume actually pipetted into the well (µL). */
 export function totalVolume(entries) {
   return (entries || []).reduce((sum, e) => sum + (Number(e.volume) || 0), 0)
@@ -173,6 +219,58 @@ export function scaleEntriesToTotal(entries, newTotal) {
   if (!(total > 0) || !(target > 0) || !isFinite(target)) return null
   const f = target / total
   return (entries || []).map(e => ({ ...e, volume: (Number(e.volume) || 0) * f }))
+}
+
+/**
+ * Exchange the component behind one entry for another inventory item.
+ *
+ * The volume stays — it is what was pipetted into the well — while the identity
+ * and the stock concentration come from the new bottle, so the concentration
+ * reached is recomputed from what that bottle holds. A fill-up entry is left
+ * alone: it is a medium, not a stock. Returns a new array; the input is untouched.
+ */
+export function exchangeEntry(entries, index, inv) {
+  return (entries || []).map((e, i) => (i !== index || e.kind !== 'reagent' || !inv) ? e : exchangeFields(e, inv))
+}
+// The substitution itself: identity and stock from the bottle, volume and
+// labware from the well. One place, so "this well" and "every well" agree.
+function exchangeFields(e, inv) {
+  const stock = parseFloat(String(inv.stock ?? '').replace(',', '.'))
+  return {
+    ...e,
+    invId: inv.id || '',
+    code: inv.code || '',
+    name: inv.name || e.name,
+    stock: isFinite(stock) ? stock : null,
+    unit: inv.stockUnit || e.unit || 'µM',
+  }
+}
+
+/**
+ * The same exchange in every well of a plate that uses the component `key`.
+ * `oldName` also catches copies of the compound that carry no inventory id
+ * (imported or legacy chips): with no id, the name is their only identity.
+ * Returns the rebuilt wells (untouched wells are returned as they were).
+ */
+export function exchangeOnPlate(wells, key, inv, { inventory = [], oldName = '' } = {}) {
+  const nameKey = oldName ? 'name:' + String(oldName).trim().toLowerCase() : null
+  const out = {}
+  let wellsChanged = 0, entriesChanged = 0
+  Object.entries(wells || {}).forEach(([wellId, html]) => {
+    const entries = parseWellHtml(html)
+    let touched = false
+    const next = entries.map(e => {
+      if (e.kind !== 'reagent' || !inv) return e
+      const k = entryKey(e)
+      if (k !== key && !(nameKey && !e.invId && k === nameKey)) return e
+      touched = true
+      entriesChanged++
+      return exchangeFields(e, inv)
+    })
+    if (touched) wellsChanged++
+    out[wellId] = touched ? buildWellHtml(next, { inventory, showFinal: true, extra: wellExtras(html) }) : html
+  })
+  return { wells: out, wellsChanged, entriesChanged }
 }
 
 /** Round for display without inventing precision: 3 significant-ish decimals. */
@@ -238,7 +336,8 @@ export function applyStockToPlate(wells, key, patch = {}, { inventory = [] } = {
         e.invId = patch.inv.id
         e.code = patch.inv.code || e.code
         e.name = patch.inv.name || e.name
-        if (e.stock == null) { e.stock = Number(patch.inv.stock); e.unit = patch.inv.stockUnit || e.unit }
+        const s = parseFloat(String(patch.inv.stock ?? '').replace(',', '.'))
+        if (e.stock == null && isFinite(s)) { e.stock = s; e.unit = patch.inv.stockUnit || e.unit }
       }
       if (patch.stock != null && isFinite(patch.stock)) e.stock = Number(patch.stock)
       if (patch.unit) e.unit = String(patch.unit).trim()
@@ -246,7 +345,7 @@ export function applyStockToPlate(wells, key, patch = {}, { inventory = [] } = {
       entriesChanged++
     })
     if (touched) wellsChanged++
-    out[wellId] = touched ? buildWellHtml(entries, { inventory, showFinal: true }) : html
+    out[wellId] = touched ? buildWellHtml(entries, { inventory, showFinal: true, extra: wellExtras(html) }) : html
   })
   return { wells: out, wellsChanged, entriesChanged }
 }
@@ -260,7 +359,7 @@ export function applyStockToPlate(wells, key, patch = {}, { inventory = [] } = {
  * `inventory` lets a parsed entry re-link to a real stock so the chip carries
  * data-inv-id again (that attribute is what the usage tracker keys on).
  */
-export function buildWellHtml(entries, { inventory = [], showFinal = true, targetVolume = null } = {}) {
+export function buildWellHtml(entries, { inventory = [], showFinal = true, targetVolume = null, extra = '' } = {}) {
   const rows = withFinalConcentrations(entries)
   const total = totalVolume(entries)
   let html = ''
@@ -289,8 +388,14 @@ export function buildWellHtml(entries, { inventory = [], showFinal = true, targe
     const final = (showFinal && e.final != null)
       ? ` <span class="well-final" style="opacity:0.75;">→ ${esc(fmtConc(e.final))} ${esc(e.unit || '')}</span>`
       : ''
-    html += `${chip}&nbsp; ${fmtVol(e.volume)} µL${final}<br>`
+    const lineLabel = e.label ? `<strong>${esc(e.label)}:</strong> ` : ''
+    html += `${lineLabel}${chip}&nbsp; ${fmtVol(e.volume)} µL${final}<br>`
   })
+
+  // Lines the parser does not model (see wellExtras) go back between the
+  // composition and the fill-up: the parser takes the LAST labelled volume as the
+  // fill-up, so nothing may follow it but the total.
+  if (extra) html += `${extra}<br>`
 
   // The fill-up keeps the name it was written with. Re-emitting a buffer fill-up as
   // "MQ H₂O" would be worse than dropping it: the .onp exporters key that label to

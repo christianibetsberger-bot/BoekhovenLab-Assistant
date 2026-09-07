@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { readAiTargetWell, inferScreenFromPlate, readPlateWells, syntheticSampleId, levelSpacing } from './phaseWellMapping'
-import { buildWellHtml } from './wellComposition'
+import { buildWellHtml, parseWellHtml, wellExtras } from './wellComposition'
 import { convertConcentration } from './units'
 
 // A well exactly as PhasePredictor's "Send to plate" writes it.
@@ -332,5 +332,21 @@ describe('readPlateWells', () => {
     expect(wells.A12.anion).toBeCloseTo(100 * 12 / 50 / 1000, 9)
     // Distinct wells get distinct points rather than collapsing onto one id.
     expect(new Set(Object.values(wells).map(w => w.sampleId)).size).toBe(12)
+  })
+})
+
+describe('readAiTargetWell after a plate-editor rebuild', () => {
+  it('does not read leftover "(x mM)" lines of a rebuilt well as targets', () => {
+    const chip = (code, name, stock, unit) => `<span class="inv-ref" data-inv-id="inv-${code}" data-labware="">[${code}] ${name} (${stock} ${unit})</span>`
+    const stamped = '<strong style="color: var(--primary);">AI Target [9001]</strong><br>'
+      + '<strong>Unknown Component:</strong> 40.00 µL (5 mM)<br>'
+      + `&nbsp;${chip('C2', 'RNA', 16, 'mM')}&nbsp; 20.00 µL (4 mM)<br>`
+      + `&nbsp;${chip('C3', 'NaCl', 248, 'mM')}&nbsp; 9.67 µL (30 mM)<br>`
+      + '<strong>Glycerol:</strong> 1.00 µL (5 mM)<br><strong>Tween:</strong> 2.00 µL (1 mM)<br>'
+      + '<strong>MQ H₂O:</strong> 7.33 µL<br>'
+    expect(readAiTargetWell(stamped)).toMatchObject({ sampleId: 9001, anion: 5, cation: 4, salt: 30 })
+    const rebuilt = buildWellHtml(parseWellHtml(stamped), { showFinal: true, extra: wellExtras(stamped) })
+    expect(rebuilt).toContain('AI Target [9001]')     // the stamp survives the rebuild
+    expect(readAiTargetWell(rebuilt)).toBeNull()      // but it is no longer a target well
   })
 })

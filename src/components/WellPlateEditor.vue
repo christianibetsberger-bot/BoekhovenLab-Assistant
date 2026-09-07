@@ -7,8 +7,8 @@ import { invChip } from '../utils/invChip'
 import { parseOnp } from '../utils/onpImport'
 import * as XLSX from 'xlsx'
 import { buildPlateRows, buildWellSummary, buildPlateGrid, plateToYaml, plateExportFilename, plateDims } from '../utils/plateExport'
-import { parseWellHtml, buildWellHtml, withFinalConcentrations, totalVolume, fmtConc,
-         collectPlateStocks, applyStockToPlate, unlinkedVolumes, scaleEntriesToTotal } from '../utils/wellComposition'
+import { parseWellHtml, buildWellHtml, withFinalConcentrations, totalVolume, fmtConc, entryKey, wellExtras,
+         collectPlateStocks, applyStockToPlate, unlinkedVolumes, scaleEntriesToTotal, exchangeEntry, exchangeOnPlate } from '../utils/wellComposition'
 import ExpStatusPicker from './ExpStatusPicker.vue'
 import { usePlanWorkspace } from '../composables/usePlanWorkspace'
 import CloudLibraryModal from './CloudLibraryModal.vue'
@@ -205,9 +205,56 @@ const setWellEntry = (plate, index, field, value) => {
     if (field === 'unit') entries[index].unit = String(value || '').trim()
     else if (isFinite(v) && v >= 0) entries[index][field] = v
     else return
-    plate.wells[plate.selectedWell] = buildWellHtml(entries, { inventory: store.inventory, showFinal: true })
+    plate.wells[plate.selectedWell] = buildWellHtml(entries, { inventory: store.inventory, showFinal: true, extra: wellExtras(plate.wells[plate.selectedWell]) })
     syncWellEditor(plate)
     store.saveWorkspaceState()
+}
+
+// --- Exchange a component for another stock ---
+// Swaps the bottle behind a row of the selected well. The volume that was
+// pipetted stays; the new item's identity and stock concentration replace the
+// old, so the concentration reached is recomputed from what the new bottle
+// holds. "Every well" does the same wherever this plate uses that component,
+// which is how a whole screen is re-made with a different peptide or salt.
+const exchangeEverywhere = ref(false)
+// The menu is teleported to <body> and placed at the button: the editing panel
+// clips its overflow, and a menu that drops into a short panel loses its tail.
+const xchPos = ref({ left: 0, top: 0, up: false })
+const openExchange = (plate, index, ev) => {
+    const key = 'xch_' + plate.id + '_' + index
+    if (activeDropdown.value === key) { activeDropdown.value = null; return }
+    const r = ev.currentTarget.getBoundingClientRect()
+    const up = r.bottom + 380 > window.innerHeight && r.top > 380
+    xchPos.value = { left: Math.min(r.left, window.innerWidth - 350), top: up ? r.top - 4 : r.bottom + 4, up }
+    store.wellRtfSearchQuery = ''
+    exchangeEverywhere.value = false   // the wide scope is chosen per use, never inherited
+    activeDropdown.value = key
+}
+const closeExchangeOnScroll = (e) => {
+    if (e?.target?.closest?.('[data-menu]')) return   // scrolling the menu's own list
+    if (String(activeDropdown.value || '').startsWith('xch_')) activeDropdown.value = null
+}
+// The other two menus share the search field; every menu opens with it empty.
+const toggleDropdown = (key) => { store.wellRtfSearchQuery = ''; activeDropdown.value = activeDropdown.value === key ? null : key }
+const exchangeWellEntry = (plate, index, inv) => {
+    if (!plate?.selectedWell || !inv) return
+    const entries = parseWellHtml(plate.wells[plate.selectedWell] || '')
+    const old = entries[index]
+    if (!old || old.kind !== 'reagent') return
+    activeDropdown.value = null
+    if (exchangeEverywhere.value) {
+        const { wells, wellsChanged } = exchangeOnPlate(plate.wells, entryKey(old), inv, { inventory: store.inventory, oldName: old.name })
+        plate.wells = wells
+        store.toast?.(`Exchanged ${old.name} for ${inv.name} in ${wellsChanged} well${wellsChanged === 1 ? '' : 's'}`)
+    } else {
+        plate.wells[plate.selectedWell] = buildWellHtml(exchangeEntry(entries, index, inv),
+            { inventory: store.inventory, showFinal: true, extra: wellExtras(plate.wells[plate.selectedWell]) })
+        store.toast?.(`Exchanged ${old.name} for ${inv.name} in ${plate.selectedWell}`)
+    }
+    syncWellEditor(plate)
+    store.saveWorkspaceState()
+    // A different bottle is a different usage record.
+    store.reconcilePlanUsage?.('plates', plate)
 }
 
 // Re-make the selected well at a different total volume. Every volume — fill-up
@@ -223,7 +270,7 @@ const scaleWellTo = (plate, value) => {
         if (String(value).trim() !== '') store.toast?.('Nothing to scale — the well needs parsed volumes and a positive target')
         return
     }
-    plate.wells[plate.selectedWell] = buildWellHtml(scaled, { inventory: store.inventory, showFinal: true })
+    plate.wells[plate.selectedWell] = buildWellHtml(scaled, { inventory: store.inventory, showFinal: true, extra: wellExtras(plate.wells[plate.selectedWell]) })
     syncWellEditor(plate)
     store.saveWorkspaceState()
     store.reconcilePlanUsage?.('plates', plate)
@@ -350,6 +397,9 @@ const insertInventoryRefToWell = (plate) => {
 // Bound at document level since well editors are dynamically created per-plate.
 const onWellEditorClick = (e) => {
     const target = e.target
+    // Every menu wrapper stops click propagation, so a click that reaches the
+    // document is outside all of them: close whatever is open.
+    if (activeDropdown.value && !target?.closest?.('[data-menu]')) activeDropdown.value = null
     if (!target?.classList?.contains('inv-ref-remove')) return
     const editor = target.closest('[id^="wellEditor_"]')
     if (!editor) return
@@ -372,9 +422,18 @@ const syncAllWellEditors = () => nextTick(() => {
         if (editor) editor.innerHTML = sanitize(plate.wells[plate.selectedWell] || '')
     }
 })
-onMounted(() => { document.addEventListener('click', onWellEditorClick); syncAllWellEditors() })
+onMounted(() => {
+    document.addEventListener('click', onWellEditorClick)
+    window.addEventListener('scroll', closeExchangeOnScroll, true)
+    window.addEventListener('resize', closeExchangeOnScroll)
+    syncAllWellEditors()
+})
 onActivated(syncAllWellEditors)
-onBeforeUnmount(() => document.removeEventListener('click', onWellEditorClick))
+onBeforeUnmount(() => {
+    document.removeEventListener('click', onWellEditorClick)
+    window.removeEventListener('scroll', closeExchangeOnScroll, true)
+    window.removeEventListener('resize', closeExchangeOnScroll)
+})
 
 // --- Integrations ---
 const savePlateToJournal = (plate) => {
@@ -1365,7 +1424,7 @@ const exportAndrewPlusMulti = () => {
                            style="padding:2px 5px; font-size:0.78rem; width:100%;" placeholder="mM">
                     <span style="opacity:0.6; font-size:0.76rem;">{{ s.wells.length }} · {{ s.totalVolume.toFixed(1) }} µL</span>
                     <div style="position:relative;" @click.stop>
-                        <div @click="activeDropdown = activeDropdown === 'stock_' + plate.id + s.key ? null : 'stock_' + plate.id + s.key"
+                        <div @click="toggleDropdown('stock_' + plate.id + s.key)"
                              style="padding:3px 8px; font-size:0.78rem; border-radius:var(--radius); border:1px solid var(--border); cursor:pointer; display:flex; align-items:center; gap:6px;"
                              :style="s.invId ? '' : 'border-style:dashed; opacity:0.75;'">
                             <span v-if="linkedShelf(s.invId)"
@@ -1378,7 +1437,7 @@ const exportAndrewPlusMulti = () => {
                             </span>
                             <i class="fas fa-chevron-down" style="opacity:0.4; margin-left:auto; font-size:0.7rem;"></i>
                         </div>
-                        <div v-if="activeDropdown === 'stock_' + plate.id + s.key"
+                        <div v-if="activeDropdown === 'stock_' + plate.id + s.key" data-menu
                              style="position:absolute; top:100%; right:0; z-index:1000; background:var(--surface); border:1px solid var(--border); box-shadow:0 4px 6px rgba(0,0,0,0.1); border-radius:var(--radius); min-width:310px;">
                             <div style="display:flex; gap:4px; padding:6px 6px 0;">
                                 <button v-for="opt in [['Global','Lab inventory'],['Personal','Private inventory']]" :key="opt[0]"
@@ -1435,11 +1494,11 @@ const exportAndrewPlusMulti = () => {
                 <button class="rtf-btn" @click.prevent="formatWellDoc(plate, 'underline')" title="Underline"><i class="fas fa-underline"></i></button>
                 <div style="width: 1px; background: var(--border); margin: 0 4px; height: 24px;"></div>
                 <div style="position: relative; margin-left: auto;" @click.stop>
-                    <div @click="activeDropdown = activeDropdown === 'plate_ref_' + plate.id ? null : 'plate_ref_' + plate.id" style="padding: 4px 8px; font-size: 0.85rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; height: 32px; display: flex; align-items: center; gap: 6px;">
+                    <div @click="toggleDropdown('plate_ref_' + plate.id)" style="padding: 4px 8px; font-size: 0.85rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; height: 32px; display: flex; align-items: center; gap: 6px;">
                         <span>+ Reference Stock</span>
                         <i class="fas fa-chevron-down" style="opacity: 0.5;"></i>
                     </div>
-                    <div v-if="activeDropdown === 'plate_ref_' + plate.id" style="position: absolute; top: 100%; right: 0; z-index: 1000; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: var(--radius); min-width: 250px; display: flex; flex-direction: column;">
+                    <div v-if="activeDropdown === 'plate_ref_' + plate.id" data-menu style="position: absolute; top: 100%; right: 0; z-index: 1000; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: var(--radius); min-width: 250px; display: flex; flex-direction: column;">
                         <div style="display: flex; gap: 4px; padding: 6px 6px 0;">
                             <button v-for="opt in [['Global','Lab inventory'],['Personal','Private inventory']]" :key="opt[0]"
                                     @click.stop="store.plateRefSearchScope = opt[0]" class="small"
@@ -1468,9 +1527,59 @@ const exportAndrewPlusMulti = () => {
                 </div>
                 <div v-for="(row, ri) in wellRows(plate)" :key="ri"
                      style="display:grid; grid-template-columns:1.6fr 84px 96px 60px 1fr; gap:6px; align-items:center; font-size:0.8rem; padding:2px 0;">
-                    <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" :title="row.name">
-                        <i class="fas" :class="row.kind === 'water' ? 'fa-droplet' : 'fa-tag'" style="opacity:0.5; font-size:0.7rem;"></i>
-                        {{ row.code ? '[' + row.code + '] ' : '' }}{{ row.name }}
+                    <span style="display:flex; align-items:center; gap:6px; min-width:0;" :title="row.name">
+                        <!-- Exchange: swap this component for another stock, keeping the volume -->
+                        <button v-if="row.kind === 'reagent'" class="xch-btn" :class="{ on: activeDropdown === 'xch_' + plate.id + '_' + ri }"
+                                :data-test="'exchange-' + ri"
+                                @click.stop="openExchange(plate, ri, $event)"
+                                title="Exchange this component for another stock — the volume stays, the new stock's concentration applies">
+                            <i class="fas fa-right-left"></i>
+                        </button>
+                        <i v-else class="fas fa-droplet" style="opacity:0.5; font-size:0.7rem; width:22px; text-align:center; flex:none;"></i>
+                        <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ row.code ? '[' + row.code + '] ' : '' }}{{ row.name }}</span>
+                        <Teleport to="body">
+                        <div v-if="activeDropdown === 'xch_' + plate.id + '_' + ri" data-menu @click.stop
+                             :style="{ position: 'fixed', left: xchPos.left + 'px', top: xchPos.top + 'px', transform: xchPos.up ? 'translateY(-100%)' : 'none', zIndex: 12000 }"
+                             style="width:340px; background:var(--surface-solid, var(--surface)); color:var(--tx, inherit); border:1px solid var(--border); box-shadow:var(--sh, 0 8px 28px rgba(0,0,0,.15)); border-radius:var(--radius); font-size:0.8rem;">
+                            <div style="padding:8px 8px 0; font-size:0.72rem; opacity:0.7;">
+                                Exchange <strong>{{ row.name }}</strong> for…
+                            </div>
+                            <!-- The two choices to make before picking: which shelf, and how far the exchange reaches -->
+                            <div style="display:flex; gap:4px; padding:6px 6px 0;">
+                                <button v-for="opt in [['Global','Lab inventory'],['Personal','Private inventory']]" :key="opt[0]"
+                                        @click.stop="store.plateRefSearchScope = opt[0]" class="small"
+                                        :style="store.plateRefSearchScope === opt[0] ? 'flex:1; padding:2px 6px; font-size:0.72rem;' : 'flex:1; padding:2px 6px; font-size:0.72rem; background:transparent; color:inherit; border:1px solid var(--border);'">
+                                    {{ opt[1] }}
+                                </button>
+                            </div>
+                            <div style="display:flex; gap:4px; padding:4px 6px 0;">
+                                <button class="small" @click.stop="exchangeEverywhere = false"
+                                        :style="!exchangeEverywhere ? 'flex:1; padding:3px 6px; font-size:0.72rem;' : 'flex:1; padding:3px 6px; font-size:0.72rem; background:transparent; color:inherit; border:1px solid var(--border);'">
+                                    <i class="fas fa-crosshairs"></i> {{ plate.selectedWell }} only
+                                </button>
+                                <button class="small" @click.stop="exchangeEverywhere = true"
+                                        :style="exchangeEverywhere ? 'flex:1; padding:3px 6px; font-size:0.72rem;' : 'flex:1; padding:3px 6px; font-size:0.72rem; background:transparent; color:inherit; border:1px solid var(--border);'"
+                                        title="Exchange it in every well of this plate that uses this component">
+                                    <i class="fas fa-border-all"></i> whole plate
+                                </button>
+                            </div>
+                            <input type="text" v-model="store.wellRtfSearchQuery" :placeholder="`Search ${store.plateRefSearchScope === 'Personal' ? 'private' : 'lab'} inventory…`"
+                                   style="margin:6px 5px 5px; width:calc(100% - 10px); padding:4px; border:1px solid var(--border); border-radius:var(--radius);" @click.stop>
+                            <div style="overflow-y:auto; max-height:220px;">
+                                <div v-for="inv in stockPickList(store.wellRtfSearchQuery).filter(i => !wellRows(plate).some(r => r.invId === i.id))" :key="inv.id"
+                                     @mousedown.prevent="exchangeWellEntry(plate, ri, inv)"
+                                     style="padding:6px 10px; cursor:pointer; font-size:0.82rem; border-bottom:1px solid var(--bg); display:flex; align-items:center; gap:7px;"
+                                     onmouseover="this.style.background='var(--summary-bg)'" onmouseout="this.style.background='transparent'">
+                                    <span style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                                        [{{ inv.code }}] {{ inv.name }}<span v-if="inv.stock !== '' && inv.stock != null"> ({{ store.formatNum(inv.stock) }} {{ inv.stockUnit || 'µM' }})</span>
+                                    </span>
+                                </div>
+                                <div v-if="!stockPickList(store.wellRtfSearchQuery).filter(i => !wellRows(plate).some(r => r.invId === i.id)).length" style="padding:8px 10px; font-size:0.78rem; opacity:0.55;">
+                                    Nothing else in the {{ store.plateRefSearchScope === 'Personal' ? 'private' : 'lab' }} inventory matches — try the other shelf.
+                                </div>
+                            </div>
+                        </div>
+                        </Teleport>
                     </span>
                     <input type="number" step="any" min="0" :value="row.volume"
                            @change="setWellEntry(plate, ri, 'volume', $event.target.value)"
@@ -1582,4 +1691,13 @@ const exportAndrewPlusMulti = () => {
 }
 
 .pt-sep { width: 1px; height: 18px; background: var(--ln2, rgba(0,0,0,.12)); margin: 0 2px; flex: none; }
+
+/* Exchange button on a composition row: quiet until hovered, lit while its menu is open. */
+.xch-btn {
+  width: 22px; height: 22px; padding: 0; flex: none; border-radius: 6px;
+  background: var(--fl, rgba(0,0,0,.05)); color: var(--tx2, inherit); border: 1px solid var(--ln2, rgba(0,0,0,.12));
+  box-shadow: none; font-size: 0.66rem; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.xch-btn:hover { color: var(--acc, #2563eb); border-color: var(--acc, #2563eb); filter: none; }
+.xch-btn.on { background: var(--acs, rgba(37,99,235,.14)); color: var(--acc, #2563eb); border-color: var(--acc, #2563eb); }
 </style>

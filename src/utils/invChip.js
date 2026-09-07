@@ -23,9 +23,12 @@ const REMOVE_ICON = `<i class="fas fa-times inv-ref-remove" style="cursor:pointe
  *             removable – render the × (false for read-only summaries)
  */
 export function invChip(inv, { labware = '', unit = 'µM', fmt = (v) => v, removable = true } = {}) {
+  // A bottle with no stock recorded gets no parentheses at all — `( mM)` would
+  // parse back as a concentration of nothing.
+  const hasStock = inv.stock !== '' && inv.stock != null
   return `<span class="inv-ref" contenteditable="false" data-inv-id="${esc(inv.id)}" data-labware="${esc(labware)}">`
-    + `<i class="fas fa-tag"></i>&nbsp;[${esc(inv.code)}] ${esc(inv.name)} `
-    + `(${esc(fmt(inv.stock))} ${esc(inv.stockUnit || unit)})`
+    + `<i class="fas fa-tag"></i>&nbsp;[${esc(inv.code)}] ${esc(inv.name)}`
+    + `${hasStock ? ` (${esc(fmt(inv.stock))} ${esc(inv.stockUnit || unit)})` : ''}`
     + `${removable ? '&nbsp;' + REMOVE_ICON : ''}</span>`
 }
 

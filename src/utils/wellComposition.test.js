@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseWellHtml, totalVolume, withFinalConcentrations, buildWellHtml,
+import { parseWellHtml, totalVolume, withFinalConcentrations, buildWellHtml, exchangeEntry, exchangeOnPlate, wellExtras,
          collectPlateStocks, unlinkedVolumes, scaleEntriesToTotal } from './wellComposition'
 
 // Fixtures copied from the real producers' template literals. There was no test
@@ -203,5 +203,179 @@ describe('the fill-up does not become a plate stock', () => {
       A2: phaseWell('<strong>MOPS pH 7:</strong> 16.33 µL<br>'),
     })
     expect(stocks.map(s => s.name).sort()).toEqual(['EDC', 'NaCl', 'Peptide', 'RNA'])
+  })
+})
+
+describe('exchangeEntry', () => {
+  const chipX = (code, name, stock, unit, id = `inv-${code}`) =>
+    `<span class="inv-ref" data-inv-id="${id}" data-labware="lw-1">[${code}] ${name} (${stock} ${unit})</span>&nbsp; 40.00 µL<br>`
+  const html = chipX('C1', 'K10 peptide', 10, 'mM') + '<strong>MQ H₂O:</strong> 40.00 µL<br>'
+  const k12 = { id: 'inv-C3', code: 'C3', name: 'K12 peptide', stock: '5', stockUnit: 'mM' }
+
+  it('swaps identity and stock, keeps the volume and the labware', () => {
+    const entries = parseWellHtml(html)
+    const out = exchangeEntry(entries, 0, k12)
+    expect(out[0]).toMatchObject({ kind: 'reagent', invId: 'inv-C3', code: 'C3', name: 'K12 peptide', stock: 5, unit: 'mM', volume: 40, labware: 'lw-1' })
+    expect(entries[0].invId).toBe('inv-C1')   // input untouched
+    expect(out[1]).toEqual(entries[1])
+  })
+  it('recomputes what the well holds from the new bottle', () => {
+    const out = withFinalConcentrations(exchangeEntry(parseWellHtml(html), 0, k12))
+    expect(out[0].final).toBeCloseTo(2.5)      // 5 mM × 40 / 80
+  })
+  it('leaves fill-ups, other rows and bad indexes alone, and copes with a bottle without a stock', () => {
+    const entries = parseWellHtml(html)
+    expect(exchangeEntry(entries, 1, k12)[1]).toEqual(entries[1])
+    expect(exchangeEntry(entries, 7, k12)).toEqual(entries)
+    expect(exchangeEntry(entries, 0, null)).toEqual(entries)
+    const noStock = exchangeEntry(entries, 0, { id: 'inv-X', code: 'X', name: 'Mystery', stock: '' })[0]
+    expect(noStock.stock).toBeNull()
+    expect(noStock.unit).toBe('mM')            // keeps the unit it had
+  })
+  it('survives a rebuild: the new chip carries the new inventory id', () => {
+    const rebuilt = buildWellHtml(exchangeEntry(parseWellHtml(html), 0, k12), { showFinal: true })
+    const again = parseWellHtml(rebuilt)
+    expect(again[0]).toMatchObject({ invId: 'inv-C3', name: 'K12 peptide', stock: 5, volume: 40 })
+    expect(rebuilt).toContain('data-inv-id="inv-C3"')
+    expect(rebuilt).not.toContain('inv-C1')
+  })
+})
+
+describe('wellExtras — what a rebuild must not lose', () => {
+  const chipX = (code, name, stock, unit, vol, id = `inv-${code}`) =>
+    `&nbsp;<span class="inv-ref" data-inv-id="${id}" data-labware="">[${code}] ${name} (${stock} ${unit})</span>&nbsp; ${vol} µL (${(stock * vol / 80).toFixed(2)} ${unit})<br>`
+  const html = `<strong style="color: var(--primary);">Sample [9001]</strong><br>`
+    + chipX('C1', 'K10 peptide', 10, 'mM', 40)
+    + `<strong>T4-Ligase:</strong> 3.00 µL (5 U)<br>`
+    + `note: keep cold<br>`
+    + `<strong>MQ H₂O:</strong> 37.00 µL<br>`
+  const k12 = { id: 'inv-C3', code: 'C3', name: 'K12 peptide', stock: '5', stockUnit: 'mM' }
+
+  it('keeps headers, unlinked reagent lines and notes, and drops what the parser models', () => {
+    const x = wellExtras(html)
+    expect(x).toContain('Sample [9001]')
+    expect(x).toContain('<strong>T4-Ligase:</strong> 3.00 µL (5 U)')
+    expect(x).toContain('note: keep cold')
+    expect(x).not.toContain('inv-ref')
+    expect(x).not.toContain('MQ H₂O')
+    expect(x).not.toContain('40')
+  })
+  it('an exchange in one well leaves the unlinked ligase and the header in place', () => {
+    const rebuilt = buildWellHtml(exchangeEntry(parseWellHtml(html), 0, k12), { showFinal: true, extra: wellExtras(html) })
+    expect(unlinkedVolumes(rebuilt)).toEqual([{ name: 'T4-Ligase', volume: 3 }])
+    expect(rebuilt).toContain('Sample [9001]')
+    expect(rebuilt).toContain('note: keep cold')
+    expect(parseWellHtml(rebuilt).map(e => e.name)).toEqual(['K12 peptide', 'MQ H₂O'])
+    // Order: composition, then the extras, then the total.
+    expect(rebuilt.indexOf('inv-C3')).toBeLessThan(rebuilt.indexOf('T4-Ligase'))
+    expect(rebuilt.indexOf('T4-Ligase')).toBeLessThan(rebuilt.indexOf('well-total'))
+  })
+  it('is stable: rebuilding twice changes nothing', () => {
+    const once = buildWellHtml(parseWellHtml(html), { showFinal: true, extra: wellExtras(html) })
+    const twice = buildWellHtml(parseWellHtml(once), { showFinal: true, extra: wellExtras(once) })
+    expect(twice).toBe(once)
+    expect(wellExtras(once)).toBe(wellExtras(twice))
+  })
+  it('is empty for a well made only of what the parser models', () => {
+    const plain = buildWellHtml(parseWellHtml(chipX('C1', 'K10 peptide', 10, 'mM', 40) + '<strong>MQ H₂O:</strong> 40.00 µL<br>'), { showFinal: true })
+    expect(wellExtras(plain)).toBe('')
+    expect(wellExtras('')).toBe('')
+  })
+})
+
+describe('exchangeOnPlate', () => {
+  const chipX = (code, name, stock, unit, vol, id) =>
+    `<span class="inv-ref"${id ? ` data-inv-id="${id}"` : ''} data-labware="">[${code}] ${name} (${stock} ${unit})</span>&nbsp; ${vol} µL<br>`
+  const wells = {
+    A1: chipX('C1', 'K10 peptide', 10, 'mM', 40, 'inv-C1') + '<strong>EDC:</strong> 4.00 µL (10 mM)<br><strong>MQ H₂O:</strong> 40.00 µL<br>',
+    A2: chipX('C1', 'K10 peptide', 10, 'mM', 20, '') + '<strong>MQ H₂O:</strong> 60.00 µL<br>',   // an unlinked copy
+    B1: chipX('C2', 'pU RNA', 8, 'mM', 10, 'inv-C2') + '<strong>MQ H₂O:</strong> 70.00 µL<br>',
+  }
+  const k12 = { id: 'inv-C3', code: 'C3', name: 'K12 peptide', stock: '5', stockUnit: 'mM' }
+
+  it('exchanges the linked and the unlinked copies, leaves other compounds alone, keeps extras', () => {
+    const { wells: out, wellsChanged, entriesChanged } = exchangeOnPlate(wells, 'inv:inv-C1', k12, { oldName: 'K10 peptide' })
+    expect(wellsChanged).toBe(2)
+    expect(entriesChanged).toBe(2)
+    expect(parseWellHtml(out.A1)[0]).toMatchObject({ invId: 'inv-C3', name: 'K12 peptide', stock: 5, volume: 40 })
+    expect(parseWellHtml(out.A2)[0]).toMatchObject({ invId: 'inv-C3', name: 'K12 peptide', stock: 5, volume: 20 })
+    expect(out.B1).toBe(wells.B1)
+    expect(unlinkedVolumes(out.A1)).toEqual([{ name: 'EDC', volume: 4 }])
+  })
+  it('a bottle without a recorded stock leaves the concentration unknown everywhere, not the old value', () => {
+    const { wells: out } = exchangeOnPlate(wells, 'inv:inv-C1', { id: 'inv-X', code: 'X', name: 'Mystery', stock: null }, { oldName: 'K10 peptide' })
+    for (const id of ['A1', 'A2']) {
+      const e = parseWellHtml(out[id])[0]
+      expect(e).toMatchObject({ invId: 'inv-X', name: 'Mystery', stock: null })
+      expect(withFinalConcentrations(parseWellHtml(out[id]))[0].final).toBeNull()
+      expect(out[id]).not.toContain('( mM)')
+    }
+  })
+})
+
+describe('wellExtras — the shapes the producers really write', () => {
+  const chip = (code, name, stock, unit, id = `inv-${code}`) =>
+    `<span class="inv-ref" contenteditable="false" data-inv-id="${id}" data-labware="">[${code}] ${name} (${stock} ${unit})</span>`
+  const roundtrip = (x) => {
+    const y = buildWellHtml(parseWellHtml(x), { showFinal: true, extra: wellExtras(x) })
+    const z = buildWellHtml(parseWellHtml(y), { showFinal: true, extra: wellExtras(y) })
+    return { y, z }
+  }
+  const same = (x) => {
+    const { y, z } = roundtrip(x)
+    expect(z).toBe(y)
+    expect(parseWellHtml(y)).toEqual(parseWellHtml(x))
+    expect(unlinkedVolumes(y)).toEqual(unlinkedVolumes(x))
+    return y
+  }
+
+  it('two labelled buffer lines and no water: the fill-up stays the last volume, nothing flips', () => {
+    const x = `&nbsp;${chip('C1', 'Peptide', 100, 'µM')}&nbsp; 10 µL<br><strong>Buffer A:</strong> 20 µL<br><strong>Buffer B:</strong> 30 µL<br>`
+    const y = same(x)
+    expect(parseWellHtml(y).find(e => e.kind === 'water')).toMatchObject({ name: 'Buffer B', volume: 30 })
+    expect(y.indexOf('Buffer A')).toBeLessThan(y.indexOf('Buffer B'))
+    expect(totalVolume(parseWellHtml(y))).toBe(40)
+  })
+  it('a chip without a volume does not swallow the next chip', () => {
+    const x = `&nbsp;${chip('C1', 'Peptide', 100, 'µM')}&nbsp;<br>&nbsp;${chip('C2', 'RNA', 100, 'µM')}&nbsp; 20 µL<br><strong>MQ H₂O:</strong> 60 µL`
+    expect(parseWellHtml(x).map(e => e.name)).toEqual(['RNA', 'MQ H₂O'])
+    const y = same(x)
+    expect(y).toContain('inv-C1')
+    expect(y).toContain('inv-C2')
+  })
+  it('Matrix and Lida labels stay on their chip line', () => {
+    const x = `<strong>Row:</strong> &nbsp;${chip('C1', 'Peptide', 10, 'mM')}&nbsp; 4.00 µL (5 mM)<br><strong>Col:</strong> &nbsp;${chip('C2', 'RNA', 8, 'mM')}&nbsp; 8.00 µL (5 mM)<br><strong>MQ H₂O:</strong> 68.00 µL<br>`
+    const y = same(x)
+    expect(parseWellHtml(y).map(e => e.label)).toEqual(['Row', 'Col', undefined])
+    expect(y).toMatch(/<strong>Row:<\/strong> <span class="inv-ref"/)
+    expect(wellExtras(x)).toBe('')
+  })
+  it("Screening's nested '(5 µL (Fixed))' leaves no stray parenthesis; a typed note in parentheses is kept", () => {
+    const fixed = `&nbsp;${chip('C1', 'Peptide', 10, 'mM')}&nbsp; 5.00 µL (5 µL (Fixed))<br><div style="margin-top: 8px;"><strong>MQ H₂O:</strong> <span style="font-weight: bold;">45.00 µL</span></div>`
+    expect(wellExtras(fixed)).not.toContain(')')
+    same(fixed)
+    const note = `&nbsp;${chip('C1', 'Peptide', 10, 'mM')}&nbsp; 10 µL (add last)<br><strong>MQ H₂O:</strong> 60 µL`
+    expect(wellExtras(note)).toBe('(add last)')
+    expect(same(note)).toContain('(add last)')
+  })
+  it('pretty-printed markup converges on the first rebuild', () => {
+    const x = `<strong style="x">H</strong>\n  <br>\n &nbsp;&nbsp;\n${chip('C1', 'Peptide', 10, 'mM')}\n&nbsp;\n10 µL\n<br>\n&nbsp;&nbsp;note&nbsp;&nbsp;<br>\n<strong>MQ H₂O:</strong>\n60 µL\n`
+    const y = same(x)
+    expect(y).toContain('note')
+    expect(wellExtras(y)).not.toContain('\n')
+  })
+  it('a code-only chip is an entry, and a name with parentheses keeps them', () => {
+    const codeOnly = `<span class="inv-ref" data-inv-id="i9" data-labware="">[C9] (10 mM)</span>&nbsp; 10 µL<br><strong>MQ H₂O:</strong> 60 µL`
+    expect(parseWellHtml(codeOnly)[0]).toMatchObject({ invId: 'i9', code: 'C9', name: 'C9', stock: 10, volume: 10 })
+    expect(same(codeOnly)).toContain('data-inv-id="i9"')
+    const poly = `&nbsp;${chip('C8', 'Poly(U) RNA', 50, 'mM')}&nbsp; 5.00 µL<br><strong>MQ H₂O:</strong> 45.00 µL`
+    expect(parseWellHtml(poly)[0]).toMatchObject({ name: 'Poly(U) RNA', stock: 50, unit: 'mM' })
+    same(poly)
+  })
+  it('a note typed after a volume on the same line survives on its own line', () => {
+    const x = `&nbsp;${chip('C1', 'Peptide', 10, 'mM')}&nbsp; 5 µL, add slowly<br><strong>MQ H₂O:</strong> 45 µL`
+    const y = same(x)
+    expect(y).toContain('add slowly')
+    expect(y).not.toContain('<br>, add')
   })
 })

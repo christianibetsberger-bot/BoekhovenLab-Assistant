@@ -50,6 +50,11 @@ const SLOT_KEYS = ['anion', 'cation', 'salt', 'compD']
  */
 export function readAiTargetWell(html, { hasD = false, components = [] } = {}) {
   const src = String(html || '')
+  // A well that has been edited in the plate editor was rebuilt by buildWellHtml:
+  // its chips now carry what they reached, not what was targeted, and any
+  // remaining "(x mM)" lines are unlinked extras — reading those as targets would
+  // invent a screen. Such a well is read from its composition instead.
+  if (/class="well-(?:final|total)"/.test(src)) return null
   const sampleId = sampleIdOf(src)
   if (sampleId === null) return null
   TARGET_CONC_RE.lastIndex = 0

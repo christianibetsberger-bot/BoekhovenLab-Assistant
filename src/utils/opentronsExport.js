@@ -271,7 +271,7 @@ export function newOt2Step(type) {
     case 'pause':         return { ...base, message: 'Continue when ready' }
     case 'mix':           return { ...base, wells: 'all', reps: 3, volume: '', pipette: 'auto', newTip: 'always' }
     case 'sample':        return { ...base, wells: 'all', volume: 10, pipette: 'auto', newTip: 'always', mixBeforeReps: 0, mixBeforeUl: '', quenchName: '', quenchUl: '' }
-    case 'series':        return { ...base, count: 6, intervalMinutes: 30, firstAtZero: true, wells: 'all', volume: 10, pipette: 'auto', newTip: 'always', mixBeforeReps: 0, mixBeforeUl: '', quenchName: '', quenchUl: '' }
+    case 'series':        return { ...base, count: 6, intervalMinutes: 30, firstAtZero: true, wells: 'all', volume: 10, pipette: 'auto', newTip: 'always', mixBeforeReps: 0, mixBeforeUl: '', quenchName: '', quenchUl: '', pauseEvery: 0, pauseMessage: '' }
     case 'comment':       return { ...base, text: '' }
     case 'custom':        return { ...base, code: '' }
     default:              return base
@@ -742,8 +742,9 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   }
 
   // Sampling: destinations are handed out column by column, continuing across
-  // steps. 8-channel sampling starts on a fresh column of the sample labware.
+  // steps and across sample plates. 8-channel sampling starts on a fresh column.
   let sampleCursor = 0
+  let samplePlateIdx = 0, sampleSwaps = 0
   const samplePlans = new Map()
   for (const s of stepsOf('sample', 'series')) {
     const label = s.type === 'series' ? 'Sampling series' : 'Take samples'
@@ -755,11 +756,24 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     const count = s.type === 'series' ? Math.max(1, Math.floor(Number(s.count) || 0)) : 1
     const pref = multi ? s.pipette : (mountIsMulti(s.pipette) ? 'auto' : s.pipette)
     const p = vol > 0 ? choosePipette(vol, pref, `${label} (${pyNum(vol)} µL)`, { multi }) : null
-    const start = multi ? Math.ceil(sampleCursor / 8) * 8 : sampleCursor
-    const need = units.length * (multi ? 8 : 1) * count
-    sampleCursor = start + need
+    // Where each time point goes: an absolute index across as many sample plates
+    // as the run needs. A time point never straddles two plates; when the plate
+    // is full the robot pauses so a fresh one can be put in, and continues at A1.
     const capacity = samplesLw ? samplesLw.rows * samplesLw.cols : 0
-    if (sampleCursor > capacity) warn(`${label}: needs ${need} sample wells (${units.length * (multi ? 8 : 1)} wells × ${count} time point${count > 1 ? 's' : ''}) but only ${Math.max(0, capacity - start)} are left on the ${samplesLw?.label || 'sample labware'}. Reduce the count, sample fewer wells, or choose a larger labware.`)
+    const perPoint = units.length * (multi ? 8 : 1)
+    if (capacity && perPoint > capacity) warn(`${label}: one time point needs ${perPoint} sample wells but the ${samplesLw.label} has ${capacity} — sample fewer wells or choose a larger labware.`)
+    const starts = [], fresh = new Set()
+    let abs = multi ? Math.ceil(sampleCursor / 8) * 8 : sampleCursor
+    for (let i = 0; i < count; i++) {
+      if (capacity && perPoint <= capacity && (abs % capacity) + perPoint > capacity) abs = Math.ceil(abs / capacity) * capacity
+      const plateIdx = capacity ? Math.floor(abs / capacity) : 0
+      if (plateIdx > samplePlateIdx) { fresh.add(i); samplePlateIdx = plateIdx }
+      starts.push(capacity ? abs % capacity : abs)
+      abs += perPoint
+    }
+    sampleCursor = abs
+    sampleSwaps += fresh.size
+    const start = starts[0] ?? 0
     if (samplesLw && vol > samplesLw.maxUl) warn(`${label}: ${pyNum(vol)} µL exceeds a ${samplesLw.label} well (${samplesLw.maxUl} µL).`)
     const qv = num(s.quenchUl), qn = String(s.quenchName || '').trim()
     const quench = qn && qv > 0 ? quenchDemands.get('quench:' + qn.toLowerCase()) : null
@@ -772,7 +786,8 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
       const iv = num(s.intervalMinutes)
       if (!(iv > 0)) warn('Sampling series: the interval must be a positive number of minutes.')
     }
-    samplePlans.set(s.id, { wells: pre.wells, units, multi, vol, count, pip: p, start, quench, qp, qv, qMulti, tipsPerPoint })
+    const pauseEvery = s.type === 'series' ? Math.max(0, Math.floor(Number(s.pauseEvery) || 0)) : 0
+    samplePlans.set(s.id, { wells: pre.wells, units, multi, vol, count, pip: p, start, starts, fresh, quench, qp, qv, qMulti, tipsPerPoint, pauseEvery, pauseMessage: oneLine(s.pauseMessage || 'Scheduled check — do what is needed, then resume') })
   }
   for (const s of stepsOf('mix')) {
     const pre = selectionPre.get(s.id)
@@ -797,30 +812,84 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     const free = TIP_SLOT_ORDER.filter(s => !occupancy[s] && !(tooTallBesideHS(lw) && hsSides.includes(s)))
     return [...free.filter(s => !hsNeighbours.includes(s)), ...free.filter(s => hsNeighbours.includes(s))]
   }
+  const takeRack = (p) => {
+    const slot = freeSlots(p.tipLw)[0]
+    if (!slot) return false
+    occupancy[slot] = { what: `${p.tipLw?.label || p.tipName} (${p.var})`, lw: p.tipLw, role: 'tips', pipette: p.var }
+    p.tipSlots.push(slot)
+    return true
+  }
+  const racksNeeded = (p) => p.tipsNeeded > 0 ? Math.ceil(p.tipsNeeded / p.perRack) : 0   // none for a pipette that never picks up a tip
   for (const p of pipettes) {
     p.perRack = p.def.channels === 8 ? 12 : 96     // an 8-channel empties a rack in 12 pickups
-    const racksNeeded = Math.max(1, Math.ceil(p.tipsNeeded / p.perRack))
     p.tipSlots = []
-    for (let i = 0; i < racksNeeded; i++) {
-      const slot = freeSlots(p.tipLw)[0]
-      if (!slot) break
-      occupancy[slot] = { what: `${p.tipLw?.label || p.tipName} (${p.var})`, lw: p.tipLw, role: 'tips', pipette: p.var }
-      p.tipSlots.push(slot)
-    }
+    for (let i = 0; i < racksNeeded(p); i++) if (!takeRack(p)) break
+  }
+  // A pipette left without any rack would stop the run at its first pickup,
+  // whereas one rack fewer for another pipette only means one more refill pause:
+  // hand over a rack from the pipette that has the most.
+  for (const needy of pipettes.filter(p => p.tipsNeeded > 0 && !p.tipSlots.length)) {
+    const donor = [...pipettes].filter(p => p.tipSlots.length > 1).sort((a, b) => b.tipSlots.length - a.tipSlots.length)[0]
+    if (!donor) continue
+    delete occupancy[donor.tipSlots.pop()]
+    takeRack(needy)
+  }
+  for (const p of pipettes) {
     p.tipCapacity = p.tipSlots.length * p.perRack
-    if (p.tipSlots.length < racksNeeded) {
-      const unit = p.def.channels === 8 ? 'tip columns' : 'tips'
-      warn(`${p.def.label} needs ${p.tipsNeeded} ${unit} (${racksNeeded} racks) but only ${p.tipSlots.length} rack${p.tipSlots.length === 1 ? '' : 's'} fit on the deck — the run will pause ${Math.ceil(p.tipsNeeded / Math.max(p.perRack, p.tipCapacity)) - 1}× for you to refill them. "One tip per stock" needs far fewer.`)
-    }
+    const need = racksNeeded(p)
+    if (p.tipSlots.length >= need) continue
+    const unit = p.def.channels === 8 ? 'tip columns' : 'tips'
+    if (!p.tipSlots.length) warn(`No slot is free for a tip rack of the ${p.def.label}, which needs ${p.tipsNeeded} ${unit} — the run would stop at its first pickup. Free a slot: a smaller sample labware, fewer sources, or one pipette for everything.`)
+    else warn(`${p.def.label} needs ${p.tipsNeeded} ${unit} (${need} racks) but only ${p.tipSlots.length} rack${p.tipSlots.length === 1 ? '' : 's'} fit on the deck — the run will pause ${Math.ceil(p.tipsNeeded / p.tipCapacity) - 1}× for you to refill them. "One tip per stock" needs far fewer.`)
   }
   // When any pipette will run dry, the protocol keeps its own count and pauses
   // for a refill just before the step that would fail.
   const needRefill = pipettes.some(p => p.tipsNeeded > p.tipCapacity)
-  const tipCall = (p, n, indent = '') => { if (needRefill && p && n > 0) emit(`${indent}need_tips(${p.var}, ${n})`) }
+  const tipCall = (p, n, indent = '') => { if (needRefill && p && p.tipCapacity && n > 0) emit(`${indent}need_tips(${p.var}, ${n})`) }
+
+  // ── The run as a list of actions, for the dialog's preview ──
+  // One record per atomic thing the robot does, in execution order, with the
+  // wells it touches, the tips it spends, a rough duration, and the module state
+  // after it. It is built by the same walk that writes the Python, so the two
+  // cannot disagree; a series is expanded into its time points, and the tip
+  // refills land exactly where need_tips() will pause.
+  const actions = []
+  let clock = 0
+  let curStep = null, curN = 0
+  const previewTips = Object.fromEntries(pipettes.map(p => [p.var, p.tipCapacity]))
+  const mod = { tcBlock: null, tcLidTemp: null, temp: null, hsTemp: null, mag: 'down' }
+  const plateSlot = targetOn === 'deck' ? targetSlot : targetOn === 'thermocycler' ? '7' : targetOn === 'temperature' ? String(cfg.deck.temperature) : String(cfg.deck.heaterShaker)
+  const sampleNames = samplesLw ? wellNamesOf(samplesLw) : []
+  const groupWells = (address) => groups.find(g => g.address === address)?.wells || [address]
+  const srcRef = (d) => d?.rack ? { slot: racks[d.rack].slot, var: d.rack, wells: d.rack === 'reservoir' ? columnWells(columnLw, d.well) : [d.well] } : null
+  const act = (a) => {
+    const durationSec = Math.round(a.durationSec || 0)
+    actions.push({ id: actions.length, step: curN, stepId: curStep?.id || '', stepType: curStep?.type || 'setup', kind: a.kind, text: a.text,
+                   pipette: a.pipette || '', multi: !!a.multi, src: a.src || null, dst: a.dst || null, volume: a.volume ?? null, count: a.count || 0,
+                   tipsUsed: a.tipsUsed || 0, durationSec, userAction: !!a.userAction, clockSec: Math.round(clock),
+                   state: { tcLid: lidOpen ? 'open' : 'closed', tcBlock: mod.tcBlock, tcLidTemp: mod.tcLidTemp, temp: mod.temp, hsTemp: mod.hsTemp, hsRpm, mag: mod.mag, tipsLeft: { ...previewTips } } })
+    clock += durationSec
+  }
+  // Tip accounting for the preview: the same rule need_tips() applies at run time.
+  const spendTips = (p, n) => {
+    if (!p || !(n > 0)) return
+    if (!p.tipCapacity) {
+      // No rack could be placed: the run cannot get past the first pickup.
+      if (!p.noRackFlagged) { p.noRackFlagged = true; act({ kind: 'refill', userAction: true, pipette: p.var, text: `No tip rack for the ${p.def.label} fits on the deck — the run stops at its first pickup. Free a slot (see the warnings).` }) }
+      return
+    }
+    if (needRefill && previewTips[p.var] < n) {
+      act({ kind: 'refill', userAction: true, pipette: p.var, text: `Refill every tip rack of the ${p.def.label} (slot${p.tipSlots.length === 1 ? '' : 's'} ${p.tipSlots.join(', ')}), then resume`,
+            dst: { slot: p.tipSlots[0] || '', var: p.tipVar, wells: [] } })
+      previewTips[p.var] = p.tipCapacity
+    }
+    previewTips[p.var] = Math.max(0, previewTips[p.var] - n)
+  }
+  const volText = (vols) => { const lo = Math.min(...vols), hi = Math.max(...vols); return lo === hi ? `${pyNum(lo)} µL` : `${pyNum(lo)}–${pyNum(hi)} µL` }
   // Split a transfer list so no chunk costs more tips than the loaded racks hold.
   const chunked = (items, p, always) => {
-    if (!needRefill || !always) return [{ items, tips: always ? tipsFor(p, items, true) : 1 }]
-    const cap = Math.max(1, p.tipCapacity)
+    if (!needRefill || !always || !p.tipCapacity) return [{ items, tips: always ? tipsFor(p, items, true) : 1 }]
+    const cap = p.tipCapacity
     const out = []
     let cur = [], cost = 0
     for (const it of items) {
@@ -927,7 +996,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   }
   if (samplesLw) emit(`samples = protocol.load_labware(${py(samplesLw.name)}, ${py(String(cfg.deck.samples || '2'))}, label=${py(uniqueLabel('Samples'))})`)
   for (const p of pipettes) {
-    if (!p.tipSlots.length) { emit(`${p.tipVar} = []  # no free slot for a tip rack — see warnings`); continue }
+    if (!p.tipSlots.length) { emit(`${p.tipVar} = []  # ${p.tipsNeeded > 0 ? 'no free slot for a tip rack — see warnings' : 'this pipette is not used by any step'}`); continue }
     emit(`${p.tipVar} = [protocol.load_labware(${py(p.tipName)}, slot) for slot in [${p.tipSlots.map(py).join(', ')}]]`)
   }
   emit()
@@ -999,16 +1068,27 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   let lidOpen = true     // what the code has told the thermocycler so far
   let hsRpm = 0          // shake speed currently commanded
   let hsHeating = false  // the robot never switches the Heater-Shaker off by itself
-  if (targetOn === 'thermocycler') { emit('tc.open_lid()  # the plate must be reachable before anything is pipetted into it'); lidOpen = true; emit() }
-  if (usesHS) { emit('hs.close_labware_latch()  # the latch must be closed to shake and to hold the plate'); emit() }
+  if (targetOn === 'thermocycler') { emit('tc.open_lid()  # the plate must be reachable before anything is pipetted into it'); lidOpen = true; act({ kind: 'tc', text: 'Thermocycler: open the lid so the plate can be reached', dst: { slot: '7', var: 'tc', wells: [] }, durationSec: 30 }); emit() }
+  if (usesHS) { emit('hs.close_labware_latch()  # the latch must be closed to shake and to hold the plate'); act({ kind: 'hs', text: 'Heater-Shaker: close the labware latch', dst: { slot: String(cfg.deck.heaterShaker), var: 'hs', wells: [] }, durationSec: 5 }); emit() }
 
   // Before any pipetting: the plate on the Thermocycler needs its lid open, and a
   // shaking Heater-Shaker blocks the pipette from every slot around it. Both are
   // put back afterwards, so a step that was set up keeps running.
-  const beforePipetting = () => {
+  // `record` adds the same moves to the preview; the series loop records its
+  // time points itself, since the code for them is written once but runs N times.
+  const beforePipetting = ({ record = true } = {}) => {
     const undo = []
-    if (targetOn === 'thermocycler' && !lidOpen) { emit('tc.open_lid()'); lidOpen = true; undo.push(() => { emit('tc.close_lid()'); lidOpen = false }) }
-    if (usesHS && hsRpm > 0) { const rpm = hsRpm; emit('hs.deactivate_shaker()'); hsRpm = 0; undo.push(() => { emit(`hs.set_and_wait_for_shake_speed(${pyNum(rpm)})`); hsRpm = rpm }) }
+    if (targetOn === 'thermocycler' && !lidOpen) {
+      emit('tc.open_lid()'); lidOpen = true
+      if (record) act({ kind: 'tc', text: 'Thermocycler: open the lid for pipetting', dst: { slot: '7', var: 'tc', wells: [] }, durationSec: 30 })
+      undo.push(() => { emit('tc.close_lid()'); lidOpen = false; if (record) act({ kind: 'tc', text: 'Thermocycler: close the lid again', dst: { slot: '7', var: 'tc', wells: [] }, durationSec: 30 }) })
+    }
+    if (usesHS && hsRpm > 0) {
+      const rpm = hsRpm
+      emit('hs.deactivate_shaker()'); hsRpm = 0
+      if (record) act({ kind: 'hs', text: 'Heater-Shaker: stop shaking so the pipette can reach the deck around it', dst: { slot: String(cfg.deck.heaterShaker), var: 'hs', wells: [] }, durationSec: 5 })
+      undo.push(() => { emit(`hs.set_and_wait_for_shake_speed(${pyNum(rpm)})`); hsRpm = rpm; if (record) act({ kind: 'hs', text: `Heater-Shaker: shake again at ${pyNum(rpm)} rpm`, dst: { slot: String(cfg.deck.heaterShaker), var: 'hs', wells: [] }, durationSec: 5 }) })
+    }
     return () => undo.forEach(fn => fn())
   }
 
@@ -1026,6 +1106,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   let n = 0
   for (const s of steps) {
     n++
+    curStep = s; curN = n
     switch (s.type) {
       case 'build': {
         const plan = buildPlans.shift() || []
@@ -1041,6 +1122,15 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
           const oneTip = s.mode === 'distribute' || s.newTip === 'once'
           for (const { items: chunk, tips } of chunked(b.transfers, b.pip, !oneTip)) {
             tipCall(b.pip, tips)
+            spendTips(b.pip, tips)
+            const fills = chunk.reduce((x, t) => x + t.wells, 0)
+            act({
+              kind: s.mode === 'distribute' ? 'distribute' : 'transfer', pipette: b.pip.var, multi: b.multi,
+              text: `${oneLine(desc)}: ${volText(chunk.map(t => t.volume))} into ${b.multi ? `${chunk.length} column${chunk.length === 1 ? '' : 's'} (${fills} wells) with the 8-channel` : `${fills} well${fills === 1 ? '' : 's'}`} (${b.pip.var}, ${oneTip ? 'one tip' : 'new tip each'})`,
+              src: srcRef(b.src), dst: { slot: plateSlot, var: 'plate', wells: chunk.flatMap(t => b.multi ? groupWells(t.target) : [t.target]) },
+              volume: chunk.length === 1 ? chunk[0].volume : null, count: fills, tipsUsed: tips,
+              durationSec: s.mode === 'distribute' ? 8 + 3 * chunk.length : chunk.length * (oneTip ? 4 : 9) + 2 * (tips - (oneTip ? 1 : chunk.length)),
+            })
             if (s.mode === 'distribute') {
               // One aspirate feeds several wells; the tip never re-enters the wells.
               const kwd = kw.filter(k => !k.startsWith('blowout_location') && !k.startsWith('mix_after') && !k.startsWith('new_tip'))
@@ -1066,24 +1156,35 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         if (isSet(s.lidTemp)) bits.push(`lid ${pyNum(s.lidTemp)} °C`)
         if (s.deactivate) bits.push('then off')
         emit(`# Step ${n}: thermocycler — ${bits.join(', ') || 'no change'}`)
-        if (s.lid === 'open') { emit('tc.open_lid()'); lidOpen = true }
-        if (s.lid === 'close') { emit('tc.close_lid()'); lidOpen = false }
-        if (isSet(s.lidTemp)) emit(`tc.set_lid_temperature(${pyNum(s.lidTemp)})`)
+        const tcRef = { slot: '7', var: 'tc', wells: [] }
+        if (s.lid === 'open') { emit('tc.open_lid()'); lidOpen = true; act({ kind: 'tc', text: 'Thermocycler: open the lid', dst: tcRef, durationSec: 30 }) }
+        if (s.lid === 'close') { emit('tc.close_lid()'); lidOpen = false; act({ kind: 'tc', text: 'Thermocycler: close the lid', dst: tcRef, durationSec: 30 }) }
+        if (isSet(s.lidTemp)) { emit(`tc.set_lid_temperature(${pyNum(s.lidTemp)})`); mod.tcLidTemp = Number(s.lidTemp); act({ kind: 'tc', text: `Thermocycler: heat the lid to ${pyNum(s.lidTemp)} °C`, dst: tcRef, durationSec: 60 }) }
         if (isSet(s.blockTemp)) {
           const args = [pyNum(s.blockTemp)]
-          if (isSet(s.holdMinutes) && Number(s.holdMinutes) > 0) args.push(`hold_time_minutes=${pyNum(s.holdMinutes)}`)
+          const hold = isSet(s.holdMinutes) && Number(s.holdMinutes) > 0 ? Number(s.holdMinutes) : 0
+          if (hold) args.push(`hold_time_minutes=${pyNum(s.holdMinutes)}`)
           if (Number(plate?.targetVolume) > 0) args.push(`block_max_volume=${pyNum(plate.targetVolume)}`)
-          emit(`tc.set_block_temperature(${args.join(', ')})${isSet(s.holdMinutes) && Number(s.holdMinutes) > 0 ? '  # returns after the hold' : ''}`)
+          emit(`tc.set_block_temperature(${args.join(', ')})${hold ? '  # returns after the hold' : ''}`)
+          mod.tcBlock = Number(s.blockTemp)
+          act({ kind: 'tc', text: `Thermocycler: block to ${pyNum(s.blockTemp)} °C${hold ? ` and hold ${pyNum(hold)} min` : ''}`, dst: tcRef, durationSec: 60 + hold * 60 })
         }
-        if (s.deactivate) { emit('tc.deactivate_lid()'); emit('tc.deactivate_block()') }
+        if (s.deactivate) { emit('tc.deactivate_lid()'); emit('tc.deactivate_block()'); mod.tcBlock = null; mod.tcLidTemp = null; act({ kind: 'tc', text: 'Thermocycler: block and lid off', dst: tcRef, durationSec: 5 }) }
         emit()
         break
       }
       case 'tc_profile': {
         const prof = (s.profile || []).filter(st => isSet(st.temp) && isSet(st.seconds))
         emit(`# Step ${n}: thermocycler profile — ${prof.map(st => `${pyNum(st.temp)} °C ${pyNum(st.seconds)} s`).join(' → ')} × ${Math.max(1, Math.floor(Number(s.cycles) || 1))}`)
-        if (lidOpen) { emit('tc.close_lid()'); lidOpen = false }
-        if (isSet(s.lidTemp)) emit(`tc.set_lid_temperature(${pyNum(s.lidTemp)})`)
+        const tcRef = { slot: '7', var: 'tc', wells: [] }
+        if (lidOpen) { emit('tc.close_lid()'); lidOpen = false; act({ kind: 'tc', text: 'Thermocycler: close the lid for the profile', dst: tcRef, durationSec: 30 }) }
+        if (isSet(s.lidTemp)) { emit(`tc.set_lid_temperature(${pyNum(s.lidTemp)})`); mod.tcLidTemp = Number(s.lidTemp); act({ kind: 'tc', text: `Thermocycler: heat the lid to ${pyNum(s.lidTemp)} °C`, dst: tcRef, durationSec: 60 }) }
+        {
+          const reps = Math.max(1, Math.floor(Number(s.cycles) || 1))
+          const perCycle = prof.reduce((x, st) => x + Number(st.seconds) + 15, 0)
+          mod.tcBlock = prof.length ? Number(prof[prof.length - 1].temp) : mod.tcBlock
+          act({ kind: 'tc', text: `Thermocycler: run the profile ${prof.map(st => `${pyNum(st.temp)} °C ${pyNum(st.seconds)} s`).join(' → ')} × ${reps}`, dst: tcRef, durationSec: 30 + perCycle * reps })
+        }
         emit('tc.execute_profile(')
         emit('    steps=[')
         for (const st of prof) emit(`        {"temperature": ${pyNum(st.temp)}, "hold_time_seconds": ${pyNum(st.seconds)}},`)
@@ -1092,37 +1193,41 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         const bmv = isSet(s.blockMaxUl) ? Number(s.blockMaxUl) : (Number(plate?.targetVolume) > 0 ? Number(plate.targetVolume) : null)
         if (bmv) emit(`    block_max_volume=${pyNum(bmv)},`)
         emit(')')
-        if (isSet(s.finalTemp)) emit(`tc.set_block_temperature(${pyNum(s.finalTemp)})`)
+        if (isSet(s.finalTemp)) { emit(`tc.set_block_temperature(${pyNum(s.finalTemp)})`); mod.tcBlock = Number(s.finalTemp); act({ kind: 'tc', text: `Thermocycler: hold the block at ${pyNum(s.finalTemp)} °C`, dst: { slot: '7', var: 'tc', wells: [] }, durationSec: 60 }) }
         emit()
         break
       }
       case 'temperature': {
-        if (s.deactivate) { emit(`# Step ${n}: temperature module off`); emit('temp_mod.deactivate()') }
-        else { emit(`# Step ${n}: temperature module → ${pyNum(s.temp)} °C (waits until reached)`); emit(`temp_mod.set_temperature(celsius=${pyNum(s.temp)})`) }
+        const tmRef = { slot: String(cfg.deck.temperature), var: 'temp_mod', wells: [] }
+        if (s.deactivate) { emit(`# Step ${n}: temperature module off`); emit('temp_mod.deactivate()'); mod.temp = null; act({ kind: 'temp', text: 'Temperature Module: off', dst: tmRef, durationSec: 3 }) }
+        else { emit(`# Step ${n}: temperature module → ${pyNum(s.temp)} °C (waits until reached)`); emit(`temp_mod.set_temperature(celsius=${pyNum(s.temp)})`); mod.temp = Number(s.temp); act({ kind: 'temp', text: `Temperature Module: to ${pyNum(s.temp)} °C and wait until reached`, dst: tmRef, durationSec: 120 }) }
         emit()
         break
       }
       case 'heater_shaker': {
+        const hsRef = { slot: String(cfg.deck.heaterShaker), var: 'hs', wells: [] }
         if (s.deactivate) {
           emit(`# Step ${n}: heater-shaker off`)
-          emit('hs.deactivate_shaker()'); emit('hs.deactivate_heater()'); hsRpm = 0; hsHeating = false
+          emit('hs.deactivate_shaker()'); emit('hs.deactivate_heater()'); hsRpm = 0; hsHeating = false; mod.hsTemp = null
+          act({ kind: 'hs', text: 'Heater-Shaker: heater and shaker off', dst: hsRef, durationSec: 5 })
         } else {
           const bits = []
           if (isSet(s.temp)) bits.push(`${pyNum(s.temp)} °C`)
           if (isSet(s.rpm)) bits.push(Number(s.rpm) > 0 ? `${pyNum(s.rpm)} rpm` : 'stop shaking')
           emit(`# Step ${n}: heater-shaker — ${bits.join(', ') || 'no change'}`)
-          if (isSet(s.temp)) { emit(`hs.set_and_wait_for_temperature(${pyNum(s.temp)})`); hsHeating = true }
+          if (isSet(s.temp)) { emit(`hs.set_and_wait_for_temperature(${pyNum(s.temp)})`); hsHeating = true; mod.hsTemp = Number(s.temp); act({ kind: 'hs', text: `Heater-Shaker: heat to ${pyNum(s.temp)} °C and wait`, dst: hsRef, durationSec: 90 }) }
           if (isSet(s.rpm)) {
-            if (Number(s.rpm) > 0) { emit(`hs.set_and_wait_for_shake_speed(${pyNum(s.rpm)})`); hsRpm = Number(s.rpm) }
-            else { emit('hs.deactivate_shaker()'); hsRpm = 0 }
+            if (Number(s.rpm) > 0) { emit(`hs.set_and_wait_for_shake_speed(${pyNum(s.rpm)})`); hsRpm = Number(s.rpm); act({ kind: 'hs', text: `Heater-Shaker: shake at ${pyNum(s.rpm)} rpm`, dst: hsRef, durationSec: 5 }) }
+            else { emit('hs.deactivate_shaker()'); hsRpm = 0; act({ kind: 'hs', text: 'Heater-Shaker: stop shaking', dst: hsRef, durationSec: 5 }) }
           }
         }
         emit()
         break
       }
       case 'magnetic': {
-        if (s.action === 'disengage') { emit(`# Step ${n}: magnets down`); emit('mag.disengage()') }
-        else { emit(`# Step ${n}: magnets up`); emit(isSet(s.height) ? `mag.engage(height_from_base=${pyNum(s.height)})` : 'mag.engage()') }
+        const mgRef = { slot: String(cfg.deck.magnetic), var: 'mag', wells: [] }
+        if (s.action === 'disengage') { emit(`# Step ${n}: magnets down`); emit('mag.disengage()'); mod.mag = 'down'; act({ kind: 'mag', text: 'Magnetic Module: magnets down', dst: mgRef, durationSec: 5 }) }
+        else { emit(`# Step ${n}: magnets up`); emit(isSet(s.height) ? `mag.engage(height_from_base=${pyNum(s.height)})` : 'mag.engage()'); mod.mag = 'up'; act({ kind: 'mag', text: `Magnetic Module: magnets up${isSet(s.height) ? ` (${pyNum(s.height)} mm)` : ''}`, dst: mgRef, durationSec: 5 }) }
         emit()
         break
       }
@@ -1135,17 +1240,19 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         if (secs > 0) args.push(`seconds=${pyNum(secs)}`)
         if (String(s.message || '').trim()) args.push(`msg=${py(oneLine(s.message))}`)
         emit(`protocol.delay(${args.join(', ')})`)
+        act({ kind: 'wait', text: `Wait ${mins ? pyNum(mins) + ' min' : ''}${mins && secs ? ' ' : ''}${secs ? pyNum(secs) + ' s' : ''}${String(s.message || '').trim() ? ` — ${oneLine(s.message)}` : ''}`, durationSec: mins * 60 + secs })
         emit()
         break
       }
       case 'pause': {
         emit(`# Step ${n}: pause until someone resumes the run`)
         emit(`protocol.pause(${py(oneLine(s.message || 'Continue when ready'))})`)
+        act({ kind: 'pause', userAction: true, text: `Paused: ${oneLine(s.message || 'Continue when ready')} — press Resume in the Opentrons App` })
         emit()
         break
       }
       case 'comment': {
-        if (String(s.text || '').trim()) emit(`protocol.comment(${py(oneLine(s.text))})`)
+        if (String(s.text || '').trim()) { emit(`protocol.comment(${py(oneLine(s.text))})`); act({ kind: 'comment', text: oneLine(s.text) }) }
         emit()
         break
       }
@@ -1157,6 +1264,9 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         emit(`# Step ${n}: mix ${what}, ${Math.max(1, Math.floor(Number(s.reps) || 1))} × ${pyNum(vol)} µL (${pl.pip.var})`)
         const restore = beforePipetting()
         if (s.newTip === 'once') tipCall(pl.pip, 1)
+        spendTips(pl.pip, s.newTip === 'once' ? 1 : pl.units.length)
+        act({ kind: 'mix', pipette: pl.pip.var, multi: pl.multi, text: `Mix ${what}: ${Math.max(1, Math.floor(Number(s.reps) || 1))} × ${pyNum(vol)} µL (${pl.pip.var})`,
+              dst: { slot: plateSlot, var: 'plate', wells: pl.units.flatMap(u => pl.multi ? groupWells(u) : [u]) }, count: pl.units.length, tipsUsed: s.newTip === 'once' ? 1 : pl.units.length, durationSec: pl.units.length * 6 })
         emit(`for well in [${pl.units.map(py).join(', ')}]:`)
         if (s.newTip === 'once') { emit(`    if not ${pl.pip.var}.has_tip:`); emit(`        ${pl.pip.var}.pick_up_tip()`) }
         else { tipCall(pl.pip, 1, '    '); emit(`    ${pl.pip.var}.pick_up_tip()`) }
@@ -1181,28 +1291,47 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         const fromWhat = pl.multi ? `${nU} column${nU === 1 ? '' : 's'} (${nU * 8} wells) with the 8-channel` : `${nU} well${nU === 1 ? '' : 's'}`
         // With the 8-channel, destinations are whole columns of the sample labware.
         const col0 = pl.start / 8
-        const destsExpr = (count) => pl.multi
-          ? `[col[0] for col in samples.columns()[${col0}:${col0 + nU * count}]]`
-          : `samples.wells()[${pl.start}:${pl.start + nU * count}]`
+        const SWAP_MSG = 'Sample plate full: replace it with a fresh one (and top up the quench), then resume'
+        // Destinations for a time point: a literal slice for a single sample step,
+        // a computed one inside the series loop.
+        const destsAt = (st) => typeof st === 'number'
+          ? (pl.multi ? `[col[0] for col in samples.columns()[${st / 8}:${st / 8 + nU}]]` : `samples.wells()[${st}:${st + nU}]`)
+          : (pl.multi ? `[col[0] for col in samples.columns()[${st} // 8:${st} // 8 + ${nU}]]` : `samples.wells()[${st}:${st} + ${nU}]`)
         // A single-channel quench into 8-channel destinations must visit every well of each column.
         const quenchDests = pl.multi && !pl.qMulti ? '[w for a in dests for w in samples.columns_by_name()[a.well_name[1:]]]' : 'dests'
+        // Preview records for one sampling round into the sample wells `names`.
+        const plateWells = pl.units.flatMap(u => pl.multi ? groupWells(u) : [u])
+        const sampleRound = (names, label) => {
+          if (pl.quench && pl.qp) {
+            spendTips(pl.qp, 1)
+            act({ kind: 'transfer', pipette: pl.qp.var, multi: pl.qMulti, text: `${label}quench: ${pyNum(pl.qv)} µL ${pl.quench.name} into ${names.length} sample well${names.length === 1 ? '' : 's'} (${pl.qp.var})`,
+                  src: srcRef(pl.quench), dst: { slot: String(cfg.deck.samples || '2'), var: 'samples', wells: names }, volume: pl.qv, count: names.length, tipsUsed: 1, durationSec: 6 + 3 * names.length })
+          }
+          spendTips(pl.pip, pl.tipsPerPoint)
+          act({ kind: 'transfer', pipette: pl.pip.var, multi: pl.multi, text: `${label}sample ${pyNum(pl.vol)} µL from ${fromWhat} into sample well${names.length === 1 ? '' : 's'} ${names[0]}–${names[names.length - 1]} (${pl.pip.var})`,
+                src: { slot: plateSlot, var: 'plate', wells: plateWells }, dst: { slot: String(cfg.deck.samples || '2'), var: 'samples', wells: names },
+                volume: pl.vol, count: names.length, tipsUsed: pl.tipsPerPoint, durationSec: pl.units.length * (s.newTip === 'once' ? 5 : 9) })
+        }
         if (isSeries) {
           const iv = num(s.intervalMinutes) || 0
           const count = pl.count
           emit(`# Step ${n}: sampling series — ${count} time points every ${pyNum(iv)} min, ${pyNum(pl.vol)} µL from ${fromWhat} (${pl.pip.var})`)
-          if (pl.multi) emit(`#   time point i fills samples columns ${col0 + 1} + i*${nU} … (a well name below means its whole column)`)
-          else emit(`#   time point i fills samples wells [${pl.start} + i*${nU} : ${pl.start} + (i+1)*${nU}] in column order (A1, B1, … H1, A2, …)`)
+          emit(`#   each time point fills the next ${pl.multi ? `${nU} column${nU === 1 ? '' : 's'}` : `${nU} well${nU === 1 ? '' : 's'}`} of the sample labware (column order: A1, B1, … H1, A2, …)${pl.fresh.size ? `; the plate is swapped for a fresh one before time point${pl.fresh.size === 1 ? '' : 's'} ${[...pl.fresh].map(i => i + 1).join(', ')}` : ''}`)
           emit(`series_wells = [${pl.units.map(py).join(', ')}]`)
-          emit(`series_dests = ${destsExpr(count)}`)
+          emit(`series_starts = [${pl.starts.join(', ')}]  # first sample well of each time point`)
+          emit(`fresh_plate_before = ${pl.fresh.size ? '{' + [...pl.fresh].join(', ') + '}' : 'set()'}  # time points that begin on a fresh sample plate`)
           emit(`series_t0 = time.monotonic()`)
           emit(`for i in range(${count}):`)
           const firstAtZero = s.firstAtZero !== false
           emit(`    wait_until(series_t0 + ${firstAtZero ? 'i' : '(i + 1)'} * ${pyNum(iv)} * 60)`)
           emit(`    protocol.comment(f"Time point {i + 1}/${count} at t = {${firstAtZero ? 'i' : '(i + 1)'} * ${pyNum(iv)}} min")`)
-          emit(`    dests = series_dests[i * ${nU}:(i + 1) * ${nU}]`)
+          emit(`    if i in fresh_plate_before:`)
+          emit(`        protocol.pause(${py(SWAP_MSG)})`)
+          if (pl.pauseEvery > 0) { emit(`    if i > 0 and i % ${pl.pauseEvery} == 0:`); emit(`        protocol.pause(${py(pl.pauseMessage)})`) }
+          emit(`    dests = ${destsAt('series_starts[i]')}`)
           // Everything inside the loop is one level deeper: emit, then indent.
           const loopStart = L.length
-          const restore = beforePipetting()
+          const restore = beforePipetting({ record: false })
           if (pl.quench && pl.qp) {
             tipCall(pl.qp, 1)
             emit(`${pl.qp.var}.transfer(${pyNum(pl.qv)}, ${pl.quench.rack}[${py(pl.quench.well)}], ${quenchDests}, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first`)
@@ -1211,11 +1340,33 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
           emit(`${pl.pip.var}.transfer(${pyNum(pl.vol)}, ${srcList}, dests, ${kw.join(', ')})`)
           restore()
           for (let k = loopStart; k < L.length; k++) L[k] = '    ' + L[k]
+          // The preview walks the time points the loop will run.
+          const t0 = clock
+          const lidWasClosed = targetOn === 'thermocycler' && !lidOpen
+          const shaking = usesHS && hsRpm > 0 ? hsRpm : 0
+          for (let i = 0; i < count; i++) {
+            const tMin = (firstAtZero ? i : i + 1) * iv
+            const target = t0 + tMin * 60
+            if (target > clock) act({ kind: 'wait', text: `Wait for time point ${i + 1}/${count} (t = ${pyNum(tMin)} min)`, durationSec: target - clock })
+            act({ kind: 'comment', text: `Time point ${i + 1}/${count} at t = ${pyNum(tMin)} min` })
+            if (pl.fresh.has(i)) act({ kind: 'swap', userAction: true, text: SWAP_MSG, dst: { slot: String(cfg.deck.samples || '2'), var: 'samples', wells: [] } })
+            if (pl.pauseEvery > 0 && i > 0 && i % pl.pauseEvery === 0) act({ kind: 'pause', userAction: true, text: `Paused: ${pl.pauseMessage} — press Resume in the Opentrons App` })
+            if (lidWasClosed) { lidOpen = true; act({ kind: 'tc', text: 'Thermocycler: open the lid for sampling', dst: { slot: '7', var: 'tc', wells: [] }, durationSec: 30 }) }
+            if (shaking) { hsRpm = 0; act({ kind: 'hs', text: 'Heater-Shaker: stop shaking for sampling', dst: { slot: String(cfg.deck.heaterShaker), var: 'hs', wells: [] }, durationSec: 5 }) }
+            const st = pl.starts[i]
+            const rowNames = pl.multi
+              ? Array.from({ length: nU }, (_, k) => sampleNames.slice((st / 8 + k) * 8, (st / 8 + k + 1) * 8)).flat()
+              : sampleNames.slice(st, st + nU)
+            sampleRound(rowNames, `Time point ${i + 1}: `)
+            if (lidWasClosed) { lidOpen = false; act({ kind: 'tc', text: 'Thermocycler: close the lid again', dst: { slot: '7', var: 'tc', wells: [] }, durationSec: 30 }) }
+            if (shaking) { hsRpm = shaking; act({ kind: 'hs', text: `Heater-Shaker: shake again at ${pyNum(shaking)} rpm`, dst: { slot: String(cfg.deck.heaterShaker), var: 'hs', wells: [] }, durationSec: 5 }) }
+          }
         } else {
           const into = pl.multi ? `samples columns ${col0 + 1}–${col0 + nU}` : `samples wells ${pl.start}–${pl.start + nU - 1}`
           emit(`# Step ${n}: take ${pyNum(pl.vol)} µL from ${fromWhat} into ${into} (${pl.pip.var})`)
           emit(`sample_wells = [${pl.units.map(py).join(', ')}]`)
-          emit(`dests = ${destsExpr(1)}`)
+          if (pl.fresh.has(0)) { emit(`protocol.pause(${py(SWAP_MSG)})`); act({ kind: 'swap', userAction: true, text: SWAP_MSG, dst: { slot: String(cfg.deck.samples || '2'), var: 'samples', wells: [] } }) }
+          emit(`dests = ${destsAt(pl.start)}`)
           const restore = beforePipetting()
           if (pl.quench && pl.qp) {
             tipCall(pl.qp, 1)
@@ -1223,6 +1374,10 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
           }
           tipCall(pl.pip, pl.tipsPerPoint)
           emit(`${pl.pip.var}.transfer(${pyNum(pl.vol)}, ${srcList}, dests, ${kw.join(', ')})`)
+          const names = pl.multi
+            ? Array.from({ length: nU }, (_, k) => sampleNames.slice((col0 + k) * 8, (col0 + k + 1) * 8)).flat()
+            : sampleNames.slice(pl.start, pl.start + nU)
+          sampleRound(names, '')
           restore()
         }
         emit()
@@ -1233,6 +1388,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         if (!code.trim()) break
         emit(`# Step ${n}: custom`)
         for (const line of code.split('\n')) L.push(line.trim() ? '    ' + line : '')
+        act({ kind: 'custom', text: `Custom Python (${code.split('\n').filter(l => l.trim()).length} lines) — not previewed` })
         emit()
         break
       }
@@ -1264,10 +1420,34 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     columnLabware: columnLw?.name || '',
     sampleWellsUsed: sampleCursor,
     sampleCapacity: samplesLw ? samplesLw.rows * samplesLw.cols : 0,
+    samplePlates: usesSamples ? samplePlateIdx + 1 : 0,
+    sampleSwaps,
     modules: { thermocycler: usesTC, temperature: usesTemp, heaterShaker: usesHS, magnetic: usesMag },
     steps: steps.length,
+    plateSlot, samplesSlot: samplesLw ? String(cfg.deck.samples || '2') : '',
+    runSec: Math.round(clock),
   }
-  return { code, warnings, summary }
+  // ── Run clearance: the warnings sorted into the checks the Opentrons App would
+  // fail the file on (deck, tips, labware, modules, apiLevel), plus the ones only
+  // this side knows (volumes a pipette cannot do accurately, what is scheduled).
+  const refills = actions.filter(a => a.kind === 'refill').length
+  const CHECKS = [
+    { id: 'deck', label: 'Deck layout', re: /deck conflict|not an OT-2 deck slot|Heater-Shaker can|recommends slots|next to the Heater-Shaker|left or right of the Heater-Shaker|fits the Thermocycler|cannot be loaded on the/i, info: `${deckEntries.length} slots in use` },
+    { id: 'tips', label: 'Tips', re: /tip rack|tips \(|tip columns|needs \d+ tips/i, info: refills ? `${refills} refill pause${refills === 1 ? '' : 's'} scheduled` : 'the loaded racks cover the run' },
+    { id: 'samples', label: 'Sample plate', re: /sample well|sample labware|time point/i, info: usesSamples ? `${sampleCursor} wells over ${samplePlateIdx + 1} plate${samplePlateIdx ? 's' : ''}${sampleSwaps ? ` — ${sampleSwaps} plate change${sampleSwaps === 1 ? '' : 's'} scheduled` : ''}` : 'no sampling' },
+    { id: 'liquids', label: 'Liquids and their containers', re: /needs about|no free position|already taken|has no position|reservoir, so the single|touch tip/i, info: `${sources.filter(d => d.rack).length} liquids placed` },
+    { id: 'api', label: 'Robot software', re: /apiLevel/i, info: `apiLevel ${cfg.apiLevel}` },
+    { id: 'modules', label: 'Modules', re: /Thermocycler|Temperature Module|Heater-Shaker|°C|rpm|profile|magnet/i, info: [usesTC && 'Thermocycler', usesTemp && 'Temperature Module', usesHS && 'Heater-Shaker', usesMag && 'Magnetic Module'].filter(Boolean).join(', ') || 'none' },
+    { id: 'pipettes', label: 'Pipettes and volumes', re: /pipette|minimum|maximum|strokes|8-channel|single-channel|mount/i, info: pipettes.map(p => `${p.var} (${p.def.min}–${p.def.max} µL)`).join(', ') || 'none loaded' },
+    { id: 'steps', label: 'Steps', re: /./, info: `${steps.length} step${steps.length === 1 ? '' : 's'}, ${actions.length} actions, about ${Math.round(clock / 60)} min` },
+  ]
+  const clearance = CHECKS.map(c => ({ id: c.id, label: c.label, info: c.info, notes: [] }))
+  for (const w of warnings) {
+    const c = CHECKS.findIndex(x => x.re.test(w))
+    clearance[c >= 0 ? c : clearance.length - 1].notes.push(w)
+  }
+  for (const c of clearance) c.ok = c.notes.length === 0
+  return { code, warnings, summary, actions, clearance }
 }
 
 /** A filename that says which plate it is and when it was made. */

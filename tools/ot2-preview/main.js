@@ -21,7 +21,7 @@ const pinia = createPinia()
 // is exercised with the same containing-block trap the app has.
 const app = createApp({ render: () => h('div', { class: 'card', style: 'margin: 40px; min-height: 200px;' }, [
   h('h2', 'Well Plate (preview shell)'),
-  h(Modal, { plate, initialTab: params.get('tab') || 'steps', onClose: () => {} }),
+  h(Modal, { plate, initialTab: params.get('tab') || 'steps', initialAction: Number(params.get('action') || 0), onClose: () => {} }),
 ]) })
 app.use(pinia)
 const store = useLabStore()

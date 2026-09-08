@@ -25,6 +25,12 @@ export function fixture(which) {
     const series = newOt2Step('series'); Object.assign(series, { count: 6, intervalMinutes: 30, wells: 'A1-H2', volume: 25, quenchName: 'TFA 1 %', quenchUl: 30 })
     const mix = newOt2Step('mix'); Object.assign(mix, { wells: 'A3-H3', reps: 2, volume: 40 })
     cfg.steps = [newOt2Step('build'), series, mix]
+  } else if (which === 'swap') {
+    plate = plate96({ name: 'Coacervate kinetics 14', peptide: (r, c) => 5 + c, rna: () => 10 })
+    cfg = defaultOt2Config(plate)
+    cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' }
+    const series = newOt2Step('series'); Object.assign(series, { count: 8, intervalMinutes: 20, wells: 'A1-H2', volume: 25, quenchName: 'TFA 1 %', quenchUl: 30, pauseEvery: 4, pauseMessage: 'Top up the quench tube' })
+    cfg.steps = [newOt2Step('build'), series]
   } else if (which === 'modules') {
     plate = plate96({ name: 'PCR screen 4', peptide: (r) => 5 + r, rna: (r, c) => c * 2 })
     cfg = defaultOt2Config(plate)

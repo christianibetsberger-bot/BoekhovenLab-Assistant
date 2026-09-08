@@ -18,7 +18,15 @@
 // Input is the generator's summary.deck: one row per occupied slot.
 import { computed, useId } from 'vue'
 
-const props = defineProps({ deck: { type: Array, default: () => [] } })
+// `overlay` is what the run preview paints on top of the deck for one moment
+// of the run: the wells being drawn from and dispensed into, the wells already
+// filled, the tips already used, the module states, and a banner when the
+// person at the bench has to do something. Null draws the plain deck.
+//   { src: { slot, wells[] } | null, dst: { slot, wells[] } | null,
+//     filled: { [slot]: string[] }, tips: { [slot]: { used, columns } },
+//     modules: { tcLid, tcBlock, tcLidTemp, temp, hsTemp, hsRpm, mag } | null,
+//     banner: { kind: 'user' | 'wait' | 'info', text } | null }
+const props = defineProps({ deck: { type: Array, default: () => [] }, overlay: { type: Object, default: null } })
 
 // ── Deck geometry (SBS footprint 128 : 86, 8-unit gaps) ──
 const SW = 128, SH = 86, GAP = 8, PAD = 8
@@ -46,24 +54,25 @@ const TC_RESERVED = new Set(['8', '11'])   // kept free for it
 // rows × cols grid of centres filling a box. The pitch may differ between the
 // two axes (up to 1.4 : 1) so a well field fills a wide, short box instead of
 // leaving blank margins; `shrink` is the radius as a fraction of the pitch.
+const ROWS = 'ABCDEFGHIJKLMNOP'
 function grid(box, rows, cols, shrink) {
   const cx = box.w / cols, cy = box.h / rows
   const cellX = Math.min(cx, cy * 1.4), cellY = Math.min(cy, cx * 1.4)
   const ox = box.x + (box.w - cellX * cols) / 2 + cellX / 2
   const oy = box.y + (box.h - cellY * rows) / 2 + cellY / 2
-  const pts = []
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) pts.push({ x: ox + c * cellX, y: oy + r * cellY })
-  return { pts, r: Math.min(cellX, cellY) * shrink }
+  const pts = [], names = []
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) { pts.push({ x: ox + c * cellX, y: oy + r * cellY }); names.push(`${ROWS[r]}${c + 1}`) }
+  return { pts, names, rows, cols, r: Math.min(cellX, cellY) * shrink }
 }
 // Reservoir troughs: `cols` upright troughs for a single row, otherwise `rows` flat ones.
 function troughs(box, rows, cols) {
   const out = [], g = 2
   if (rows <= 1) {
     const w = (box.w - g * (cols - 1)) / cols
-    for (let c = 0; c < cols; c++) out.push({ x: box.x + c * (w + g), y: box.y, w, h: box.h })
+    for (let c = 0; c < cols; c++) out.push({ x: box.x + c * (w + g), y: box.y, w, h: box.h, name: `A${c + 1}` })
   } else {
     const h = (box.h - g * (rows - 1)) / rows
-    for (let r = 0; r < rows; r++) out.push({ x: box.x, y: box.y + r * (h + g), w: box.w, h })
+    for (let r = 0; r < rows; r++) out.push({ x: box.x, y: box.y + r * (h + g), w: box.w, h, name: `${ROWS[r]}1` })
   }
   return out
 }
@@ -84,13 +93,41 @@ function labwareGlyph(lw, box, caption) {
   return { type: 'wells', box, ...grid(inner, r, c, r >= 16 ? 0.3 : 0.36) }
 }
 
+// ── What the overlay says about a slot ──
+const ov = computed(() => props.overlay || null)
+const setOf = (arr) => new Set(arr || [])
+const slotState = (slot) => {
+  const o = ov.value
+  if (!o) return null
+  const isSrc = o.src && String(o.src.slot) === slot, isDst = o.dst && String(o.dst.slot) === slot
+  return {
+    src: isSrc ? setOf(o.src.wells) : null, dst: isDst ? setOf(o.dst.wells) : null,
+    filled: setOf(o.filled?.[slot]), tips: o.tips?.[slot] || null,
+    active: !!(isSrc || isDst),
+  }
+}
+// The class of one well/tip/tube/trough by its name, given the slot's state.
+const wellClass = (st, name, i, glyph) => {
+  if (!st) return ''
+  if (glyph.type === 'tips' && st.tips) {
+    // Tips are taken column by column (A1, B1, … H1, A2, …); an 8-channel takes a whole column at once.
+    const col = i % glyph.cols, row = Math.floor(i / glyph.cols)
+    const used = st.tips.columns ? col < st.tips.used : (col * glyph.rows + row) < st.tips.used
+    return used ? 'used' : ''
+  }
+  if (st.dst?.has(name)) return 'dst'
+  if (st.src?.has(name)) return 'src'
+  if (st.filled.has(name)) return 'filled'
+  return ''
+}
+
 // ── One entry per slot tile (the two under the Thermocycler are not drawn) ──
 const cells = computed(() => Object.keys(pos)
   .filter(slot => !(tc.value && TC_UNDER.has(slot)))
   .map(slot => {
     const { x, y } = pos[slot]
     const d = bySlot.value[slot] || null
-    const c = { slot, x, y, kind: 'empty', title: `Slot ${slot}: empty`, role: '' }
+    const c = { slot, x, y, kind: 'empty', title: `Slot ${slot}: empty`, role: '', st: slotState(slot) }
     if (slot === '12') { c.kind = 'trash'; c.title = 'Slot 12: fixed trash'; return c }
     if (tc.value && TC_RESERVED.has(slot)) { c.kind = 'reserved'; c.title = `Slot ${slot}: reserved for the Thermocycler`; return c }
     if (!d) return c
@@ -120,6 +157,49 @@ const cells = computed(() => Object.keys(pos)
     return c
   }))
 
+// ── Overlay geometry: the path from source to target, badges, banner ──
+const slotCentre = (slot) => {
+  const s = String(slot)
+  if (tc.value && (s === '7' || s === '10' || s === '8' || s === '11') && tcBox.value) {
+    const b = tcBox.value; return { x: b.x + b.w / 2, y: b.y + b.h * 0.62 }
+  }
+  const p = pos[s]; return p ? { x: p.x + SW / 2, y: p.y + SH / 2 } : null
+}
+const path = computed(() => {
+  const o = ov.value
+  if (!o?.src || !o?.dst) return null
+  const a = slotCentre(o.src.slot), b = slotCentre(o.dst.slot)
+  if (!a || !b) return null
+  if (String(o.src.slot) === String(o.dst.slot)) return { d: `M${a.x - 30} ${a.y - 26} q30 -28 60 0` }
+  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2
+  const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1
+  const bow = Math.min(46, len * 0.25)
+  return { d: `M${a.x} ${a.y} Q${mx - dy / len * bow} ${my + dx / len * bow} ${b.x} ${b.y}` }
+})
+const fmtTemp = (t) => (t == null ? null : `${Math.round(t * 10) / 10} °C`)
+const badgeFor = (moduleType) => {
+  const m = ov.value?.modules
+  if (!m) return ''
+  if (moduleType === 'thermocycler') return [m.tcLid === 'closed' ? 'lid closed' : 'lid open', fmtTemp(m.tcBlock)].filter(Boolean).join(' · ')
+  if (moduleType === 'temperature') return fmtTemp(m.temp) || 'idle'
+  if (moduleType === 'heater_shaker') return [fmtTemp(m.hsTemp), m.hsRpm ? `${m.hsRpm} rpm` : null].filter(Boolean).join(' · ') || 'idle'
+  if (moduleType === 'magnetic') return m.mag === 'up' ? 'magnets up' : 'magnets down'
+  return ''
+}
+// The banner wraps onto a second line rather than cutting a sentence short.
+const banner = computed(() => {
+  const b = ov.value?.banner
+  if (!b) return null
+  const words = String(b.text || '').split(/\s+/)
+  const lines = ['']
+  for (const w of words) {
+    if ((lines[lines.length - 1] + ' ' + w).trim().length > 60 && lines.length < 2) lines.push(w)
+    else lines[lines.length - 1] = (lines[lines.length - 1] + ' ' + w).trim()
+  }
+  if (lines[1] && lines[1].length > 60) lines[1] = lines[1].slice(0, 59) + '…'
+  return { kind: b.kind, lines }
+})
+
 // ── The Thermocycler: one tall unit over slots 7 and 10, overhanging right ──
 const tcUnit = computed(() => {
   if (!tc.value) return null
@@ -134,6 +214,7 @@ const tcUnit = computed(() => {
   ]
   const lwOn = tc.value.onModule
   return {
+    st: slotState('7'),
     box: b, body, lid, holder, plate, notches,
     handle: { x: b.x + b.w / 2 - 20, y: lid.y + 14, w: 40, h: 5 },
     vent: { x: b.x + 14, y: b.y + b.h - 20, w: b.w - 42, h: 4 },
@@ -154,7 +235,7 @@ const tcUnit = computed(() => {
     <rect x=".5" y=".5" :width="W - 1" :height="H - 1" rx="12" class="panel" />
 
     <!-- Slot tiles -->
-    <g v-for="c in cells" :key="c.slot" class="slot" :class="c.kind">
+    <g v-for="c in cells" :key="c.slot" class="slot" :class="[c.kind, { active: c.st?.active, 'active-src': !!c.st?.src, 'active-dst': !!c.st?.dst }]">
       <title>{{ c.title }}</title>
       <rect :x="c.x" :y="c.y" :width="SW" :height="SH" rx="4" class="base" />
 
@@ -191,21 +272,22 @@ const tcUnit = computed(() => {
         <g v-if="c.glyph" class="lw" :class="[c.glyph.type, 'role-' + c.role]">
           <rect :x="c.glyph.box.x" :y="c.glyph.box.y" :width="c.glyph.box.w" :height="c.glyph.box.h" rx="3" class="frame" />
           <template v-if="c.glyph.type === 'troughs'">
-            <rect v-for="(t, i) in c.glyph.troughs" :key="i" :x="t.x" :y="t.y" :width="t.w" :height="t.h" rx="1.5" class="trough" />
+            <rect v-for="(t, i) in c.glyph.troughs" :key="i" :x="t.x" :y="t.y" :width="t.w" :height="t.h" rx="1.5" class="trough" :class="wellClass(c.st, t.name, i, c.glyph)" />
           </template>
           <template v-else-if="c.glyph.type === 'tips'">
-            <circle v-for="(p, i) in c.glyph.pts" :key="i" :cx="p.x" :cy="p.y" :r="c.glyph.r" class="tip" />
+            <circle v-for="(p, i) in c.glyph.pts" :key="i" :cx="p.x" :cy="p.y" :r="c.glyph.r" class="tip" :class="wellClass(c.st, c.glyph.names[i], i, c.glyph)" />
           </template>
           <template v-else-if="c.glyph.type === 'tubes'">
-            <g v-for="(p, i) in c.glyph.pts" :key="i">
+            <g v-for="(p, i) in c.glyph.pts" :key="i" :class="wellClass(c.st, c.glyph.names[i], i, c.glyph)">
               <circle :cx="p.x" :cy="p.y" :r="c.glyph.r" class="tube" />
               <circle :cx="p.x" :cy="p.y" :r="c.glyph.r * 0.58" class="tube-in" />
             </g>
           </template>
           <template v-else>
-            <circle v-for="(p, i) in c.glyph.pts" :key="i" :cx="p.x" :cy="p.y" :r="c.glyph.r" class="well" />
+            <circle v-for="(p, i) in c.glyph.pts" :key="i" :cx="p.x" :cy="p.y" :r="c.glyph.r" class="well" :class="wellClass(c.st, c.glyph.names[i], i, c.glyph)" />
           </template>
         </g>
+        <text v-if="badgeFor(c.module)" :x="c.x + SW / 2" :y="c.y + 12" text-anchor="middle" class="badge">{{ badgeFor(c.module) }}</text>
         <text :x="c.x + 7" :y="c.y + SH - 6" class="cap num">{{ c.slot }}</text>
         <text :x="c.x + SW / 2 + (c.slot.length > 1 ? 5 : 0)" :y="c.y + SH - 6" text-anchor="middle" class="mlabel">{{ c.label }}</text>
       </template>
@@ -215,19 +297,19 @@ const tcUnit = computed(() => {
         <rect :x="c.glyph.box.x" :y="c.glyph.box.y" :width="c.glyph.box.w" :height="c.glyph.box.h" rx="4" class="frame" />
         <path v-if="c.accent" :d="`M${c.glyph.box.x + 4} ${c.glyph.box.y + 1.5} H${c.glyph.box.x + c.glyph.box.w - 4}`" class="bar" :style="{ stroke: c.accent }" />
         <template v-if="c.glyph.type === 'troughs'">
-          <rect v-for="(t, i) in c.glyph.troughs" :key="i" :x="t.x" :y="t.y" :width="t.w" :height="t.h" rx="1.5" class="trough" />
+          <rect v-for="(t, i) in c.glyph.troughs" :key="i" :x="t.x" :y="t.y" :width="t.w" :height="t.h" rx="1.5" class="trough" :class="wellClass(c.st, t.name, i, c.glyph)" />
         </template>
         <template v-else-if="c.glyph.type === 'tips'">
-          <circle v-for="(p, i) in c.glyph.pts" :key="i" :cx="p.x" :cy="p.y" :r="c.glyph.r" class="tip" />
+          <circle v-for="(p, i) in c.glyph.pts" :key="i" :cx="p.x" :cy="p.y" :r="c.glyph.r" class="tip" :class="wellClass(c.st, c.glyph.names[i], i, c.glyph)" />
         </template>
         <template v-else-if="c.glyph.type === 'tubes'">
-          <g v-for="(p, i) in c.glyph.pts" :key="i">
+          <g v-for="(p, i) in c.glyph.pts" :key="i" :class="wellClass(c.st, c.glyph.names[i], i, c.glyph)">
             <circle :cx="p.x" :cy="p.y" :r="c.glyph.r" class="tube" />
             <circle :cx="p.x" :cy="p.y" :r="c.glyph.r * 0.58" class="tube-in" />
           </g>
         </template>
         <template v-else>
-          <circle v-for="(p, i) in c.glyph.pts" :key="i" :cx="p.x" :cy="p.y" :r="c.glyph.r" class="well" />
+          <circle v-for="(p, i) in c.glyph.pts" :key="i" :cx="p.x" :cy="p.y" :r="c.glyph.r" class="well" :class="wellClass(c.st, c.glyph.names[i], i, c.glyph)" />
         </template>
         <text :x="c.glyph.box.x + 6" :y="c.glyph.box.y + c.glyph.box.h - 4" class="cap num">{{ c.num }}</text>
         <text :x="c.glyph.box.x + c.glyph.box.w - 6" :y="c.glyph.box.y + c.glyph.box.h - 4" text-anchor="end" class="cap word">{{ c.word }}</text>
@@ -235,7 +317,7 @@ const tcUnit = computed(() => {
     </g>
 
     <!-- Thermocycler: one tall unit in the left column over slots 7 and 10 -->
-    <g v-if="tcUnit" class="tc">
+    <g v-if="tcUnit" class="tc" :class="{ active: tcUnit.st?.active, 'active-src': !!tcUnit.st?.src, 'active-dst': !!tcUnit.st?.dst }">
       <title>{{ tcUnit.title }}</title>
       <path :d="tcUnit.body" class="tcbody" />
       <path :d="`M${tcUnit.box.x + 10} ${tcUnit.box.y + 1.5} H${tcUnit.box.x + tcUnit.box.w - 10}`" class="bar" :style="{ stroke: ROLE_COLOR.module }" />
@@ -249,22 +331,36 @@ const tcUnit = computed(() => {
       <g v-if="tcUnit.glyph" class="lw role-plate" :class="tcUnit.glyph.type">
         <rect :x="tcUnit.plate.x" :y="tcUnit.plate.y" :width="tcUnit.plate.w" :height="tcUnit.plate.h" rx="3" class="frame" />
         <template v-if="tcUnit.glyph.type === 'troughs'">
-          <rect v-for="(t, i) in tcUnit.glyph.troughs" :key="i" :x="t.x" :y="t.y" :width="t.w" :height="t.h" rx="1.5" class="trough" />
+          <rect v-for="(t, i) in tcUnit.glyph.troughs" :key="i" :x="t.x" :y="t.y" :width="t.w" :height="t.h" rx="1.5" class="trough" :class="wellClass(tcUnit.st, t.name, i, tcUnit.glyph)" />
         </template>
         <template v-else-if="tcUnit.glyph.type === 'tubes'">
-          <g v-for="(p, i) in tcUnit.glyph.pts" :key="i">
+          <g v-for="(p, i) in tcUnit.glyph.pts" :key="i" :class="wellClass(tcUnit.st, tcUnit.glyph.names[i], i, tcUnit.glyph)">
             <circle :cx="p.x" :cy="p.y" :r="tcUnit.glyph.r" class="tube" />
             <circle :cx="p.x" :cy="p.y" :r="tcUnit.glyph.r * 0.58" class="tube-in" />
           </g>
         </template>
         <template v-else>
-          <circle v-for="(p, i) in tcUnit.glyph.pts" :key="i" :cx="p.x" :cy="p.y" :r="tcUnit.glyph.r" :class="tcUnit.glyph.type === 'tips' ? 'tip' : 'well'" />
+          <circle v-for="(p, i) in tcUnit.glyph.pts" :key="i" :cx="p.x" :cy="p.y" :r="tcUnit.glyph.r" :class="[tcUnit.glyph.type === 'tips' ? 'tip' : 'well', wellClass(tcUnit.st, tcUnit.glyph.names[i], i, tcUnit.glyph)]" />
         </template>
       </g>
       <rect v-else :x="tcUnit.plate.x" :y="tcUnit.plate.y" :width="tcUnit.plate.w" :height="tcUnit.plate.h" rx="3" class="block" />
+      <text v-if="badgeFor('thermocycler')" :x="tcUnit.lid.x + tcUnit.lid.w - 8" :y="tcUnit.lid.y + tcUnit.lid.h - 8" text-anchor="end" class="badge">{{ badgeFor('thermocycler') }}</text>
       <!-- vent bar and indicator -->
       <rect :x="tcUnit.vent.x" :y="tcUnit.vent.y" :width="tcUnit.vent.w" :height="tcUnit.vent.h" rx="2" class="vent" />
       <circle :cx="tcUnit.dot.cx" :cy="tcUnit.dot.cy" r="4" class="dot" />
+    </g>
+
+    <!-- Preview overlay: the move being made, and anything the person must do -->
+    <defs v-if="path">
+      <marker :id="hatchId + '-arrow'" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" class="arrowhead" />
+      </marker>
+    </defs>
+    <path v-if="path" :d="path.d" class="move" :marker-end="`url(#${hatchId}-arrow)`" />
+    <g v-if="banner" class="banner" :class="banner.kind">
+      <rect :x="PAD + 10" :y="PAD + 10" :width="W - PAD * 2 - 20" :height="banner.lines.length > 1 ? 58 : 44" rx="9" class="banner-bg" />
+      <text :x="W / 2" :y="PAD + 10 + 18" text-anchor="middle" class="banner-title">{{ banner.kind === 'user' ? 'YOUR TURN' : banner.kind === 'wait' ? 'WAITING' : 'NOTE' }}</text>
+      <text v-for="(l, i) in banner.lines" :key="i" :x="W / 2" :y="PAD + 10 + 34 + i * 14" text-anchor="middle" class="banner-text">{{ l }}</text>
     </g>
   </svg>
 </template>
@@ -314,6 +410,26 @@ const tcUnit = computed(() => {
 .wave { fill: none; stroke: var(--tx3); stroke-width: 1.2; }
 .magnet { fill: var(--tx3); }
 .pole { fill: #E69F00; }
+
+/* Preview overlay */
+.slot.active-dst .base, .tc.active-dst .tcbody { stroke: var(--acc); stroke-width: 2; }
+.slot.active-src .base, .tc.active-src .tcbody { stroke: #009E73; stroke-width: 2; }
+.well.filled, .tube.filled, .filled .tube-in { fill: var(--acc); opacity: .35; }
+.lw.role-samples .well.filled { fill: #CC79A7; opacity: .45; }
+.well.dst, .filled.dst, .dst .tube-in { fill: var(--acc); opacity: 1; stroke: var(--acc); }
+.well.src, .src .tube, .src .tube-in, .trough.src { fill: #009E73; stroke: #009E73; opacity: .85; }
+.trough.dst { fill: var(--acc); stroke: var(--acc); }
+.tip.used { opacity: .12; }
+.move { fill: none; stroke: var(--acc); stroke-width: 2.5; stroke-dasharray: 6 4; animation: otd-flow 1.2s linear infinite; }
+.arrowhead { fill: var(--acc); }
+@keyframes otd-flow { to { stroke-dashoffset: -20; } }
+.badge { font-size: 10px; font-weight: 700; fill: #b45309; }
+.banner-bg { stroke-width: 1.2; }
+.banner.user .banner-bg { fill: rgba(217,119,6,.92); stroke: #b45309; }
+.banner.wait .banner-bg { fill: var(--acc); stroke: var(--acc); opacity: .92; }
+.banner.info .banner-bg { fill: var(--tx3); stroke: var(--tx3); opacity: .9; }
+.banner-title { font-size: 11px; font-weight: 800; letter-spacing: .12em; fill: #fff; }
+.banner-text { font-size: 11.5px; font-weight: 600; fill: #fff; }
 
 /* Thermocycler */
 .tcbody { fill: var(--fl); stroke: var(--tx3); stroke-width: 1; }

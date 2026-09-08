@@ -357,7 +357,9 @@ describe('generateOpentronsProtocol — modules and steps', () => {
     expect(code).toContain('import time')
     expect(code).toContain('def wait_until(t_target):')
     expect(code).toContain('samples = protocol.load_labware("nest_96_wellplate_100ul_pcr_full_skirt", "2", label="Samples")')
-    expect(code).toContain('series_dests = samples.wells()[0:32]')
+    expect(code).toContain('series_starts = [0, 8, 16, 24]  # first sample well of each time point')
+    expect(code).toContain('fresh_plate_before = set()')
+    expect(code).toContain('    dests = samples.wells()[series_starts[i]:series_starts[i] + 8]')
     expect(code).toContain('for i in range(4):')
     expect(code).toContain('        wait_until(series_t0 + i * 15 * 60)')
     // Peptide A1, RNA B1, then the quench is the third tube.
@@ -368,13 +370,41 @@ describe('generateOpentronsProtocol — modules and steps', () => {
     expect(summary.sampleWellsUsed).toBe(34)
     assertPythonShape(code)
   })
-  it('sampling series: first sample after one interval, and too many samples is a warning', () => {
-    const { code, warnings } = gen(fullPlate(), cfg => {
+  it('sampling series: first sample after one interval; a full sample plate schedules a plate change instead of overflowing', () => {
+    const { code, warnings, summary, actions, clearance } = gen(fullPlate(), cfg => {
       const s = newOt2Step('series'); s.count = 20; s.intervalMinutes = 5; s.wells = 'all'; s.volume = 5; s.firstAtZero = false
       cfg.steps.push(s)
     })
     expect(code).toContain('wait_until(series_t0 + (i + 1) * 5 * 60)')
-    expect(warnings.some(w => /needs 1920 sample wells/.test(w))).toBe(true)
+    // 96 wells per time point = one plate each: a fresh plate before every time point but the first.
+    expect(code).toContain(`fresh_plate_before = {${Array.from({ length: 19 }, (_, i) => i + 1).join(', ')}}`)
+    expect(code).toContain('        if i in fresh_plate_before:\n            protocol.pause("Sample plate full: replace it with a fresh one (and top up the quench), then resume")')
+    expect(code).toContain('series_starts = [' + Array(20).fill('0').join(', ') + ']')
+    expect(summary.samplePlates).toBe(20)
+    expect(summary.sampleSwaps).toBe(19)
+    expect(summary.sampleWellsUsed).toBe(1920)
+    expect(warnings.some(w => /sample wells/.test(w))).toBe(false)
+    const swaps = actions.filter(a => a.kind === 'swap')
+    expect(swaps).toHaveLength(19)
+    expect(swaps.every(a => a.userAction && a.dst.slot === '2')).toBe(true)
+    // The swap comes right after the time-point comment, before anything is pipetted.
+    const k = actions.findIndex(a => a.kind === 'swap')
+    expect(actions[k - 1].kind).toBe('comment')
+    expect(clearance.find(c => c.id === 'samples')).toMatchObject({ ok: true, info: '1920 wells over 20 plates — 19 plate changes scheduled' })
+  })
+  it('a series can pause for a scheduled check every N time points; the clearance list sorts every warning into a check', () => {
+    const { code, warnings, actions, clearance } = gen(fullPlate(), cfg => {
+      const s = newOt2Step('series'); s.count = 7; s.intervalMinutes = 10; s.wells = 'A1-H1'; s.volume = 5; s.pauseEvery = 3; s.pauseMessage = 'Top up the quench'
+      cfg.steps.push(s)
+    })
+    expect(code).toContain('        if i > 0 and i % 3 == 0:\n            protocol.pause("Top up the quench")')
+    const pauses = actions.filter(a => a.kind === 'pause')
+    expect(pauses.map(a => a.text)).toEqual(['Paused: Top up the quench — press Resume in the Opentrons App', 'Paused: Top up the quench — press Resume in the Opentrons App'])   // before time points 4 and 7
+    expect(actions[actions.indexOf(pauses[0]) - 1].text).toBe('Time point 4/7 at t = 30 min')
+    expect(clearance.map(c => c.id)).toEqual(['deck', 'tips', 'samples', 'liquids', 'api', 'modules', 'pipettes', 'steps'])
+    expect(clearance.flatMap(c => c.notes).sort()).toEqual([...warnings].sort())
+    expect(clearance.find(c => c.id === 'samples')).toMatchObject({ ok: true, info: '56 wells over 1 plate' })
+    expect(clearance.find(c => c.id === 'steps').info).toMatch(/^\d+ steps?, \d+ actions, about \d+ min$/)
   })
   it('pauses to refill tips when the deck cannot hold enough racks', () => {
     const wells = {}
@@ -466,7 +496,8 @@ describe('8-channel', () => {
     })
     expect(warnings).toEqual([])
     expect(code).toContain('series_wells = ["A1", "A2"]')
-    expect(code).toContain('series_dests = [col[0] for col in samples.columns()[0:6]]')
+    expect(code).toContain('series_starts = [0, 16, 32]')
+    expect(code).toContain('    dests = [col[0] for col in samples.columns()[series_starts[i] // 8:series_starts[i] // 8 + 2]]')
     expect(code).toContain('        p300m.transfer(30, reservoir["A2"], dests, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first')
     expect(code).toContain('        p300m.transfer(25, [plate[w] for w in series_wells], dests, new_tip="always", blow_out=True, blowout_location="destination well")')
     // A partial selection after the series stays single-channel and continues after the used columns.
@@ -526,5 +557,132 @@ describe('tip accounting', () => {
     const plate = fullPlate({ peptide: () => 5, rna: () => 10, total: 82 })
     const { summary } = gen(plate, cfg => { cfg.pipettes = { left: '', right: 'p20_single_gen2' }; cfg.steps[0].newTip = 'once' })
     expect(summary.pipettes[0].tipsNeeded).toBe(3)
+  })
+})
+
+describe('action list (the run preview)', () => {
+  it('records every transfer with its wells, tips and clock, in execution order', () => {
+    const { actions, summary } = gen(fullPlate(), cfg => { const d = newOt2Step('delay'); d.minutes = 30; cfg.steps.push(d, newOt2Step('sample')) })
+    expect(actions.map(a => a.kind)).toEqual(['transfer', 'transfer', 'transfer', 'transfer', 'wait', 'transfer'])
+    const water = actions[0]
+    expect(water).toMatchObject({ step: 1, stepType: 'build', pipette: 'p300', count: 96, tipsUsed: 96, clockSec: 0 })
+    expect(water.src).toEqual({ slot: '5', var: 'bulk', wells: ['A1'] })
+    expect(water.dst.slot).toBe('1')
+    expect(water.dst.wells).toHaveLength(96)
+    expect(water.state.tipsLeft).toEqual({ p300: 96, p20: 288 })   // two P300 racks minus the 96 tips this action spends; the state is after its spend
+    expect(actions[4]).toMatchObject({ kind: 'wait', durationSec: 1800 })
+    expect(actions[5].clockSec).toBe(actions[4].clockSec + 1800)
+    expect(actions[5]).toMatchObject({ kind: 'transfer', pipette: 'p20', count: 96 })
+    expect(actions[5].src.wells).toHaveLength(96)
+    expect(actions[5].dst).toMatchObject({ slot: '2', var: 'samples' })
+    expect(actions[5].dst.wells.slice(0, 3)).toEqual(['A1', 'B1', 'C1'])
+    expect(summary.runSec).toBe(actions[5].clockSec + actions[5].durationSec)
+    expect(summary.plateSlot).toBe('1')
+  })
+  it('expands a sampling series into time points with waits measured from the series start, lid open/close around each', () => {
+    const { actions } = gen(smallPlate(), cfg => {
+      cfg.target = { on: 'thermocycler', labware: 'nest_96_wellplate_100ul_pcr_full_skirt' }
+      const tc = newOt2Step('thermocycler'); tc.lid = 'close'; tc.blockTemp = 30
+      const s = newOt2Step('series'); s.count = 3; s.intervalMinutes = 10; s.wells = 'A1'; s.volume = 5; s.firstAtZero = true
+      cfg.steps.push(tc, s)
+    })
+    const seq = actions.map(a => a.kind)
+    // setup lid open, build transfers, tc close, tc block, then 3 × (wait?, comment, open, sample, close)
+    expect(seq.slice(0, 1)).toEqual(['tc'])
+    const points = actions.filter(a => a.kind === 'comment' && /Time point/.test(a.text))
+    expect(points).toHaveLength(3)
+    const t0 = points[0].clockSec
+    expect(points[1].clockSec).toBe(t0 + 600)
+    expect(points[2].clockSec).toBe(t0 + 1200)
+    const after = actions.slice(actions.indexOf(points[0]))
+    expect(after.slice(1, 4).map(a => a.kind)).toEqual(['tc', 'transfer', 'tc'])
+    expect(after[1].text).toMatch(/open the lid/)
+    expect(after[3].text).toMatch(/close the lid/)
+    expect(after[2].dst.wells).toEqual(['A1'])
+    expect(actions.find(a => a.kind === 'wait').text).toMatch(/time point 2\/3/)
+    expect(actions.every(a => a.dst?.var !== 'plate' || a.dst.slot === '7')).toBe(true)
+  })
+  it('places the tip refills exactly where need_tips() will pause, as user actions', () => {
+    const plate = fullPlate({ peptide: () => 5, rna: () => 10, total: 82 })   // 576 P20 tips, 480 fit → one refill
+    const { actions, code } = gen(plate, cfg => {
+      cfg.pipettes = { left: '', right: 'p20_single_gen2' }
+      cfg.target = { on: 'thermocycler', labware: 'nest_96_wellplate_100ul_pcr_full_skirt' }
+    })
+    const refills = actions.filter(a => a.kind === 'refill')
+    expect(refills).toHaveLength(1)
+    expect(refills[0].userAction).toBe(true)
+    expect(refills[0].text).toMatch(/Refill every tip rack of the P20/)
+    const spentBefore = actions.slice(0, actions.indexOf(refills[0])).reduce((a, x) => a + x.tipsUsed, 0)
+    expect(spentBefore).toBeLessThanOrEqual(480)
+    expect(spentBefore + actions[actions.indexOf(refills[0]) + 1].tipsUsed).toBeGreaterThan(480)
+    expect((code.match(/need_tips\(p20/g) || []).length).toBe(actions.filter(a => a.kind === 'transfer').length)
+  })
+  it('a pipette with no rack at all stops the run once, instead of pausing before every well', () => {
+    const { actions, code, warnings } = gen(fullPlate(), cfg => {
+      // Thermocycler + every module + samples + both racks leave one free slot; the P300 takes it.
+      cfg.target = { on: 'thermocycler', labware: 'nest_96_wellplate_100ul_pcr_full_skirt' }
+      cfg.deck.heaterShaker = '3'; cfg.deck.magnetic = '6'; cfg.deck.temperature = '9'
+      cfg.steps.push(newOt2Step('heater_shaker'), newOt2Step('magnetic'), newOt2Step('temperature'), newOt2Step('sample'))
+    })
+    const stops = actions.filter(a => a.kind === 'refill' && /No tip rack/.test(a.text))
+    expect(stops).toHaveLength(1)
+    expect(code).not.toContain('need_tips(p20')
+    expect(warnings.some(w => /No slot is free for a tip rack of the P20 Single-Channel GEN2, which needs \d+ tips — the run would stop at its first pickup/.test(w))).toBe(true)
+    expect(actions.filter(a => a.kind === 'transfer' && a.pipette === 'p20').length).toBeGreaterThan(0)
+  })
+  it('a pause and a custom step are actions too; comments carry their text', () => {
+    const { actions } = gen(smallPlate(), cfg => {
+      const p = newOt2Step('pause'); p.message = 'Swap plates'
+      const c = newOt2Step('comment'); c.text = 'half way'
+      const cu = newOt2Step('custom'); cu.code = 'protocol.comment("x")'
+      cfg.steps.push(p, c, cu)
+    })
+    expect(actions.find(a => a.kind === 'pause')).toMatchObject({ userAction: true, durationSec: 0 })
+    expect(actions.find(a => a.kind === 'pause').text).toContain('Swap plates')
+    expect(actions.find(a => a.kind === 'comment').text).toBe('half way')
+    expect(actions.find(a => a.kind === 'custom').text).toMatch(/not previewed/)
+  })
+})
+
+describe('tip racks when the deck is crowded', () => {
+  it('never leaves a pipette that needs tips without a rack — the richer pipette gives one up', () => {
+    const { summary, warnings, actions } = gen(fullPlate(), cfg => {
+      cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' }
+      const s = newOt2Step('series'); s.count = 8; s.intervalMinutes = 1; s.wells = 'A1-H12'; s.volume = 25; s.quenchName = 'TFA'; s.quenchUl = 30
+      cfg.steps.push(s)
+    })
+    const multi = summary.pipettes.find(p => p.var === 'p300m'), single = summary.pipettes.find(p => p.var === 'p20')
+    expect(single.tipsNeeded).toBeGreaterThan(0)
+    expect(single.tipSlots.length).toBeGreaterThanOrEqual(1)
+    expect(multi.tipSlots.length + single.tipSlots.length).toBe(6)            // every free slot holds a rack
+    expect(warnings.some(w => /only 0 racks|No slot is free/.test(w))).toBe(false)
+    expect(warnings.filter(w => /the run will pause \d+×/.test(w))).toHaveLength(2)
+    expect(actions.filter(a => a.kind === 'refill' && a.pipette === 'p20').length).toBeGreaterThan(0)
+  })
+})
+
+describe('8-channel on a 384-well plate', () => {
+  it('fills each column in two strokes — every other row per stroke — when the volumes agree within a stroke', () => {
+    const wells = {}
+    const R = 'ABCDEFGHIJKLMNOP'
+    for (let r = 0; r < 16; r++) for (let c = 1; c <= 24; c++) {
+      wells[`${R[r]}${c}`] = linked('C1', 'K10', 10, 'mM', (1 + (r % 2)).toFixed(2)) + fill('MQ H₂O', '12.00')   // 1 µL on rows A,C,E…; 2 µL on B,D,F…
+    }
+    const { code, summary, warnings, actions } = gen({ name: '384', format: 384, targetVolume: 20, wells }, cfg => {
+      cfg.pipettes = { left: 'p20_multi_gen2', right: 'p20_single_gen2' }
+      cfg.target = { on: 'deck', slot: '1', labware: 'corning_384_wellplate_112ul_flat' }
+    })
+    // 24 columns × 2 interleaved groups for each liquid, both from the reservoir.
+    expect(summary.sources.map(s => [s.name, s.columns, s.rack])).toEqual([['MQ H₂O', 48, 'reservoir'], ['K10', 48, 'reservoir']])
+    expect(code).toMatch(/build\(p20m, reservoir\["A2"\], \[\s*\("A1", 1\), \("B1", 2\), \("A2", 1\), \("B2", 2\)/)
+    expect(code).not.toContain('build(p20,')
+    const multi = summary.pipettes.find(p => p.var === 'p20m')
+    expect(multi.tipsNeeded).toBe(96)        // 48 columns per liquid, a new tip column each
+    expect(summary.pipettes.find(p => p.var === 'p20').tipsNeeded).toBe(0)
+    expect(warnings).toEqual([])
+    // The preview knows a stroke on "A1" of a 384 plate touches rows A, C, …, O.
+    const first = actions.find(a => a.kind === 'transfer')
+    expect(first.dst.wells.slice(0, 3)).toEqual(['A1', 'C1', 'E1'])
+    expect(first.dst.wells).toHaveLength(384)
   })
 })

@@ -11,7 +11,7 @@
 // The dialog is four tabs over one persistent rail: the deck map and the run
 // summary stay in view whatever is being edited, because most decisions here
 // are about where things sit and how much of what is needed.
-import { computed, reactive, ref, watch, onBeforeUnmount } from 'vue'
+import { computed, reactive, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useLabStore } from '../stores/labStore'
 import OtDeckMap from './OtDeckMap.vue'
 import {
@@ -21,7 +21,7 @@ import {
   OT2_PIPETTES, OT2_API_LEVELS, OT2_SLOTS, OT2_MODULES, OT2_STEP_TYPES,
 } from '../utils/opentronsExport'
 
-const props = defineProps({ plate: { type: Object, required: true }, initialTab: { type: String, default: 'steps' } })
+const props = defineProps({ plate: { type: Object, required: true }, initialTab: { type: String, default: 'steps' }, initialAction: { type: Number, default: 0 } })
 const emit = defineEmits(['close'])
 const store = useLabStore()
 
@@ -47,6 +47,7 @@ const TABS = [
   { id: 'robot', label: 'Robot', icon: 'fa-eye-dropper' },
   { id: 'deck', label: 'Deck & liquids', icon: 'fa-table-cells' },
   { id: 'steps', label: 'Steps', icon: 'fa-list-ol' },
+  { id: 'preview', label: 'Run preview', icon: 'fa-play' },
   { id: 'code', label: 'Python', icon: 'fa-code' },
 ]
 const tab = ref(TABS.some(t => t.id === props.initialTab) ? props.initialTab : 'steps')
@@ -137,6 +138,127 @@ const stepSummary = (s) => {
     default: return ''
   }
 }
+
+// ── Run preview ──
+// The generator's action list, walked one action at a time. The deck map gets
+// an overlay for the current action; the wells filled and the tips used so far
+// are accumulated from every action before it, so scrubbing backwards is exact.
+const actions = computed(() => result.value.actions || [])
+const clearance = computed(() => result.value.clearance || [])
+const clearanceOk = computed(() => clearance.value.filter(c => c.ok).length)
+const cursor = ref(0)
+const playing = ref(false)
+const speed = ref(60)            // × real time, per action, clamped to something watchable
+const current = computed(() => actions.value[cursor.value] || null)
+watch(actions, (list) => { if (cursor.value > list.length - 1) cursor.value = Math.max(0, list.length - 1) })
+
+const fmtClock = (sec) => {
+  const s = Math.max(0, Math.round(sec || 0))
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${m}:${String(r).padStart(2, '0')}`
+}
+const KIND_ICON = { transfer: 'fa-eye-dropper', distribute: 'fa-eye-dropper', mix: 'fa-blender', tc: 'fa-temperature-half', temp: 'fa-snowflake', hs: 'fa-water', mag: 'fa-magnet', wait: 'fa-hourglass-half', pause: 'fa-hand', refill: 'fa-hand-holding', swap: 'fa-arrows-rotate', comment: 'fa-message', custom: 'fa-code' }
+const kindIcon = (k) => KIND_ICON[k] || 'fa-circle'
+
+// Everything the deck should show at the cursor.
+const overlay = computed(() => {
+  const list = actions.value
+  const a = current.value
+  if (!a) return null
+  const filled = {}
+  const spent = {}          // pipette var -> tips spent since its last refill
+  for (let i = 0; i <= cursor.value; i++) {
+    const x = list[i]
+    if ((x.kind === 'transfer' || x.kind === 'distribute') && x.dst?.slot) {
+      (filled[x.dst.slot] ||= new Set())
+      for (const w of x.dst.wells) filled[x.dst.slot].add(w)
+    }
+    if (x.kind === 'refill' && x.pipette) spent[x.pipette] = 0
+    if (x.kind === 'swap' && x.dst?.slot) filled[x.dst.slot] = new Set()   // a fresh sample plate
+    if (x.tipsUsed && x.pipette) spent[x.pipette] = (spent[x.pipette] || 0) + x.tipsUsed
+  }
+  const tips = {}
+  for (const p of summary.value?.pipettes || []) {
+    let left = spent[p.var] || 0
+    p.tipSlots.forEach(slot => { tips[slot] = { used: Math.min(p.perRack, Math.max(0, left)), columns: p.channels === 8 }; left -= p.perRack })
+  }
+  const st = a.state || {}
+  const banner = a.userAction ? { kind: 'user', text: a.text }
+    : a.kind === 'wait' ? { kind: 'wait', text: `${a.text} (${fmtClock(a.durationSec)})` }
+    : null
+  return {
+    src: a.src?.slot ? { slot: a.src.slot, wells: a.src.wells } : null,
+    dst: a.dst?.slot && a.dst.wells?.length ? { slot: a.dst.slot, wells: a.dst.wells } : (a.dst?.slot ? { slot: a.dst.slot, wells: [] } : null),
+    filled: Object.fromEntries(Object.entries(filled).map(([k, v]) => [k, [...v]])),
+    tips,
+    modules: { tcLid: st.tcLid, tcBlock: st.tcBlock, tcLidTemp: st.tcLidTemp, temp: st.temp, hsTemp: st.hsTemp, hsRpm: st.hsRpm, mag: st.mag },
+    banner,
+  }
+})
+
+// Moving through the run.
+const goTo = (i) => { cursor.value = Math.min(Math.max(0, i), Math.max(0, actions.value.length - 1)) }
+const stepStart = (i) => { const a = actions.value[i]; if (!a) return 0; let k = i; while (k > 0 && actions.value[k - 1].step === a.step) k--; return k }
+const restartStep = () => goTo(stepStart(cursor.value))
+const nextUserAction = () => { const i = actions.value.findIndex((a, k) => k > cursor.value && a.userAction); if (i >= 0) goTo(i); else store.toast?.('No further action of yours in this run') }
+const repeatStep = () => {
+  const a = current.value
+  if (!a?.stepId) return
+  const i = cfg.steps.findIndex(s => s.id === a.stepId)
+  if (i < 0) return
+  duplicateStep(i)
+  store.toast?.(`Step ${i + 1} will run again right after itself — see Steps`)
+}
+const stepLabel = (a) => a?.stepType === 'setup' ? 'Setup' : `Step ${a?.step}: ${stepMeta(a?.stepType).label}`
+
+// Play: one action per tick, paced by its estimated duration; it stops on
+// anything the person must do, like the robot would.
+let timer = null
+const pace = (a) => Math.min(2500, Math.max(350, ((a?.durationSec || 0) * 1000) / speed.value))
+const tick = () => {
+  timer = null
+  if (!playing.value) return
+  if (cursor.value >= actions.value.length - 1) { playing.value = false; return }
+  cursor.value++
+  if (current.value?.userAction) { playing.value = false; return }
+  timer = setTimeout(tick, pace(current.value))
+}
+const togglePlay = () => {
+  if (playing.value) { playing.value = false; return }
+  if (cursor.value >= actions.value.length - 1) cursor.value = 0
+  playing.value = true
+  timer = setTimeout(tick, pace(current.value))
+}
+watch(playing, (on) => { if (!on && timer) { clearTimeout(timer); timer = null } })
+watch(tab, (t) => { if (t !== 'preview') playing.value = false })
+
+// Keep the active row in view.
+const rowRefs = new Map()
+const setRowRef = (i, el) => { if (el) rowRefs.set(i, el); else rowRefs.delete(i) }
+// Keep the current row in view by scrolling the run log itself — scrollIntoView
+// would also scroll the tab body and hide the controls.
+watch(cursor, (i) => nextTick(() => {
+  const el = rowRefs.get(i), list = el?.closest('.ot-pv-list')
+  if (!el || !list) return
+  const top = el.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop
+  if (top < list.scrollTop + 40 || top + el.offsetHeight > list.scrollTop + list.clientHeight - 40) list.scrollTo({ top: Math.max(0, top - list.clientHeight / 2), behavior: 'smooth' })
+}))
+
+// Keyboard: arrows step, space plays, Home/End jump, U finds the next thing to do.
+const onKey = (e) => {
+  if (tab.value !== 'preview') return
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target?.tagName)) return
+  if (e.key === 'ArrowRight') { goTo(cursor.value + 1); e.preventDefault() }
+  else if (e.key === 'ArrowLeft') { goTo(cursor.value - 1); e.preventDefault() }
+  else if (e.key === 'Home') { goTo(0); e.preventDefault() }
+  else if (e.key === 'End') { goTo(actions.value.length - 1); e.preventDefault() }
+  else if (e.key === ' ') { togglePlay(); e.preventDefault() }
+  else if (e.key === 'u' || e.key === 'U') nextUserAction()
+}
+onMounted(() => { window.addEventListener('keydown', onKey); if (props.initialAction) goTo(props.initialAction) })
+onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); playing.value = false })
+
+const userActionCount = computed(() => actions.value.filter(a => a.userAction).length)
 
 // ── Summary tiles ──
 const fills = computed(() => (summary.value?.sources || []).filter(s => !s.isQuench).reduce((a, s) => a + s.wells, 0))
@@ -483,6 +605,8 @@ const download = () => {
                         <label>Time points <input type="number" min="1" step="1" v-model="s.count" /></label>
                         <label>Every … min <input type="number" min="0" step="1" v-model="s.intervalMinutes" /></label>
                         <label class="ot-checks" style="grid-column: span 2;"><span><input type="checkbox" v-model="s.firstAtZero" /> first sample right away (t = 0)</span></label>
+                        <label title="The robot pauses before every Nth time point so you can top up the quench, swap tubes, check the plate — 0 = never">Pause every … time points <input type="number" min="0" step="1" v-model.number="s.pauseEvery" /></label>
+                        <label style="grid-column: span 2;">Pause message <input type="text" v-model="s.pauseMessage" :disabled="!s.pauseEvery" placeholder="Top up the quench, check the plate …" /></label>
                       </div>
                       <div class="ot-grid4">
                         <label style="grid-column: span 2;">From wells <input type="text" v-model="s.wells" placeholder="all, or A1-H1" /></label>
@@ -500,7 +624,7 @@ const download = () => {
                         <label>Quench µL <input type="number" min="0" step="1" v-model="s.quenchUl" :disabled="!s.quenchName" /></label>
                       </div>
                       <div class="ot-hint">
-                        Samples go into the sample labware column by column, each time point into the next free wells<template v-if="summary"> — {{ summary.sampleWellsUsed }} of {{ summary.sampleCapacity }} used</template>.
+                        Samples go into the sample labware column by column, each time point into the next free wells; when the plate is full the robot pauses for a fresh one<template v-if="summary"> — {{ summary.sampleWellsUsed }} wells over {{ summary.samplePlates || 1 }} plate{{ summary.samplePlates > 1 ? 's' : '' }}{{ summary.sampleSwaps ? `, ${summary.sampleSwaps} plate change${summary.sampleSwaps === 1 ? '' : 's'} scheduled` : '' }}</template>.
                         <template v-if="hasMulti"> Whole columns (A1-H1, A1-H2, …) are taken eight at a time with the 8-channel, one sample column per plate column.</template>
                         <template v-if="s.type === 'series'"> Intervals are measured from the start of the series, so the time sampling takes does not drift them.</template>
                       </div>
@@ -531,6 +655,76 @@ const download = () => {
             </section>
           </div>
 
+          <!-- Run preview -->
+          <div v-else-if="tab === 'preview'" class="ot-stack ot-previewtab">
+            <section class="ot-card ot-pv-controls">
+              <div class="ot-pv-row">
+                <button class="ot-btn icon" @click="goTo(0)" :disabled="!actions.length || cursor === 0" title="First action (Home)"><i class="fas fa-backward-fast"></i></button>
+                <button class="ot-btn icon" @click="goTo(cursor - 1)" :disabled="cursor === 0" title="Previous action (←)"><i class="fas fa-backward-step"></i></button>
+                <button class="ot-btn primary" @click="togglePlay" :disabled="!actions.length" :title="playing ? 'Pause (space)' : current?.userAction ? 'Carry on after this stop (space)' : 'Play (space) — stops wherever you must do something'">
+                  <i class="fas" :class="playing ? 'fa-pause' : 'fa-play'"></i> {{ playing ? 'Pause' : current?.userAction && cursor < actions.length - 1 ? 'Resume' : 'Play' }}
+                </button>
+                <button class="ot-btn icon" @click="goTo(cursor + 1)" :disabled="cursor >= actions.length - 1" title="Next action (→)"><i class="fas fa-forward-step"></i></button>
+                <button class="ot-btn icon" @click="goTo(actions.length - 1)" :disabled="!actions.length || cursor >= actions.length - 1" title="Last action (End)"><i class="fas fa-forward-fast"></i></button>
+                <label class="ot-pv-speed">speed
+                  <select v-model.number="speed"><option :value="10">10×</option><option :value="60">60×</option><option :value="600">600×</option><option :value="6000">6000×</option></select>
+                </label>
+                <span class="ot-pv-spacer"></span>
+                <button class="ot-btn" @click="nextUserAction" :disabled="!userActionCount" title="Jump to the next point where you must do something (U)"><i class="fas fa-hand"></i> Next: your turn <span v-if="userActionCount" class="ot-chip">{{ userActionCount }}</span></button>
+                <button class="ot-btn" @click="restartStep" :disabled="!current" title="Go back to the start of this step and watch it again"><i class="fas fa-rotate-left"></i> Restart step</button>
+                <button class="ot-btn" @click="repeatStep" :disabled="!current?.stepId" title="Add a copy of this step right after it, so the robot does it again"><i class="fas fa-repeat"></i> Repeat step in protocol</button>
+              </div>
+              <div v-if="current" class="ot-pv-now" :class="{ user: current.userAction, wait: current.kind === 'wait' }">
+                <i class="fas ot-pv-ic" :class="kindIcon(current.kind)"></i>
+                <div class="ot-pv-text">
+                  <div class="ot-pv-title">{{ current.text }}</div>
+                  <div class="ot-pv-sub">
+                    {{ stepLabel(current) }} · action {{ cursor + 1 }} of {{ actions.length }} · t = {{ fmtClock(current.clockSec) }}<template v-if="current.durationSec"> · ~{{ fmtClock(current.durationSec) }}</template>
+                    <template v-if="current.pipette"> · {{ current.pipette }}<template v-if="current.tipsUsed"> · {{ current.tipsUsed }} tip{{ current.tipsUsed === 1 ? '' : 's' }}</template></template>
+                    <template v-if="current.count"> · {{ current.count }} well{{ current.count === 1 ? '' : 's' }}</template>
+                  </div>
+                  <div v-if="current.userAction" class="ot-pv-hint">The robot stops here until someone presses Resume in the Opentrons App. Press Resume above (or space) to carry on with the preview.</div>
+                </div>
+                <div class="ot-pv-state">
+                  <span v-for="p in summary?.pipettes || []" :key="p.var" class="ot-chip" :title="`${p.name}: tips left in its racks`">{{ p.var }} · {{ current.state?.tipsLeft?.[p.var] ?? '–' }} {{ p.channels === 8 ? 'col' : 'tips' }}</span>
+                  <span v-if="summary?.modules?.thermocycler" class="ot-chip">TC {{ current.state?.tcLid }}{{ current.state?.tcBlock != null ? ` · ${current.state.tcBlock} °C` : '' }}</span>
+                  <span v-if="summary?.modules?.temperature" class="ot-chip">temp {{ current.state?.temp != null ? current.state.temp + ' °C' : 'idle' }}</span>
+                  <span v-if="summary?.modules?.heaterShaker" class="ot-chip">HS {{ current.state?.hsTemp != null ? current.state.hsTemp + ' °C' : '' }}{{ current.state?.hsRpm ? ` ${current.state.hsRpm} rpm` : (current.state?.hsTemp != null ? '' : 'idle') }}</span>
+                  <span v-if="summary?.modules?.magnetic" class="ot-chip">magnets {{ current.state?.mag }}</span>
+                </div>
+              </div>
+              <div v-else class="ot-hint">Nothing to preview yet — add a Build plate step.</div>
+            </section>
+
+            <section class="ot-card ot-pv-clear">
+              <h4><i class="fas fa-clipboard-check"></i> Run clearance <span class="ot-muted">{{ clearanceOk }} of {{ clearance.length }} checks clear · what the Opentrons App's analysis would refuse, plus what only this side can know</span></h4>
+              <ul class="ot-clear-list">
+                <li v-for="c in clearance" :key="c.id" :class="c.ok ? 'ok' : 'bad'">
+                  <i class="fas" :class="c.ok ? 'fa-circle-check' : 'fa-triangle-exclamation'"></i>
+                  <b>{{ c.label }}</b>
+                  <span class="ot-clear-info">{{ c.info }}</span>
+                  <div v-for="(n, i) in c.notes" :key="i" class="ot-clear-note">{{ n }}</div>
+                </li>
+              </ul>
+            </section>
+
+            <section class="ot-card ot-pv-listcard">
+              <h4><i class="fas fa-list-check"></i> Run log <span class="ot-muted">{{ actions.length }} actions · est. {{ fmtClock(summary?.runSec) }} · click a row to jump there · ← → keys step</span></h4>
+              <div class="ot-pv-list">
+                <template v-for="(a, i) in actions" :key="a.id">
+                  <div v-if="i === 0 || a.step !== actions[i - 1].step" class="ot-pv-step">{{ stepLabel(a) }}</div>
+                  <div class="ot-pv-item" :class="{ on: i === cursor, done: i < cursor, user: a.userAction, wait: a.kind === 'wait' }" :ref="el => setRowRef(i, el)" @click="goTo(i)">
+                    <span class="ot-pv-t">{{ fmtClock(a.clockSec) }}</span>
+                    <i class="fas" :class="kindIcon(a.kind)"></i>
+                    <span class="ot-pv-txt">{{ a.text }}</span>
+                    <span v-if="a.userAction" class="ot-pv-tag">your turn</span>
+                    <span v-else-if="a.durationSec >= 60" class="ot-pv-dur">{{ fmtClock(a.durationSec) }}</span>
+                  </div>
+                </template>
+              </div>
+            </section>
+          </div>
+
           <!-- Python -->
           <div v-else class="ot-stack ot-codetab">
             <section v-if="result.warnings.length" class="ot-card ot-warnings">
@@ -550,8 +744,11 @@ const download = () => {
         <!-- ── Rail: the deck and the run at a glance ── -->
         <aside class="ot-rail">
           <div class="ot-rail-title">Deck <span class="ot-rail-sub">front of the robot is at the bottom</span></div>
-          <OtDeckMap :deck="summary?.deck || []" />
-          <div class="ot-legend">
+          <OtDeckMap :deck="summary?.deck || []" :overlay="tab === 'preview' ? overlay : null" />
+          <div v-if="tab === 'preview'" class="ot-legend">
+            <span><i class="source"></i>drawing from</span><span><i class="plate"></i>dispensing into</span><span><i class="filledw"></i>filled so far</span><span><i class="usedtip"></i>tips used</span>
+          </div>
+          <div v-else class="ot-legend">
             <span><i class="plate"></i>plate</span><span><i class="source"></i>liquids</span><span><i class="samples"></i>samples</span><span><i class="module"></i>modules</span><span><i class="tips"></i>tips</span>
           </div>
 
@@ -562,7 +759,8 @@ const download = () => {
             <div v-for="p in summary?.pipettes || []" :key="p.var" class="ot-tile" :title="`${p.tipsNeeded} ${p.channels === 8 ? 'tip columns' : 'tips'} in ${p.tipSlots.length} rack${p.tipSlots.length === 1 ? '' : 's'}`">
               <b>{{ p.tipsNeeded }}</b><span>{{ p.channels === 8 ? 'columns' : 'tips' }} · {{ p.var }}</span>
             </div>
-            <div v-if="hasSampling" class="ot-tile"><b>{{ summary?.sampleWellsUsed ?? 0 }}<small>/{{ summary?.sampleCapacity ?? 0 }}</small></b><span>sample wells</span></div>
+            <div v-if="hasSampling" class="ot-tile" :title="summary?.sampleSwaps ? `${summary.sampleSwaps} sample-plate change${summary.sampleSwaps === 1 ? '' : 's'} scheduled` : 'sample wells used on the sample labware'"><b>{{ summary?.sampleWellsUsed ?? 0 }}<small v-if="(summary?.samplePlates || 0) <= 1">/{{ summary?.sampleCapacity ?? 0 }}</small></b><span>sample wells<template v-if="summary?.samplePlates > 1"> · {{ summary.samplePlates }} plates</template></span></div>
+            <div class="ot-tile" title="Rough estimate from typical OT-2 speeds plus every wait"><b>{{ fmtClock(summary?.runSec) }}</b><span>est. run time<template v-if="userActionCount"> · {{ userActionCount }}× your turn</template></span></div>
           </div>
 
           <button v-if="result.warnings.length" class="ot-warnpill" @click="tab = 'code'">
@@ -723,6 +921,47 @@ const download = () => {
 .ot-addbtn i { font-size: .85rem; color: var(--primary); }
 .ot-addbtn:hover { background: var(--acs); border-color: var(--acc); color: var(--acc); filter: none; }
 .ot-code { width: 100%; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; padding: 8px; border-radius: 8px; border: 1px solid var(--ln2); background: var(--fl); color: var(--tx); resize: vertical; }
+
+/* Run preview */
+.ot-pv-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ot-pv-speed { display: inline-flex !important; align-items: center; gap: 6px; margin: 0 0 0 4px !important; font-size: .7rem !important; }
+.ot-pv-speed select { width: auto !important; margin: 0 !important; padding: 4px 22px 4px 8px !important; }
+.ot-pv-spacer { flex: 1; }
+.ot-pv-now { display: flex; align-items: flex-start; gap: 12px; margin-top: 12px; padding: 12px 14px; border-radius: var(--rc, 10px); background: var(--fl); border: 1px solid var(--ln2); }
+.ot-pv-now.user { background: rgba(217,119,6,.10); border-color: rgba(217,119,6,.55); }
+.ot-pv-hint { font-size: 12px; color: var(--tx2); margin-top: 5px; }
+.ot-pv-clear h4 .ot-muted { font-weight: 500; }
+.ot-clear-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px 12px; }
+.ot-clear-list li { display: grid; grid-template-columns: 16px 1fr; column-gap: 8px; align-items: baseline; align-content: start; font-size: 12.5px; padding: 7px 9px; border-radius: 9px; background: var(--fl); border: 1px solid transparent; }
+.ot-clear-list li b { color: var(--tx); font-weight: 600; }
+.ot-clear-list li i { font-size: 12px; }
+.ot-clear-list li.ok i { color: #059669; }
+.ot-clear-list li.bad { background: rgba(217,119,6,.10); border-color: rgba(217,119,6,.45); }
+.ot-clear-list li.bad i { color: #d97706; }
+.ot-clear-info { grid-column: 2; font-size: 11.5px; color: var(--tx3); }
+.ot-clear-note { grid-column: 2; font-size: 12px; color: var(--tx); margin-top: 4px; line-height: 1.4; }
+.ot-pv-now.wait { background: var(--acs); border-color: var(--acc); }
+.ot-pv-ic { width: 30px; height: 30px; border-radius: 9px; background: var(--acc); color: #fff; display: flex; align-items: center; justify-content: center; flex: none; font-size: .85rem; }
+.ot-pv-now.user .ot-pv-ic { background: #d97706; }
+.ot-pv-text { flex: 1; min-width: 0; }
+.ot-pv-title { font-size: .88rem; font-weight: 700; color: var(--tx); line-height: 1.35; }
+.ot-pv-sub { font-size: .72rem; color: var(--tx2); margin-top: 3px; }
+.ot-pv-state { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; max-width: 240px; }
+.ot-pv-listcard { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.ot-pv-list { overflow-y: auto; max-height: 520px; border: 1px solid var(--ln2); border-radius: var(--rc, 10px); background: var(--cd); }
+.ot-pv-step { position: sticky; top: 0; z-index: 1; padding: 5px 12px; font-size: .66rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--tx3); background: var(--surface-solid, var(--cd)); border-bottom: 1px solid var(--ln); }
+.ot-pv-item { display: grid; grid-template-columns: 54px 16px 1fr auto; gap: 8px; align-items: center; padding: 5px 12px; font-size: .76rem; color: var(--tx2); border-bottom: 1px solid var(--ln); cursor: pointer; }
+.ot-pv-item:hover { background: var(--fl); }
+.ot-pv-item.done { opacity: .6; }
+.ot-pv-item.on { background: var(--acs); color: var(--tx); opacity: 1; box-shadow: inset 3px 0 0 var(--acc); }
+.ot-pv-item.user .fas { color: #d97706; }
+.ot-pv-item.user.on { background: rgba(217,119,6,.14); box-shadow: inset 3px 0 0 #d97706; }
+.ot-pv-t { font-variant-numeric: tabular-nums; color: var(--tx3); font-size: .7rem; }
+.ot-pv-txt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ot-pv-tag { font-size: .62rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #b45309; background: rgba(217,119,6,.14); padding: 1px 6px; border-radius: 6px; }
+.ot-pv-dur { font-size: .68rem; color: var(--tx3); font-variant-numeric: tabular-nums; }
+.ot-legend i.filledw { background: var(--acc); opacity: .35; }
+.ot-legend i.usedtip { background: var(--ln2); opacity: .5; }
 
 /* Python tab */
 .ot-codetab { height: 100%; }

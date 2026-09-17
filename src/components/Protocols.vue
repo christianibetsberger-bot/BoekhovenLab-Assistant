@@ -582,7 +582,7 @@ function linkToJournal(p) {
 
 /* Ketcher scheme modal */
 .pr-modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 16px; }
-.pr-scheme-dialog { background: var(--modal, var(--surface)); border: 1px solid var(--cdl, var(--border)); border-radius: var(--r, 14px); box-shadow: var(--sh); width: 100%; max-width: 900px; display: flex; flex-direction: column; overflow: hidden; }
+.pr-scheme-dialog { background: var(--modal); border: 1px solid var(--cdl); border-radius: var(--r); box-shadow: var(--sh); width: 100%; max-width: 900px; display: flex; flex-direction: column; overflow: hidden; }
 .pr-scheme-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; font-weight: 600; color: var(--tx); border-bottom: 1px solid var(--ln); }
 .pr-x { width: 28px; height: 28px; border-radius: 50%; background: var(--fl); color: var(--tx2); border: none; box-shadow: none; cursor: pointer; font-size: 13px; }
 .pr-scheme-canvas { position: relative; }

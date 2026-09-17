@@ -18,6 +18,7 @@ import {
   generateOpentronsProtocol, normalizeOt2Config, newOt2Step, plateDemands, wellNamesOf,
   labwareByName, targetLabwareOptions, defaultTargetLabware, sourceLabwareOptions, sampleLabwareOptions,
   columnLabwareOptions, columnPositions, tipRackOptions, opentronsFilename, fmtUl,
+  offsetKey, parseLabwareOffsets, offsetsWorkAt, PARTIAL_REAR_MAX_HEIGHT_MM,
   OT2_PIPETTES, OT2_API_LEVELS, OT2_SLOTS, OT2_MODULES, OT2_STEP_TYPES,
 } from '../utils/opentronsExport'
 
@@ -60,6 +61,8 @@ const sampleOptions = sampleLabwareOptions()
 const columnOptions = columnLabwareOptions()
 const stepTypes = OT2_STEP_TYPES
 const stepMeta = (type) => stepTypes.find(t => t.type === type) || { label: type, icon: 'fa-circle', help: '' }
+// A plate filled by hand has nothing to build, so that step is not on offer.
+const addableStepTypes = computed(() => stepTypes.filter(t => !(cfg.prefilled && t.type === 'build')))
 const pipetteDef = (mount) => OT2_PIPETTES.find(p => p.name === cfg.pipettes[mount]) || null
 const hasMulti = computed(() => ['left', 'right'].some(m => pipetteDef(m)?.channels === 8))
 const hasSingle = computed(() => ['left', 'right'].some(m => pipetteDef(m)?.channels === 1))
@@ -104,6 +107,56 @@ const positionOptions = computed(() => {
 })
 const setLiquid = (key, patch) => { cfg.compounds[key] = { ...(cfg.compounds[key] || {}), ...patch } }
 const rackShort = { stocks: 'stocks', bulk: 'bulk', reservoir: 'reservoir' }
+// A prefilled plate still needs tubes on the deck when a sampling step quenches.
+const hasQuench = computed(() => cfg.steps.some(s => (s.type === 'sample' || s.type === 'series') && String(s.quenchName || '').trim() && Number(s.quenchUl) > 0))
+const needsSourceRacks = computed(() => !cfg.prefilled || hasQuench.value)
+
+// ── Sample plates ──
+// Tip racks give way to a sample plate: they take whatever slots are left over.
+const blockedSlots = computed(() => new Set(summary.value?.usesPartial ? summary.value.partialBlockedSlots || [] : []))
+const freeSampleSlot = computed(() => {
+  const taken = new Set((summary.value?.deck || []).filter(d => d.role !== 'tips').map(d => String(d.slot)))
+  const free = OT2_SLOTS.filter(s => !taken.has(s))
+  // A partly tipped 8-channel cannot reach a slot with a module or tall labware
+  // behind it, so do not offer one of those for a sample plate.
+  return free.find(s => !blockedSlots.value.has(s)) || free[0]
+})
+const addSamplePlate = () => { if (freeSampleSlot.value) cfg.sampleSlots.push(freeSampleSlot.value) }
+const removeSamplePlate = (i) => { if (cfg.sampleSlots.length > 1) cfg.sampleSlots.splice(i, 1) }
+
+// ── Labware offsets ──
+// One row per piece of labware actually on the deck. A module holds the offset
+// of the labware on it, not of the module, which is what the robot calibrates.
+// The Thermocycler covers four slots but its plate sits on the anchor alone.
+const offsetRows = computed(() => (summary.value?.deck || [])
+  .filter(d => d.anchor)
+  .map(d => ({ slot: d.slot, what: d.what, lw: d.onModule || (d.kind ? { name: d.name, label: d.label } : null) }))
+  .filter(r => r.lw)
+  .map(r => ({ ...r, key: offsetKey(r.lw.name, r.slot), value: cfg.offsets[offsetKey(r.lw.name, r.slot)] || {} })))
+const setOffset = (key, axis, v) => {
+  const cur = { x: '', y: '', z: '', ...(cfg.offsets[key] || {}) }
+  cur[axis] = v === '' ? '' : Number(v)
+  if (!cur.x && !cur.y && !cur.z) delete cfg.offsets[key]
+  else cfg.offsets[key] = cur
+}
+const offsetPaste = ref('')
+const applyOffsetPaste = () => {
+  const found = parseLabwareOffsets(offsetPaste.value)
+  if (!found.length) { store.toast?.('No set_offset() lines found in that text'); return }
+  const mine = new Set(offsetRows.value.map(r => r.key))
+  let used = 0, skipped = []
+  for (const o of found) {
+    const key = offsetKey(o.labware, o.slot)
+    if (!mine.has(key)) { skipped.push(`${o.labware} in slot ${o.slot || '?'}`); continue }
+    if (o.x || o.y || o.z) cfg.offsets[key] = { x: o.x, y: o.y, z: o.z }
+    else delete cfg.offsets[key]
+    used++
+  }
+  offsetPaste.value = ''
+  store.toast?.(`${used} offset${used === 1 ? '' : 's'} applied${skipped.length ? ` · ${skipped.length} for labware not on this deck` : ''}`)
+}
+const clearOffsets = () => { for (const k of Object.keys(cfg.offsets)) delete cfg.offsets[k] }
+const offsetsSupported = computed(() => offsetsWorkAt(cfg.apiLevel))
 
 // ── Deck map ── drawn by OtDeckMap from summary.deck
 
@@ -120,6 +173,7 @@ const moveStep = (i, dir) => {
 const duplicateStep = (i) => { cfg.steps.splice(i + 1, 0, { ...JSON.parse(JSON.stringify(cfg.steps[i])), id: newOt2Step(cfg.steps[i].type).id }) }
 const addProfileRow = (s) => { s.profile.push({ temp: 72, seconds: 30 }) }
 const v = (x) => (x === '' || x == null ? null : x)
+const multiWord = (s) => !hasMulti.value ? '' : s.multi === 'off' ? '8-channel off' : s.multi === 'auto' ? 'whole columns ×8' : 'whole or part columns ×8'
 const stepSummary = (s) => {
   switch (s.type) {
     case 'build': return [s.newTip === 'once' ? 'one tip per stock' : 'new tip per well', s.mode === 'distribute' ? 'distribute' : '', hasMulti.value ? (s.multi === 'off' ? '8-channel off' : '8-channel for matching columns') : '', Number(s.mixAfterReps) > 0 ? 'mix after' : ''].filter(Boolean).join(' · ')
@@ -131,8 +185,8 @@ const stepSummary = (s) => {
     case 'delay': return `${Number(s.minutes) || 0} min ${Number(s.seconds) || 0} s`
     case 'pause': return s.message || ''
     case 'mix': return `${s.wells || 'all'} · ${s.reps} × ${s.volume || 'auto'} µL`
-    case 'sample': return `${s.volume} µL from ${s.wells || 'all'}${s.quenchName ? ` onto ${s.quenchUl} µL ${s.quenchName}` : ''}`
-    case 'series': return `${s.count} × every ${s.intervalMinutes} min · ${s.volume} µL from ${s.wells || 'all'}${s.quenchName ? ` onto ${s.quenchUl} µL ${s.quenchName}` : ''}`
+    case 'sample': return [`${s.volume} µL from ${s.wells || 'all'}`, s.quenchName ? `onto ${s.quenchUl} µL ${s.quenchName}` : '', multiWord(s)].filter(Boolean).join(' · ')
+    case 'series': return [`${s.count} × every ${s.intervalMinutes} min`, `${s.volume} µL from ${s.wells || 'all'}`, s.quenchName ? `onto ${s.quenchUl} µL ${s.quenchName}` : '', multiWord(s)].filter(Boolean).join(' · ')
     case 'comment': return s.text || ''
     case 'custom': return `${(s.code || '').split('\n').filter(l => l.trim()).length} lines`
     default: return ''
@@ -169,12 +223,16 @@ const overlay = computed(() => {
   const spent = {}          // pipette var -> tips spent since its last refill
   for (let i = 0; i <= cursor.value; i++) {
     const x = list[i]
+    // A sampling round can run off the end of one sample plate into the next, so
+    // it carries the wells it fills on each plate it touches.
     if ((x.kind === 'transfer' || x.kind === 'distribute') && x.dst?.slot) {
-      (filled[x.dst.slot] ||= new Set())
-      for (const w of x.dst.wells) filled[x.dst.slot].add(w)
+      for (const sp of x.dst.spans || [x.dst]) {
+        (filled[sp.slot] ||= new Set())
+        for (const w of sp.wells) filled[sp.slot].add(w)
+      }
     }
     if (x.kind === 'refill' && x.pipette) spent[x.pipette] = 0
-    if (x.kind === 'swap' && x.dst?.slot) filled[x.dst.slot] = new Set()   // a fresh sample plate
+    if (x.kind === 'swap' && x.dst?.slot) for (const s of x.dst.slots || [x.dst.slot]) filled[s] = new Set()   // fresh sample plates
     if (x.tipsUsed && x.pipette) spent[x.pipette] = (spent[x.pipette] || 0) + x.tipsUsed
   }
   const tips = {}
@@ -265,6 +323,11 @@ const fills = computed(() => (summary.value?.sources || []).filter(s => !s.isQue
 const columnsBy8 = computed(() => (summary.value?.sources || []).reduce((a, s) => a + (s.columns || 0), 0))
 const hasSampling = computed(() => cfg.steps.some(s => s.type === 'sample' || s.type === 'series'))
 const usesModule = (m) => !!summary.value?.modules?.[m]
+// What a Custom Python step can actually name: only the labware that got loaded.
+const scopeVars = computed(() => {
+  const roles = new Set((summary.value?.deck || []).map(d => d.role))
+  return ['protocol', 'plate', ...['stocks', 'bulk', 'reservoir'].filter(r => roles.has(r)), ...(roles.has('samples') ? ['sample_plates', 'sample_dests'] : [])]
+})
 
 // ── Output ──
 const copied = ref(false)
@@ -403,28 +466,54 @@ const download = () => {
                     <option v-for="l in targetOptions" :key="l.name" :value="l.name">{{ l.label }}</option>
                   </select>
                 </label>
+                <label class="ot-checks" style="grid-column: span 3;" title="Pipette the plate yourself, then put it on the robot ready to go. The robot leaves it alone until a step touches it.">
+                  <span><input type="checkbox" v-model="cfg.prefilled" /> already filled — I pipette this plate by hand</span>
+                </label>
+              </div>
+              <div v-if="cfg.prefilled" class="ot-hint">
+                The robot does not build the plate, so none of its stocks need a place on the deck — those slots go to sample plates and tip racks instead. The wells are still declared, so the Opentrons App shows what each one should hold.
               </div>
             </section>
 
             <section class="ot-card">
               <h4><i class="fas fa-vials"></i> Sources</h4>
-              <div class="ot-src">
-                <label>Stock tubes <select v-model="cfg.stocksLabware"><option v-for="l in sourceOptions" :key="l.name" :value="l.name">{{ l.label }}</option></select></label>
-                <label>Slot <select v-model="cfg.deck.stocks"><option v-for="s in OT2_SLOTS" :key="s" :value="s">{{ s }}</option></select></label>
-              </div>
-              <div class="ot-src">
-                <label title="Water and buffers: anything that does not fit a stock tube goes here by itself">Bulk liquids <select v-model="cfg.bulkLabware"><option v-for="l in sourceOptions" :key="l.name" :value="l.name">{{ l.label }}</option></select></label>
-                <label>Slot <select v-model="cfg.deck.bulk"><option v-for="s in OT2_SLOTS" :key="s" :value="s">{{ s }}</option></select></label>
-              </div>
-              <div class="ot-src" v-if="hasMulti">
-                <label title="Where the 8-channel draws from: a reservoir trough, or a column of an 8-row labware">8-channel reservoir <select v-model="cfg.columnLabware"><option v-for="l in columnOptions" :key="l.name" :value="l.name">{{ l.label }}</option></select></label>
-                <label>Slot <select v-model="cfg.deck.column"><option v-for="s in OT2_SLOTS" :key="s" :value="s">{{ s }}</option></select></label>
-              </div>
-              <div class="ot-src" v-if="hasSampling">
-                <label>Sample labware <select v-model="cfg.samplesLabware"><option v-for="l in sampleOptions" :key="l.name" :value="l.name">{{ l.label }}</option></select></label>
-                <label>Slot <select v-model="cfg.deck.samples"><option v-for="s in OT2_SLOTS" :key="s" :value="s">{{ s }}</option></select></label>
-              </div>
-              <div class="ot-hint">Tip racks fill the free slots by themselves, as many as the tip count needs. Liquids are placed automatically; pin one to a position in the table below.</div>
+              <template v-if="needsSourceRacks">
+                <div class="ot-src">
+                  <label>Stock tubes <select v-model="cfg.stocksLabware"><option v-for="l in sourceOptions" :key="l.name" :value="l.name">{{ l.label }}</option></select></label>
+                  <label>Slot <select v-model="cfg.deck.stocks"><option v-for="s in OT2_SLOTS" :key="s" :value="s">{{ s }}</option></select></label>
+                </div>
+                <div class="ot-src">
+                  <label title="Water and buffers: anything that does not fit a stock tube goes here by itself">Bulk liquids <select v-model="cfg.bulkLabware"><option v-for="l in sourceOptions" :key="l.name" :value="l.name">{{ l.label }}</option></select></label>
+                  <label>Slot <select v-model="cfg.deck.bulk"><option v-for="s in OT2_SLOTS" :key="s" :value="s">{{ s }}</option></select></label>
+                </div>
+                <div class="ot-src" v-if="hasMulti">
+                  <label title="Where the 8-channel draws from: a reservoir trough, or a column of an 8-row labware">8-channel reservoir <select v-model="cfg.columnLabware"><option v-for="l in columnOptions" :key="l.name" :value="l.name">{{ l.label }}</option></select></label>
+                  <label>Slot <select v-model="cfg.deck.column"><option v-for="s in OT2_SLOTS" :key="s" :value="s">{{ s }}</option></select></label>
+                </div>
+                <div v-if="cfg.prefilled" class="ot-hint">Only the quench liquid needs a container — the plate arrives filled.</div>
+              </template>
+              <div v-else class="ot-hint">Nothing to load: the plate arrives filled and no step draws from a tube.</div>
+
+              <template v-if="hasSampling">
+                <label>Sample labware <span class="ot-muted">× {{ cfg.sampleSlots.length }} on the deck</span>
+                  <select v-model="cfg.samplesLabware"><option v-for="l in sampleOptions" :key="l.name" :value="l.name">{{ l.label }}</option></select>
+                </label>
+                <div class="ot-slots">
+                  <span v-for="(slot, i) in cfg.sampleSlots" :key="i" class="ot-slotpick">
+                    <b>{{ i + 1 }}</b>
+                    <select v-model="cfg.sampleSlots[i]" :class="{ 'ot-bad': blockedSlots.has(slot) }" :title="blockedSlots.has(slot) ? `The 8-channel cannot reach slot ${slot} with only some nozzles tipped — something tall stands behind it` : ''">
+                      <option v-for="s in OT2_SLOTS" :key="s" :value="s">slot {{ s }}{{ blockedSlots.has(s) ? ' — blocked' : '' }}</option>
+                    </select>
+                    <button class="ot-mini danger" @click="removeSamplePlate(i)" :disabled="cfg.sampleSlots.length <= 1" title="Remove this sample plate"><i class="fas fa-times"></i></button>
+                  </span>
+                  <button class="ot-btn small" @click="addSamplePlate" :disabled="!freeSampleSlot"
+                          :title="!freeSampleSlot ? 'No slot left — free one first' : blockedSlots.has(freeSampleSlot) ? `Only slot ${freeSampleSlot} is left, and the 8-channel cannot reach it with only some nozzles tipped — something tall stands behind it` : `Add a sample plate in slot ${freeSampleSlot}`">
+                    <i class="fas fa-plus"></i> Add plate
+                  </button>
+                </div>
+                <div class="ot-hint">Sample plates are filled one after the other, so the run keeps going until the last one is full — then it pauses for a fresh set.</div>
+              </template>
+              <div class="ot-hint">Tip racks fill the free slots by themselves, as many as the tip count needs.<template v-if="needsSourceRacks"> Liquids are placed automatically; pin one to a position in the table below.</template></div>
             </section>
 
             <section v-if="(usesModule('temperature') && cfg.target.on !== 'temperature') || (usesModule('heaterShaker') && cfg.target.on !== 'heater_shaker') || (usesModule('thermocycler') && cfg.target.on !== 'thermocycler') || usesModule('magnetic')" class="ot-card">
@@ -448,7 +537,33 @@ const download = () => {
             </section>
 
             <section class="ot-card">
-              <h4><i class="fas fa-droplet"></i> Liquids <span class="ot-muted">{{ liquids.filter(l => l.included).length }} of {{ liquids.length }} pipetted</span></h4>
+              <h4><i class="fas fa-crosshairs"></i> Labware offsets
+                <span class="ot-muted">{{ summary?.offsets?.length || 0 }} applied · from Labware Position Check</span>
+              </h4>
+              <div class="ot-hint">
+                Run Labware Position Check in the Opentrons App once for this deck, press <strong>Get Labware Offset Data</strong>, and paste what it gives you here — the exported file then carries its own calibration and runs as it is. Positive x, y, z move the labware right, back and up, in mm.
+              </div>
+              <div class="ot-paste">
+                <textarea v-model="offsetPaste" class="ot-code" rows="3" spellcheck="false" placeholder="labware_1 = protocol.load_labware(&quot;nest_96_wellplate_100ul_pcr_full_skirt&quot;, location=&quot;2&quot;)&#10;labware_1.set_offset(x=0.10, y=-0.20, z=0.30)"></textarea>
+                <div class="ot-paste-btns">
+                  <button class="ot-btn small primary" @click="applyOffsetPaste" :disabled="!offsetPaste.trim()"><i class="fas fa-wand-magic-sparkles"></i> Apply</button>
+                  <button class="ot-btn small" @click="clearOffsets" :disabled="!Object.keys(cfg.offsets).length" title="Back to the robot's own calibration"><i class="fas fa-eraser"></i> Clear all</button>
+                </div>
+              </div>
+              <div class="ot-off-head"><span>Labware</span><span>x</span><span>y</span><span>z</span></div>
+              <div v-for="r in offsetRows" :key="r.key" class="ot-off">
+                <span class="ot-off-name" :title="`${r.lw.label} — ${r.what}`"><b>{{ r.slot }}</b> {{ r.lw.label }}</span>
+                <input v-for="ax in ['x', 'y', 'z']" :key="ax" type="number" step="0.1" :value="r.value[ax] ?? ''" placeholder="0" @change="setOffset(r.key, ax, $event.target.value)" />
+              </div>
+              <div v-if="!offsetRows.length" class="ot-hint">Nothing on the deck to calibrate yet.</div>
+              <div v-else-if="summary?.offsets?.length && !offsetsSupported" class="ot-hint ot-red">
+                apiLevel {{ cfg.apiLevel }} has no set_offset() — the robot refuses a file that uses one. Choose 2.18 or newer under Robot.
+              </div>
+            </section>
+
+            <section class="ot-card">
+              <h4><i class="fas fa-droplet"></i> Liquids <span class="ot-muted">{{ liquids.filter(l => l.included).length }} of {{ liquids.length }} {{ cfg.prefilled ? 'listed' : 'pipetted' }}</span></h4>
+              <div v-if="cfg.prefilled" class="ot-hint" style="margin-top: -4px;">The plate's own liquids are yours to pipette — they are listed in the file's header and declared to the Opentrons App, but never placed on the deck.</div>
               <div class="ot-liq-head"><span></span><span>Liquid</span><span>Wells</span><span>Load ≥</span><span>Position</span></div>
               <div v-for="l in liquids" :key="l.key" class="ot-liq" :class="{ off: !l.included }">
                 <input type="checkbox" :checked="l.included" :disabled="l.isQuench" @change="setLiquid(l.key, { included: $event.target.checked })" />
@@ -459,8 +574,9 @@ const download = () => {
                   <i v-if="l.unlinked" class="fas fa-link-slash ot-warn-ic" title="No inventory chip — the volume is real; you assign its tube"></i>
                 </span>
                 <span class="ot-muted">{{ l.isQuench ? 'samples' : l.wells }}</span>
-                <span :class="{ 'ot-red': l.overCapacity }" :title="l.overCapacity ? 'Does not fit one position of that labware' : `${fmtUl(l.demandUl)} consumed`">{{ l.included && l.loadUl ? fmtUl(l.loadUl) : '—' }}</span>
-                <select :value="cfg.compounds[l.key]?.position || ''" @change="setLiquid(l.key, { position: $event.target.value })" :disabled="!l.included" :title="l.rack ? `Now: ${l.rack} ${l.well}` : ''">
+                <span :class="{ 'ot-red': l.overCapacity }" :title="l.overCapacity ? 'Does not fit one position of that labware' : `${fmtUl(l.demandUl)} consumed`">{{ l.included ? (l.loadUl ? fmtUl(l.loadUl) : (cfg.prefilled && !l.isQuench ? fmtUl(l.demandUl) : '—')) : '—' }}</span>
+                <span v-if="cfg.prefilled && !l.isQuench" class="ot-chip" title="Already in the wells when the plate goes on the robot">in the plate</span>
+                <select v-else :value="cfg.compounds[l.key]?.position || ''" @change="setLiquid(l.key, { position: $event.target.value })" :disabled="!l.included" :title="l.rack ? `Now: ${l.rack} ${l.well}` : ''">
                   <option v-for="o in positionOptions" :key="o.value" :value="o.value">{{ o.value === '' ? (l.rack ? `auto → ${rackShort[l.rack]} ${l.well}` : 'auto') : o.label }}</option>
                 </select>
               </div>
@@ -493,6 +609,7 @@ const download = () => {
 
                     <!-- Build plate -->
                     <template v-if="s.type === 'build'">
+                      <div v-if="cfg.prefilled" class="ot-hint ot-red">This step is skipped: the plate is filled by hand. Remove it, or untick "already filled" under Deck &amp; liquids.</div>
                       <div class="ot-grid4">
                         <label>Pipette
                           <select v-model="s.pipette"><option value="auto">by volume</option><option v-for="m in pipetteMounts" :key="m.mount" :value="m.mount">{{ m.label }}</option></select>
@@ -523,8 +640,12 @@ const download = () => {
                         <label title="The protocol waits here until the hold is over">Hold min <input type="number" min="0" step="1" v-model="s.holdMinutes" placeholder="no hold" /></label>
                         <label>Lid °C <input type="number" step="1" v-model="s.lidTemp" placeholder="leave" /></label>
                       </div>
-                      <label class="ot-checks"><span><input type="checkbox" v-model="s.deactivate" /> switch block and lid off afterwards</span></label>
-                      <div class="ot-hint">Block {{ OT2_MODULES.thermocycler.blockMin }}–{{ OT2_MODULES.thermocycler.blockMax }} °C, lid {{ OT2_MODULES.thermocycler.lidMin }}–{{ OT2_MODULES.thermocycler.lidMax }} °C. Without a hold the protocol continues as soon as the temperature is reached — add a Wait to incubate.</div>
+                      <label class="ot-checks" title="Switches off at the end of THIS step — so anything below it, a sampling series included, runs with the block cold. Leave it unticked to keep the temperature for the rest of the run."><span><input type="checkbox" v-model="s.deactivate" /> switch block and lid off at the end of this step</span></label>
+                      <div class="ot-hint">
+                        Block {{ OT2_MODULES.thermocycler.blockMin }}–{{ OT2_MODULES.thermocycler.blockMax }} °C, lid {{ OT2_MODULES.thermocycler.lidMin }}–{{ OT2_MODULES.thermocycler.lidMax }} °C.
+                        The block keeps the temperature you set for the rest of the run, until another Thermocycler step changes it or switches it off.
+                        A <strong>hold</strong> makes the protocol wait here, so anything below — a sampling series included — only starts once the hold is over; leave it empty to carry straight on.
+                      </div>
                     </template>
 
                     <!-- Thermocycler profile -->
@@ -617,16 +738,26 @@ const download = () => {
                         <label>Tips <select v-model="s.newTip"><option value="always">new tip per well</option><option value="once">one tip per time point</option></select></label>
                         <label>Mix before ×<input type="number" min="0" step="1" v-model="s.mixBeforeReps" placeholder="0" /></label>
                         <label>Mix µL <input type="number" min="0" step="1" v-model="s.mixBeforeUl" placeholder="auto" /></label>
-                        <span></span>
+                        <label v-if="hasMulti" title="Whole columns go in one stroke. Part-columns need partial tip pickup — the 8-channel picks up only as many tips as the run is long (apiLevel 2.20 and newer).">8-channel
+                          <select v-model="s.multi">
+                            <option value="partial">whole or part columns</option>
+                            <option value="auto">whole columns only</option>
+                            <option value="off">off</option>
+                          </select>
+                        </label>
+                        <span v-else></span>
                       </div>
                       <div class="ot-grid4">
                         <label style="grid-column: span 2;" title="Put into each sample well BEFORE the sample, from its own tube (e.g. acid to stop a reaction). Empty = none.">Quench liquid <input type="text" v-model="s.quenchName" placeholder="none" /></label>
                         <label>Quench µL <input type="number" min="0" step="1" v-model="s.quenchUl" :disabled="!s.quenchName" /></label>
                       </div>
                       <div class="ot-hint">
-                        Samples go into the sample labware column by column, each time point into the next free wells; when the plate is full the robot pauses for a fresh one<template v-if="summary"> — {{ summary.sampleWellsUsed }} wells over {{ summary.samplePlates || 1 }} plate{{ summary.samplePlates > 1 ? 's' : '' }}{{ summary.sampleSwaps ? `, ${summary.sampleSwaps} plate change${summary.sampleSwaps === 1 ? '' : 's'} scheduled` : '' }}</template>.
+                        Samples go into the sample labware column by column, each time point into the next free wells; the robot moves on to the next plate on the deck by itself and only pauses when the last one is full<template v-if="summary"> — {{ summary.sampleWellsUsed }} wells over {{ summary.samplePlates || 1 }} plate{{ summary.samplePlates > 1 ? 's' : '' }}, {{ summary.samplePlatesOnDeck || 1 }} on the deck{{ summary.sampleSwaps ? `, ${summary.sampleSwaps} change${summary.sampleSwaps === 1 ? '' : 's'} scheduled` : '' }}</template>.
                         <template v-if="hasMulti"> Whole columns (A1-H1, A1-H2, …) are taken eight at a time with the 8-channel, one sample column per plate column.</template>
                         <template v-if="s.type === 'series'"> Intervals are measured from the start of the series, so the time sampling takes does not drift them.</template>
+                        <template v-if="hasMulti && s.multi === 'partial'"> An equal, unbroken run of 2 or 4 wells per column is one stroke with just that many tips — the run is addressed by its last well, since the 8-channel is tipped from the front. Nothing over {{ PARTIAL_REAR_MAX_HEIGHT_MM }} mm may stand in the slot behind anything it reaches into.</template>
+                        <template v-if="cfg.target.on === 'thermocycler'"> The Thermocycler lid opens for each time point and closes again in between, and the block holds its temperature throughout.</template>
+                        <template v-else-if="cfg.target.on === 'heater_shaker'"> Shaking stops for each time point and starts again afterwards.</template>
                       </div>
                     </template>
 
@@ -638,7 +769,7 @@ const download = () => {
                     <!-- Custom Python -->
                     <template v-else-if="s.type === 'custom'">
                       <textarea v-model="s.code" class="ot-code" rows="6" spellcheck="false" placeholder="protocol.comment(&quot;hello&quot;)&#10;p20.transfer(5, stocks[&quot;A1&quot;], plate[&quot;A1&quot;])"></textarea>
-                      <div class="ot-hint">In scope: <code>protocol</code>, <code>plate</code>, <code>stocks</code>, <code>bulk</code>, <code>reservoir</code>, <code>samples</code>, the pipettes (<code v-for="p in summary?.pipettes || []" :key="p.var">{{ p.var }} </code>) and any module (<code>tc</code>, <code>temp_mod</code>, <code>hs</code>, <code>mag</code>). Indented into <code>run()</code> as written.</div>
+                      <div class="ot-hint">In scope: <code v-for="x in scopeVars" :key="x">{{ x }} </code>, the pipettes (<code v-for="p in summary?.pipettes || []" :key="p.var">{{ p.var }} </code>) and any module (<code>tc</code>, <code>temp_mod</code>, <code>hs</code>, <code>mag</code>). Indented into <code>run()</code> as written.</div>
                     </template>
                   </div>
                 </div>
@@ -647,7 +778,7 @@ const download = () => {
               <div class="ot-add">
                 <div class="ot-add-title">Add a step</div>
                 <div class="ot-addgrid">
-                  <button v-for="t in stepTypes" :key="t.type" class="ot-addbtn" @click="addStep(t.type)" :title="t.help">
+                  <button v-for="t in addableStepTypes" :key="t.type" class="ot-addbtn" @click="addStep(t.type)" :title="t.help">
                     <i class="fas" :class="t.icon"></i><span>{{ t.label }}</span>
                   </button>
                 </div>
@@ -759,7 +890,7 @@ const download = () => {
             <div v-for="p in summary?.pipettes || []" :key="p.var" class="ot-tile" :title="`${p.tipsNeeded} ${p.channels === 8 ? 'tip columns' : 'tips'} in ${p.tipSlots.length} rack${p.tipSlots.length === 1 ? '' : 's'}`">
               <b>{{ p.tipsNeeded }}</b><span>{{ p.channels === 8 ? 'columns' : 'tips' }} · {{ p.var }}</span>
             </div>
-            <div v-if="hasSampling" class="ot-tile" :title="summary?.sampleSwaps ? `${summary.sampleSwaps} sample-plate change${summary.sampleSwaps === 1 ? '' : 's'} scheduled` : 'sample wells used on the sample labware'"><b>{{ summary?.sampleWellsUsed ?? 0 }}<small v-if="(summary?.samplePlates || 0) <= 1">/{{ summary?.sampleCapacity ?? 0 }}</small></b><span>sample wells<template v-if="summary?.samplePlates > 1"> · {{ summary.samplePlates }} plates</template></span></div>
+            <div v-if="hasSampling" class="ot-tile" :title="summary?.sampleSwaps ? `${summary.sampleSwaps} sample-plate change${summary.sampleSwaps === 1 ? '' : 's'} scheduled` : `fits the ${summary?.samplePlatesOnDeck || 1} sample plate(s) on the deck — no swap needed`"><b>{{ summary?.sampleWellsUsed ?? 0 }}<small v-if="!summary?.sampleSwaps">/{{ summary?.sampleCapacity ?? 0 }}</small></b><span>sample wells<template v-if="summary?.samplePlates > 1"> · {{ summary.samplePlates }} plates</template></span></div>
             <div class="ot-tile" title="Rough estimate from typical OT-2 speeds plus every wait"><b>{{ fmtClock(summary?.runSec) }}</b><span>est. run time<template v-if="userActionCount"> · {{ userActionCount }}× your turn</template></span></div>
           </div>
 
@@ -791,8 +922,8 @@ const download = () => {
 .ot-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 12000; padding: 14px; font-size: 14px; line-height: 1.4; }
 .ot-modal {
   width: min(1360px, 100%); height: min(94vh, 1020px);
-  background: var(--modal, var(--surface)); color: var(--tx, inherit);
-  border: 1px solid var(--ln2); border-radius: var(--r, 14px); box-shadow: var(--sh);
+  background: var(--modal); color: var(--tx);
+  border: 1px solid var(--ln2); border-radius: var(--r); box-shadow: var(--sh);
   display: flex; flex-direction: column; overflow: hidden;
 }
 
@@ -800,7 +931,7 @@ const download = () => {
 .ot-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--ln2); }
 .ot-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .ot-title > div { min-width: 0; }   /* lets a long plate name clip instead of running under the tabs */
-.ot-title-ic { width: 34px; height: 34px; border-radius: 10px; background: var(--acc); color: #fff; display: flex; align-items: center; justify-content: center; flex: none; box-shadow: 0 3px 10px var(--acsh); }
+.ot-title-ic { width: 34px; height: 34px; border-radius: 10px; background: var(--acc-fill); color: #fff; display: flex; align-items: center; justify-content: center; flex: none; box-shadow: 0 3px 10px var(--acsh); }
 .ot-title-name { font-weight: 700; font-size: .95rem; color: var(--tx); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ot-title-sub { font-size: .7rem; color: var(--tx2); }
 .ot-tabs { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--fl); }
@@ -818,7 +949,7 @@ const download = () => {
 .ot-rail-sub { font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--tx3); margin-left: 4px; }
 .ot-rail-title { font-size: .66rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--tx3); }
 .ot-stack { display: flex; flex-direction: column; gap: 12px; }
-.ot-card { border: 1px solid var(--ln2); border-radius: var(--rc, 10px); background: var(--cd); padding: 12px 14px; }
+.ot-card { border: 1px solid var(--ln2); border-radius: var(--rc); background: var(--cd); padding: 12px 14px; }
 .ot-card h4 { margin: 0 0 10px; font-size: .8rem; display: flex; align-items: center; gap: 7px; color: var(--tx); }
 .ot-card h4 i { color: var(--primary); width: 14px; }
 .ot-muted { font-size: .72rem; color: var(--tx2); font-weight: 400; }
@@ -830,6 +961,22 @@ const download = () => {
 .ot-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .ot-grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .ot-src { display: grid; grid-template-columns: 1fr 90px; gap: 10px; }
+.ot-slots { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; }
+.ot-slotpick { display: inline-flex; align-items: center; gap: 4px; padding: 2px 2px 2px 8px; border: 1px solid var(--ln2); border-radius: 8px; background: var(--fl); }
+.ot-slotpick b { font-size: .64rem; color: var(--tx3); }
+.ot-slotpick select { padding: 4px 6px; font-size: .74rem; }
+.ot-slotpick select.ot-bad { color: var(--danger-color); font-weight: 700; }
+/* Offsets: a name and three small numbers, same grid for header and rows. */
+.ot-paste { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; margin-bottom: 10px; }
+.ot-paste-btns { display: flex; flex-direction: column; gap: 6px; }
+.ot-off-head, .ot-off { display: grid; grid-template-columns: 1fr 74px 74px 74px; gap: 8px; align-items: center; }
+.ot-off-head { font-size: .64rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--tx3); padding: 0 0 4px; border-bottom: 1px solid var(--ln2); }
+.ot-off-head span:not(:first-child) { text-align: center; }
+.ot-off { padding: 4px 0; border-bottom: 1px solid var(--ln2); }
+.ot-off:last-child { border-bottom: none; }
+.ot-off-name { font-size: .74rem; color: var(--tx); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ot-off-name b { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-right: 6px; padding: 0 5px; border-radius: 5px; background: var(--fl); color: var(--tx2); font-size: .64rem; }
+.ot-off input { width: 100%; padding: 5px 6px; font-size: .74rem; text-align: center; }
 .ot-hint { font-size: .7rem; color: var(--tx2); margin: 4px 0 8px; line-height: 1.45; }
 .ot-hint code, .ot-ok code { font-size: .68rem; background: var(--fl); padding: 0 4px; border-radius: 4px; color: var(--tx); }
 /* Checkbox groups sit on the input row of the grid they share with text
@@ -844,7 +991,7 @@ const download = () => {
 
 /* Pipette mounts */
 .ot-mounts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.ot-mount { border: 1px solid var(--ln2); border-radius: var(--rc, 10px); padding: 10px 12px; background: var(--fl); }
+.ot-mount { border: 1px solid var(--ln2); border-radius: var(--rc); padding: 10px 12px; background: var(--fl); }
 .ot-mount.empty { border-style: dashed; }
 .ot-mount-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .ot-mount-name { font-size: .74rem; font-weight: 700; color: var(--tx); flex: 1; }
@@ -855,13 +1002,13 @@ const download = () => {
 .ot-btn {
   height: 32px; padding: 0 13px; border-radius: 9px; font-size: .76rem; font-weight: 600; line-height: 1; white-space: nowrap;
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-  background: var(--btn2, rgba(0,0,0,.05)); color: var(--tx, inherit); border: 1px solid var(--ln2); box-shadow: none; cursor: pointer;
+  background: var(--btn2); color: var(--tx); border: 1px solid var(--ln2); box-shadow: none; cursor: pointer;
 }
 .ot-btn:hover:not(:disabled) { filter: brightness(1.06); }
-.ot-btn.primary { background: var(--acc, #2563eb); border-color: transparent; color: #fff; box-shadow: 0 3px 10px var(--acsh); }
+.ot-btn.primary { background: var(--acc-fill); border-color: transparent; color: #fff; box-shadow: 0 3px 10px var(--acsh); }
 .ot-btn.icon { width: 32px; padding: 0; }
 .ot-btn.small { height: 26px; font-size: .7rem; padding: 0 9px; }
-.ot-btn.danger:hover { background: var(--danger-color); border-color: transparent; color: #fff; filter: none; }
+.ot-btn.danger:hover { background: var(--danger-fill); border-color: transparent; color: #fff; filter: none; }
 .ot-mini { width: 24px; height: 24px; padding: 0; border-radius: 6px; background: transparent; color: var(--tx2); border: 1px solid transparent; box-shadow: none; font-size: .7rem; cursor: pointer; }
 .ot-mini:hover:not(:disabled) { background: var(--fl); color: var(--tx); filter: none; }
 .ot-mini:disabled { opacity: .3; cursor: default; }
@@ -870,7 +1017,7 @@ const download = () => {
 .ot-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: .64rem; color: var(--tx2); }
 .ot-legend span { display: inline-flex; align-items: center; gap: 4px; }
 .ot-legend i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
-.ot-legend i.plate { background: var(--acc); }
+.ot-legend i.plate { background: var(--acc-fill); }
 .ot-legend i.source { background: #009E73; }
 .ot-legend i.samples { background: #CC79A7; }
 .ot-legend i.module { background: #E69F00; }
@@ -903,10 +1050,10 @@ const download = () => {
 /* Steps timeline */
 .ot-tl { position: relative; display: flex; flex-direction: column; gap: 8px; padding-left: 4px; }
 .ot-tl::before { content: ''; position: absolute; left: 15px; top: 16px; bottom: 16px; width: 2px; background: var(--ln2); }
-.ot-step { position: relative; border: 1px solid var(--ln2); border-radius: var(--rc, 10px); background: var(--cd); margin-left: 22px; }
+.ot-step { position: relative; border: 1px solid var(--ln2); border-radius: var(--rc); background: var(--cd); margin-left: 22px; }
 .ot-step.open { border-color: var(--acc); }
 .ot-step-head { display: flex; align-items: center; gap: 8px; padding: 9px 10px 9px 12px; cursor: pointer; font-size: .82rem; }
-.ot-step-n { position: absolute; left: -22px; top: 8px; width: 24px; height: 24px; border-radius: 50%; background: var(--acc); color: #fff; font-size: .68rem; font-weight: 700; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 3px var(--modal, var(--surface)); }
+.ot-step-n { position: absolute; left: -22px; top: 8px; width: 24px; height: 24px; border-radius: 50%; background: var(--acc-fill); color: #fff; font-size: .68rem; font-weight: 700; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 3px var(--modal); }
 .ot-step-ic { color: var(--primary); width: 14px; text-align: center; }
 .ot-step-title { font-weight: 700; color: var(--tx); }
 .ot-step-sum { flex: 1; min-width: 0; font-size: .72rem; color: var(--tx2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -927,7 +1074,7 @@ const download = () => {
 .ot-pv-speed { display: inline-flex !important; align-items: center; gap: 6px; margin: 0 0 0 4px !important; font-size: .7rem !important; }
 .ot-pv-speed select { width: auto !important; margin: 0 !important; padding: 4px 22px 4px 8px !important; }
 .ot-pv-spacer { flex: 1; }
-.ot-pv-now { display: flex; align-items: flex-start; gap: 12px; margin-top: 12px; padding: 12px 14px; border-radius: var(--rc, 10px); background: var(--fl); border: 1px solid var(--ln2); }
+.ot-pv-now { display: flex; align-items: flex-start; gap: 12px; margin-top: 12px; padding: 12px 14px; border-radius: var(--rc); background: var(--fl); border: 1px solid var(--ln2); }
 .ot-pv-now.user { background: rgba(217,119,6,.10); border-color: rgba(217,119,6,.55); }
 .ot-pv-hint { font-size: 12px; color: var(--tx2); margin-top: 5px; }
 .ot-pv-clear h4 .ot-muted { font-weight: 500; }
@@ -941,15 +1088,15 @@ const download = () => {
 .ot-clear-info { grid-column: 2; font-size: 11.5px; color: var(--tx3); }
 .ot-clear-note { grid-column: 2; font-size: 12px; color: var(--tx); margin-top: 4px; line-height: 1.4; }
 .ot-pv-now.wait { background: var(--acs); border-color: var(--acc); }
-.ot-pv-ic { width: 30px; height: 30px; border-radius: 9px; background: var(--acc); color: #fff; display: flex; align-items: center; justify-content: center; flex: none; font-size: .85rem; }
+.ot-pv-ic { width: 30px; height: 30px; border-radius: 9px; background: var(--acc-fill); color: #fff; display: flex; align-items: center; justify-content: center; flex: none; font-size: .85rem; }
 .ot-pv-now.user .ot-pv-ic { background: #d97706; }
 .ot-pv-text { flex: 1; min-width: 0; }
 .ot-pv-title { font-size: .88rem; font-weight: 700; color: var(--tx); line-height: 1.35; }
 .ot-pv-sub { font-size: .72rem; color: var(--tx2); margin-top: 3px; }
 .ot-pv-state { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; max-width: 240px; }
 .ot-pv-listcard { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.ot-pv-list { overflow-y: auto; max-height: 520px; border: 1px solid var(--ln2); border-radius: var(--rc, 10px); background: var(--cd); }
-.ot-pv-step { position: sticky; top: 0; z-index: 1; padding: 5px 12px; font-size: .66rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--tx3); background: var(--surface-solid, var(--cd)); border-bottom: 1px solid var(--ln); }
+.ot-pv-list { overflow-y: auto; max-height: 520px; border: 1px solid var(--ln2); border-radius: var(--rc); background: var(--cd); }
+.ot-pv-step { position: sticky; top: 0; z-index: 1; padding: 5px 12px; font-size: .66rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--tx3); background: var(--surface-solid); border-bottom: 1px solid var(--ln); }
 .ot-pv-item { display: grid; grid-template-columns: 54px 16px 1fr auto; gap: 8px; align-items: center; padding: 5px 12px; font-size: .76rem; color: var(--tx2); border-bottom: 1px solid var(--ln); cursor: pointer; }
 .ot-pv-item:hover { background: var(--fl); }
 .ot-pv-item.done { opacity: .6; }
@@ -960,19 +1107,19 @@ const download = () => {
 .ot-pv-txt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ot-pv-tag { font-size: .62rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #b45309; background: rgba(217,119,6,.14); padding: 1px 6px; border-radius: 6px; }
 .ot-pv-dur { font-size: .68rem; color: var(--tx3); font-variant-numeric: tabular-nums; }
-.ot-legend i.filledw { background: var(--acc); opacity: .35; }
+.ot-legend i.filledw { background: var(--acc-fill); opacity: .35; }
 .ot-legend i.usedtip { background: var(--ln2); opacity: .5; }
 
 /* Python tab */
 .ot-codetab { height: 100%; }
-.ot-warnings { border-color: rgba(217,119,6,.5); background: rgba(217,119,6,.08); }
-.ot-warnings h4, .ot-warnings h4 i { color: #b45309; }
+.ot-warnings { border-color: var(--wr); background: var(--wrs); }
+.ot-warnings h4, .ot-warnings h4 i { color: var(--wr); }
 .ot-warnings ul { margin: 0; padding-left: 18px; font-size: .76rem; line-height: 1.45; }
 .ot-ok { font-size: .76rem; color: var(--ok); display: flex; gap: 8px; align-items: center; }
 .ot-codecard { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .ot-preview {
-  margin: 0; flex: 1; min-height: 320px; overflow: auto; padding: 12px 14px; border-radius: var(--rc, 10px);
-  font: 11.5px/1.45 ui-monospace, Menlo, Consolas, monospace; background: var(--surface-solid, #EDF1F7); color: var(--tx); border: 1px solid var(--ln2);
+  margin: 0; flex: 1; min-height: 320px; overflow: auto; padding: 12px 14px; border-radius: var(--rc);
+  font: 11.5px/1.45 ui-monospace, Menlo, Consolas, monospace; background: var(--surface-solid); color: var(--tx); border: 1px solid var(--ln2);
   white-space: pre; tab-size: 4;
 }
 

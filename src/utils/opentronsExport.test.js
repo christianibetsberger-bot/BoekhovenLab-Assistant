@@ -3,6 +3,8 @@ import {
   plateDemands, parseWellSelection, generateOpentronsProtocol, defaultOt2Config,
   normalizeOt2Config, newOt2Step, targetLabwareOptions, wellNamesOf, labwareByName,
   adjacentSlots, loadVolume, opentronsFilename, multiGroups,
+  offsetKey, offsetFor, offsetsWorkAt, parseLabwareOffsets,
+  partialColumnGroups, partialEndNozzle, PARTIAL_REAR_MAX_HEIGHT_MM, slotBehind,
 } from './opentronsExport'
 
 // The markup the planners actually write into a well (see plateExport.test.js).
@@ -257,7 +259,7 @@ describe('generateOpentronsProtocol — deck rules', () => {
     const { warnings, summary } = gen(smallPlate(), cfg => {
       cfg.deck.heaterShaker = '3'
       cfg.deck.magnetic = '6'
-      cfg.deck.samples = '2'
+      cfg.sampleSlots = ['2']
       cfg.samplesLabware = 'opentrons_24_tuberack_nest_1.5ml_snapcap'   // 80 mm tall, left of slot 3
       cfg.steps.push(newOt2Step('heater_shaker'), newOt2Step('magnetic'), newOt2Step('sample'))
     })
@@ -356,16 +358,16 @@ describe('generateOpentronsProtocol — modules and steps', () => {
     expect(warnings).toEqual([])
     expect(code).toContain('import time')
     expect(code).toContain('def wait_until(t_target):')
-    expect(code).toContain('samples = protocol.load_labware("nest_96_wellplate_100ul_pcr_full_skirt", "2", label="Samples")')
+    expect(code).toContain('sample_plates = [protocol.load_labware("nest_96_wellplate_100ul_pcr_full_skirt", "2", label="Samples")]')
     expect(code).toContain('series_starts = [0, 8, 16, 24]  # first sample well of each time point')
     expect(code).toContain('fresh_plate_before = set()')
-    expect(code).toContain('    dests = samples.wells()[series_starts[i]:series_starts[i] + 8]')
+    expect(code).toContain('    dests = sample_dests[series_starts[i]:series_starts[i] + 8]')
     expect(code).toContain('for i in range(4):')
     expect(code).toContain('        wait_until(series_t0 + i * 15 * 60)')
     // Peptide A1, RNA B1, then the quench is the third tube.
     expect(code).toContain('        p20.transfer(20, stocks["C1"], dests, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first')
     expect(code).toContain('        p20.transfer(5, [plate[w] for w in series_wells], dests, new_tip="always", blow_out=True, blowout_location="destination well", mix_before=(2, 5))')
-    expect(code).toContain('dests = samples.wells()[32:34]')
+    expect(code).toContain('dests = sample_dests[32:34]')
     expect(summary.sources.find(s => s.isQuench).demandUl).toBe(20 * 8 * 4)
     expect(summary.sampleWellsUsed).toBe(34)
     assertPythonShape(code)
@@ -401,7 +403,7 @@ describe('generateOpentronsProtocol — modules and steps', () => {
     const pauses = actions.filter(a => a.kind === 'pause')
     expect(pauses.map(a => a.text)).toEqual(['Paused: Top up the quench — press Resume in the Opentrons App', 'Paused: Top up the quench — press Resume in the Opentrons App'])   // before time points 4 and 7
     expect(actions[actions.indexOf(pauses[0]) - 1].text).toBe('Time point 4/7 at t = 30 min')
-    expect(clearance.map(c => c.id)).toEqual(['deck', 'tips', 'samples', 'liquids', 'api', 'modules', 'pipettes', 'steps'])
+    expect(clearance.map(c => c.id)).toEqual(['deck', 'tips', 'samples', 'liquids', 'offsets', 'api', 'modules', 'pipettes', 'steps'])
     expect(clearance.flatMap(c => c.notes).sort()).toEqual([...warnings].sort())
     expect(clearance.find(c => c.id === 'samples')).toMatchObject({ ok: true, info: '56 wells over 1 plate' })
     expect(clearance.find(c => c.id === 'steps').info).toMatch(/^\d+ steps?, \d+ actions, about \d+ min$/)
@@ -497,23 +499,23 @@ describe('8-channel', () => {
     expect(warnings).toEqual([])
     expect(code).toContain('series_wells = ["A1", "A2"]')
     expect(code).toContain('series_starts = [0, 16, 32]')
-    expect(code).toContain('    dests = [col[0] for col in samples.columns()[series_starts[i] // 8:series_starts[i] // 8 + 2]]')
+    expect(code).toContain('    dests = sample_dest_cols[series_starts[i] // 8:series_starts[i] // 8 + 2]')
     expect(code).toContain('        p300m.transfer(30, reservoir["A2"], dests, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first')
     expect(code).toContain('        p300m.transfer(25, [plate[w] for w in series_wells], dests, new_tip="always", blow_out=True, blowout_location="destination well")')
     // A partial selection after the series stays single-channel and continues after the used columns.
-    expect(code).toContain('dests = samples.wells()[48:50]')
-    expect(code).toMatch(/p20\.transfer\(10, \[plate\[w\] for w in sample_wells\], dests/)
+    expect(code).toContain('dests = sample_dests[48:50]')
+    expect(code).toMatch(/p20\.transfer\(10, \[plate\[w\] for w in from_wells\], dests/)
     assertPythonShape(code)
   })
-  it('a single-channel quench into 8-channel columns visits every well of each column', () => {
+  it('a single-channel quench into 8-channel columns visits every well a stroke fills', () => {
     const { code } = gen(columnPlate(), cfg => {
       multiCfg(cfg)
       const s = newOt2Step('sample'); s.wells = 'A1-H1'; s.volume = 25; s.quenchName = 'TFA'; s.quenchUl = 15
       cfg.compounds = { 'quench:tfa': { included: true, position: 'stocks:C1' } }
       cfg.steps.push(s)
     })
-    expect(code).toContain('p20.transfer(15, stocks["C1"], [w for a in dests for w in samples.columns_by_name()[a.well_name[1:]]], new_tip="once"')
-    expect(code).toContain('p300m.transfer(25, [plate[w] for w in sample_wells], dests')
+    expect(code).toContain('p20.transfer(15, stocks["C1"], sample_dests[0:8], new_tip="once"')
+    expect(code).toContain('p300m.transfer(25, [plate[w] for w in from_wells], dests')
   })
   it('mixes a column with the 8-channel, and caps a mix at what the tip holds', () => {
     const { code } = gen(columnPlate(), cfg => { multiCfg(cfg); const m = newOt2Step('mix'); m.wells = 'A3-H3'; m.reps = 2; m.volume = 40; cfg.steps.push(m) })
@@ -574,7 +576,7 @@ describe('action list (the run preview)', () => {
     expect(actions[5].clockSec).toBe(actions[4].clockSec + 1800)
     expect(actions[5]).toMatchObject({ kind: 'transfer', pipette: 'p20', count: 96 })
     expect(actions[5].src.wells).toHaveLength(96)
-    expect(actions[5].dst).toMatchObject({ slot: '2', var: 'samples' })
+    expect(actions[5].dst).toMatchObject({ slot: '2', var: 'sample_plates' })
     expect(actions[5].dst.wells.slice(0, 3)).toEqual(['A1', 'B1', 'C1'])
     expect(summary.runSec).toBe(actions[5].clockSec + actions[5].durationSec)
     expect(summary.plateSlot).toBe('1')
@@ -684,5 +686,513 @@ describe('8-channel on a 384-well plate', () => {
     const first = actions.find(a => a.kind === 'transfer')
     expect(first.dst.wells.slice(0, 3)).toEqual(['A1', 'C1', 'E1'])
     expect(first.dst.wells).toHaveLength(384)
+  })
+})
+
+describe('a plate filled by hand', () => {
+  const prefilled = (mutate = () => {}) => gen(fullPlate(), cfg => {
+    cfg.prefilled = true
+    cfg.steps = [Object.assign(newOt2Step('series'), { count: 3, intervalMinutes: 20, wells: 'A1-H1', volume: 10 })]
+    mutate(cfg)
+  })
+
+  it('builds nothing, keeps the plate stocks off the deck, and frees their slots', () => {
+    const { code, summary, warnings } = prefilled()
+    expect(code).not.toContain('def build(')
+    expect(code).not.toContain('stocks = protocol.load_labware')
+    expect(code).not.toContain('bulk = protocol.load_labware')
+    // Only the plate, the sample labware and tip racks are on the deck.
+    expect(summary.deck.map(d => d.role).sort()).toEqual(['plate', 'samples', 'tips'])
+    expect(summary.sources).toEqual([])
+    expect(summary.prefilled).toBe(true)
+    expect(warnings).toEqual([])
+    assertPythonShape(code)
+  })
+
+  it('lists what to pipette by hand and declares it into the plate', () => {
+    const { code } = prefilled(cfg => { cfg.apiLevel = '2.24' })
+    expect(code).toContain('# PIPETTE THE PLATE BY HAND BEFORE STARTING  (the robot does not build it)')
+    expect(code).toMatch(/#   \[C1\] K10 peptide \(10 mM\) +96 wells +816 µL in total/)
+    expect(code).toContain('description="[C1] 10 mM pipetted into the plate by hand"')
+    // One table of (liquid, [(µL, wells), …]) rather than a call per group.
+    expect(code).toContain('for liq, groups in [')
+    expect(code).toContain('        (liq_2, [')
+    expect(code).toMatch(/ {12}\(5, \[\n {16}"A1", "A2", .*"A12"\n {12}\]\),/)
+    expect(code).toContain('        plate.load_liquid(wells=ws, volume=vol, liquid=liq)')
+  })
+
+  it('falls back to the per-well call the older API needs', () => {
+    const { code } = prefilled(cfg => { cfg.apiLevel = '2.20' })
+    expect(code).toContain('    for vol, ws in groups:')
+    expect(code).toContain('        for w in ws:')
+    expect(code).toContain('            plate[w].load_liquid(liquid=liq, volume=vol)')
+    expect(code).not.toContain('plate.load_liquid(wells=ws')
+  })
+
+  it('still puts a quench liquid in a tube', () => {
+    const { code, summary } = prefilled(cfg => { Object.assign(cfg.steps[0], { quenchName: 'HCl 1 M', quenchUl: 5 }) })
+    expect(summary.sources.map(s => [s.name, s.rack])).toEqual([['HCl 1 M', 'stocks']])
+    expect(code).toContain('stocks = protocol.load_labware')
+  })
+
+  it('skips a build step left over from before, and says so', () => {
+    const { code, warnings } = prefilled(cfg => { cfg.steps.unshift(newOt2Step('build')) })
+    expect(warnings).toContain('The plate is filled by hand, so the Build plate step was skipped. Remove it, or untick "already filled" to have the robot build the plate.')
+    expect(code).not.toContain('def build(')
+    expect(code).toContain('# Step 1: sampling series')
+  })
+})
+
+describe('several sample plates on the deck', () => {
+  // 24 time points of 8 wells = 192 wells: exactly two 96-well plates.
+  const series = (slots, extra = {}) => gen(fullPlate(), cfg => {
+    cfg.prefilled = true
+    cfg.sampleSlots = slots
+    cfg.steps = [Object.assign(newOt2Step('series'), { count: 24, intervalMinutes: 10, wells: 'A1-H1', volume: 10, ...extra })]
+  })
+
+  it('loads them all and hands out wells across them without stopping', () => {
+    const { code, summary, warnings, actions } = series(['2', '3'])
+    expect(code).toContain('sample_plates = [')
+    expect(code).toContain('    protocol.load_labware("nest_96_wellplate_100ul_pcr_full_skirt", "2", label="Samples 1"),')
+    expect(code).toContain('    protocol.load_labware("nest_96_wellplate_100ul_pcr_full_skirt", "3", label="Samples 2"),')
+    expect(code).toContain('sample_dests = [w for p in sample_plates for w in p.wells()]')
+    expect(code).toContain('series_starts = [0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 160, 168, 176, 184]')
+    expect(code).toContain('fresh_plate_before = set()')
+    expect(summary.sampleSlots).toEqual(['2', '3'])
+    expect(summary.samplePlatesOnDeck).toBe(2)
+    expect(summary.samplePlates).toBe(2)
+    expect(summary.sampleCapacity).toBe(192)
+    expect(summary.sampleSwaps).toBe(0)
+    expect(actions.some(a => a.kind === 'swap')).toBe(false)
+    // The 13th time point is the first to land on the second plate.
+    const rounds = actions.filter(a => a.kind === 'transfer')
+    expect(rounds[11].dst).toMatchObject({ slot: '2', wells: ['A12', 'B12', 'C12', 'D12', 'E12', 'F12', 'G12', 'H12'] })
+    expect(rounds[12].dst).toMatchObject({ slot: '3', wells: ['A1', 'B1', 'C1', 'D1', 'E1', 'F1', 'G1', 'H1'] })
+    expect(warnings).toEqual([])
+    assertPythonShape(code)
+  })
+
+  it('pauses once for a fresh set when the last plate is full, not once per plate', () => {
+    const one = series(['2'], { count: 25 })
+    const two = series(['2', '3'], { count: 25 })
+    expect(one.summary.sampleSwaps).toBe(2)          // a swap at well 96 and again at 192
+    expect(two.summary.sampleSwaps).toBe(1)          // both plates fill first
+    expect(two.code).toContain('fresh_plate_before = {24}')
+    const swap = two.actions.find(a => a.kind === 'swap')
+    expect(swap.text).toBe('All 2 sample plates are full: replace them with fresh ones (and top up the quench), then resume')
+    expect(swap.dst.slots).toEqual(['2', '3'])
+  })
+
+  it('sends 8-channel columns to whichever plate the column belongs to', () => {
+    const { code, actions } = gen(fullPlate(), cfg => {
+      cfg.prefilled = true
+      cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' }
+      cfg.sampleSlots = ['2', '3']
+      cfg.steps = [Object.assign(newOt2Step('series'), { count: 14, intervalMinutes: 10, wells: 'A1-H1', volume: 25 })]
+    })
+    expect(code).toContain('sample_dest_cols = [c[0] for p in sample_plates for c in p.columns()]')
+    expect(code).toContain('    dests = sample_dest_cols[series_starts[i] // 8:series_starts[i] // 8 + 1]')
+    const rounds = actions.filter(a => a.kind === 'transfer')
+    expect(rounds[11].dst.slot).toBe('2')
+    expect(rounds[12].dst).toMatchObject({ slot: '3', wells: ['A1', 'B1', 'C1', 'D1', 'E1', 'F1', 'G1', 'H1'] })
+  })
+
+  it('migrates the single sample slot of an older config', () => {
+    const c = normalizeOt2Config({ deck: { samples: '5' } }, smallPlate())
+    expect(c.sampleSlots).toEqual(['5'])
+    expect(c.deck.samples).toBeUndefined()
+    expect(normalizeOt2Config({}, smallPlate()).sampleSlots).toEqual(['2'])
+  })
+})
+
+describe('labware offsets', () => {
+  // What the Opentrons App writes under "Get Labware Offset Data".
+  const APP_OUTPUT = `
+labware_1 = protocol.load_labware("opentrons_96_tiprack_300ul", location="3")
+labware_1.set_offset(x=0.00, y=0.00, z=0.00)
+labware_2 = protocol.load_labware("opentrons_24_tuberack_nest_1.5ml_snapcap", location="4")
+labware_2.set_offset(x=0.10, y=-0.20, z=0.30)
+module_1 = protocol.load_module("thermocyclerModuleV1")
+labware_3 = module_1.load_labware("nest_96_wellplate_100ul_pcr_full_skirt")
+labware_3.set_offset(x=-1.50, y=0.40, z=2.75)
+`
+  it('reads the App\'s offset code, module-held labware included', () => {
+    expect(parseLabwareOffsets(APP_OUTPUT)).toEqual([
+      { labware: 'opentrons_96_tiprack_300ul', slot: '3', x: 0, y: 0, z: 0 },
+      { labware: 'opentrons_24_tuberack_nest_1.5ml_snapcap', slot: '4', x: 0.1, y: -0.2, z: 0.3 },
+      // A Thermocycler takes no location: it always sits on slot 7.
+      { labware: 'nest_96_wellplate_100ul_pcr_full_skirt', slot: '7', x: -1.5, y: 0.4, z: 2.75 },
+    ])
+  })
+  it('also reads positional arguments and an adapter in between', () => {
+    const out = parseLabwareOffsets(`
+adapter_1 = protocol.load_adapter("opentrons_aluminum_flat_bottom_plate", "6")
+labware_1 = adapter_1.load_labware("nest_96_wellplate_200ul_flat")
+labware_1.set_offset(1, 2, -3)
+`)
+    expect(out).toEqual([{ labware: 'nest_96_wellplate_200ul_flat', slot: '6', x: 1, y: 2, z: -3 }])
+  })
+  it('ignores prose and offsets for labware it never saw loaded', () => {
+    expect(parseLabwareOffsets('hello\nlabware_9.set_offset(x=1, y=2, z=3)\n')).toEqual([])
+    expect(parseLabwareOffsets('')).toEqual([])
+  })
+
+  it('knows which apiLevels have set_offset', () => {
+    expect(['2.13', '2.18', '2.20', '2.24', '2.28'].every(offsetsWorkAt)).toBe(true)
+    expect(['2.14', '2.16', '2.17'].some(offsetsWorkAt)).toBe(false)
+  })
+  it('drops an offset that is all zeros', () => {
+    const cfg = { offsets: { 'lw@3': { x: 0, y: 0, z: 0 }, 'lw@4': { x: 0, y: '', z: -0.5 } } }
+    expect(offsetFor(cfg, 'lw', '3')).toBe(null)
+    expect(offsetFor(cfg, 'lw', '4')).toEqual({ x: 0, y: 0, z: -0.5 })
+    expect(offsetFor(cfg, 'lw', '9')).toBe(null)
+  })
+
+  it('applies each offset right after its labware loads, and lists them in the header', () => {
+    const { code, summary, warnings } = gen(fullPlate(), cfg => {
+      cfg.target = { on: 'thermocycler', slot: '1', labware: 'nest_96_wellplate_100ul_pcr_full_skirt' }
+      cfg.apiLevel = '2.20'
+      cfg.offsets = {
+        [offsetKey('nest_96_wellplate_100ul_pcr_full_skirt', '7')]: { x: -1.5, y: 0.4, z: 2.75 },
+        [offsetKey('opentrons_24_tuberack_nest_1.5ml_snapcap', '4')]: { x: 0.1, y: -0.2, z: 0.3 },
+        [offsetKey('opentrons_96_tiprack_300ul', '6')]: { x: 0, y: 0, z: 0.5 },
+        [offsetKey('corning_96_wellplate_360ul_flat', '1')]: { x: 9, y: 9, z: 9 },   // that plate is not on this deck
+      }
+    })
+    expect(code).toMatch(/plate = tc\.load_labware\([^\n]*\n {4}plate\.set_offset\(x=-1\.5, y=0\.4, z=2\.75\)/)
+    expect(code).toMatch(/stocks = protocol\.load_labware\([^\n]*\n {4}stocks\.set_offset\(x=0\.1, y=-0\.2, z=0\.3\)/)
+    expect(code).toMatch(/tips_p300 = \[[^\n]*\n {4}tips_p300\[1\]\.set_offset\(x=0, y=0, z=0\.5\)/)
+    expect(code).not.toContain('x=9')
+    expect(code).toContain('# LABWARE OFFSETS  (from Labware Position Check — mm right / back / up)')
+    expect(code).toMatch(/#   slot {2}7 {2}the plate "Screen 3" +x {2}-1\.50 {3}y {3}0\.40 {3}z {3}2\.75/)
+    expect(summary.offsets.map(o => [o.slot, o.z])).toEqual([['4', 0.3], ['6', 0.5], ['7', 2.75]])
+    expect(warnings).toEqual([])
+    assertPythonShape(code)
+  })
+
+  it('refuses to be quiet about the apiLevels that have no set_offset', () => {
+    const { warnings, clearance } = gen(fullPlate(), cfg => {
+      cfg.apiLevel = '2.16'
+      cfg.offsets = { [offsetKey('corning_96_wellplate_360ul_flat', '1')]: { x: 0, y: 0, z: 1 } }
+    })
+    expect(warnings).toContain('Labware offsets: set_offset() does not exist in apiLevel 2.14–2.17, so the robot refuses this file as it stands. Choose apiLevel 2.18 or newer.')
+    expect(clearance.find(c => c.id === 'offsets')).toMatchObject({ ok: false, info: '1 applied from Labware Position Check' })
+  })
+  it('says nothing when no offset is set', () => {
+    const { code, clearance } = gen(fullPlate(), cfg => { cfg.apiLevel = '2.16' })
+    expect(code).not.toContain('set_offset')
+    expect(code).not.toContain('LABWARE OFFSETS')
+    expect(clearance.find(c => c.id === 'offsets')).toMatchObject({ ok: true, info: 'none — the robot uses its own calibration' })
+  })
+})
+
+describe('the Thermocycler lid around a sampling series', () => {
+  const onTc = (mutate) => gen(fullPlate(), cfg => {
+    cfg.prefilled = true
+    cfg.target = { on: 'thermocycler', slot: '1', labware: 'nest_96_wellplate_100ul_pcr_full_skirt' }
+    cfg.steps = []
+    mutate(cfg)
+  })
+  const series = () => Object.assign(newOt2Step('series'), { count: 4, intervalMinutes: 20, wells: 'A1-H1', volume: 10 })
+  // The body of the loop, where the lid moves have to be self-consistent.
+  const loopBody = (code) => code.split('for i in range(')[1] || ''
+
+  for (const lid of ['close', 'leave', 'open']) {
+    it(`opens for each time point and closes in between when the block is on (lid "${lid}")`, () => {
+      const { code, warnings } = onTc(cfg => {
+        cfg.steps = [Object.assign(newOt2Step('thermocycler'), { lid, blockTemp: 37, lidTemp: 105 }), series()]
+      })
+      const body = loopBody(code)
+      // Both moves, in this order: the body runs many times, so a body that
+      // closes the lid must open it again or the next round hits a closed one.
+      expect(body.indexOf('tc.open_lid()')).toBeGreaterThan(-1)
+      expect(body.indexOf('tc.close_lid()')).toBeGreaterThan(body.indexOf('tc.open_lid()'))
+      expect(body.indexOf('tc.open_lid()')).toBeLessThan(body.indexOf('.transfer('))
+      expect(body.indexOf('tc.close_lid()')).toBeGreaterThan(body.indexOf('.transfer('))
+      // Nothing switches the block off — it holds until told otherwise.
+      expect(code).not.toContain('deactivate_block')
+      expect(warnings).toEqual([])
+      assertPythonShape(code)
+    })
+  }
+
+  it('leaves the lid alone when nothing is heating', () => {
+    const { code } = onTc(cfg => { cfg.steps = [series()] })
+    expect(loopBody(code)).not.toContain('tc.open_lid()')
+    expect(loopBody(code)).not.toContain('tc.close_lid()')
+  })
+
+  it('closes the lid after a profile too, and keeps the final hold temperature', () => {
+    const { code } = onTc(cfg => {
+      cfg.steps = [Object.assign(newOt2Step('tc_profile'), { finalTemp: 4 }), series()]
+    })
+    expect(loopBody(code)).toContain('tc.open_lid()')
+    expect(loopBody(code)).toContain('tc.close_lid()')
+    expect(code).toContain('tc.set_block_temperature(4)')
+  })
+
+  it('shows the same lid moves in the preview as the Python does, once per time point', () => {
+    const { actions } = onTc(cfg => {
+      cfg.steps = [Object.assign(newOt2Step('thermocycler'), { lid: 'leave', blockTemp: 37 }), series()]
+    })
+    const tc = actions.filter(a => a.kind === 'tc' && /lid/.test(a.text))
+    // Setup opens it once; then open + close for each of the four time points.
+    expect(tc.filter(a => /open/i.test(a.text))).toHaveLength(1 + 4)
+    expect(tc.filter(a => /close/i.test(a.text))).toHaveLength(4)
+    expect(tc.find(a => /close/i.test(a.text)).text).toContain('the block stays at 37 °C')
+    // The block reads 37 °C at every action from the moment it is set.
+    const afterSet = actions.slice(actions.findIndex(a => /block to 37/.test(a.text)))
+    expect(afterSet.every(a => a.state.tcBlock === 37)).toBe(true)
+  })
+
+  it('still restores a closed lid after a one-off sample and after mixing', () => {
+    const { code } = onTc(cfg => {
+      cfg.steps = [
+        Object.assign(newOt2Step('thermocycler'), { lid: 'close', blockTemp: 37 }),
+        Object.assign(newOt2Step('mix'), { wells: 'A1-H1', reps: 3, volume: 10 }),
+        Object.assign(newOt2Step('sample'), { wells: 'A1-H1', volume: 10 }),
+      ]
+    })
+    expect((code.match(/tc\.open_lid\(\)/g) || [])).toHaveLength(3)   // setup, mix, sample
+    expect((code.match(/tc\.close_lid\(\)/g) || [])).toHaveLength(3)  // the step, then after each
+  })
+})
+
+describe('partial tip pickup (fewer than eight nozzles)', () => {
+  it('reads one contiguous run per column, addressed by its LAST well', () => {
+    // Four nozzles at D1 reach A1–D1: the tipped nozzles are the bottom ones.
+    expect(partialColumnGroups(['A1', 'B1', 'C1', 'D1', 'A2', 'B2', 'C2', 'D2'], 96)).toEqual({
+      n: 4,
+      groups: [{ address: 'D1', wells: ['A1', 'B1', 'C1', 'D1'] }, { address: 'D2', wells: ['A2', 'B2', 'C2', 'D2'] }],
+    })
+    // A run anywhere in the column is fine, as long as it is contiguous.
+    expect(partialColumnGroups(['E3', 'F3', 'G3', 'H3'], 96).groups).toEqual([{ address: 'H3', wells: ['E3', 'F3', 'G3', 'H3'] }])
+    expect(partialEndNozzle(4)).toBe('E1')
+    expect(partialEndNozzle(2)).toBe('G1')
+  })
+  it('refuses what it cannot do in one stroke per column', () => {
+    expect(partialColumnGroups(['A1', 'B1', 'D1'], 96)).toBe(null)             // a gap
+    expect(partialColumnGroups(['A1', 'B1', 'A2', 'B2', 'C2'], 96)).toBe(null) // different lengths
+    expect(partialColumnGroups(['A1', 'B1', 'C1'], 96)).toBe(null)             // 3 does not divide 8
+    expect(partialColumnGroups(['A1', 'B1', 'C1', 'D1'], 384)).toBe(null)      // 384 nozzle pitch skips rows
+  })
+  it('knows which slot sits behind another', () => {
+    expect([slotBehind('1'), slotBehind('6'), slotBehind('8')]).toEqual(['4', '9', '11'])
+    // Slot 12 counts: the fixed trash stands behind slot 9.
+    expect([slotBehind('9'), slotBehind('10'), slotBehind('11')]).toEqual(['12', null, null])
+  })
+
+  const partialRun = (mutate = () => {}) => gen(fullPlate(), cfg => {
+    cfg.prefilled = true
+    cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' }
+    cfg.sampleSlots = ['2', '3']
+    cfg.steps = [Object.assign(newOt2Step('series'), { count: 6, intervalMinutes: 10, wells: 'A1-D1 A2-D2 A3-D3', volume: 25 })]
+    mutate(cfg)
+  })
+
+  it('configures four nozzles once, addresses the last well, and puts the layout back', () => {
+    const { code, summary, warnings } = partialRun()
+    expect(code).toContain('from opentrons.protocol_api import ALL, PARTIAL_COLUMN')
+    expect(code).toContain('p300m.configure_nozzle_layout(style=PARTIAL_COLUMN, start="H1", end="E1", tip_racks=tips_p300m)')
+    expect(code).toContain('series_wells = ["D1", "D2", "D3"]')
+    // Destinations: the 4th well of each run of four, so the runs pack tightly.
+    expect(code).toContain('dests = sample_dests[series_starts[i] + 3:series_starts[i] + 12:4]')
+    expect(code).toContain('p300m.configure_nozzle_layout(style=ALL, tip_racks=tips_p300m)')
+    // Configured once, outside the loop — re-configuring starts a fresh column.
+    expect((code.match(/PARTIAL_COLUMN/g) || [])).toHaveLength(2)   // the import and the one call
+    // 12 wells a time point, not the 24 a whole-column stroke would take.
+    expect(summary.sampleWellsUsed).toBe(72)
+    expect(warnings).toEqual([])
+    assertPythonShape(code)
+  })
+
+  it('spends a quarter of a tip column per stroke, not a whole one', () => {
+    const partial = partialRun()
+    const whole = partialRun(cfg => { cfg.steps[0].wells = 'A1-H1 A2-H2 A3-H3' })
+    // Same 18 strokes either way; four nozzles fit two strokes into one column.
+    expect(partial.summary.pipettes.find(p => p.var === 'p300m').tipsNeeded).toBe(9)
+    expect(whole.summary.pipettes.find(p => p.var === 'p300m').tipsNeeded).toBe(18)
+  })
+
+  it('falls back to the single-channel when the option is off, or the API is too old', () => {
+    const off = partialRun(cfg => { cfg.steps[0].multi = 'off' })
+    expect(off.code).not.toContain('PARTIAL_COLUMN')
+    // 12 wells × 6 time points, each 25 µL split into two strokes on a P20.
+    expect(off.summary.pipettes.find(p => p.var === 'p20').tipsNeeded).toBe(144)
+
+    const old = partialRun(cfg => { cfg.apiLevel = '2.18' })
+    expect(old.code).not.toContain('PARTIAL_COLUMN')
+    expect(old.warnings.some(w => /partial tip pickup needs apiLevel 2\.20/.test(w))).toBe(true)
+  })
+
+  it('keeps tall labware out of the slot behind anything a partial stroke reaches', () => {
+    // Slot 5 is behind slot 2, which holds a sample plate: no tip rack there.
+    const { summary, warnings } = partialRun()
+    const behindReached = new Set(['5', '6', '10'])   // behind sample plates 2, 3 and the plate in 1
+    expect(summary.pipettes.flatMap(p => p.tipSlots).some(s => behindReached.has(s))).toBe(false)
+    expect(warnings).toEqual([])
+  })
+
+  it('names the clash when the user parks something tall behind a reached slot', () => {
+    const { warnings } = partialRun(cfg => {
+      cfg.prefilled = false                                   // brings the tube racks back
+      cfg.deck.stocks = '5'                                   // 80 mm, directly behind sample plate 2
+      cfg.deck.bulk = '9'
+      cfg.steps.unshift(newOt2Step('build'))
+    })
+    expect(warnings.some(w => /Partial tip pickup: the stock rack in slot 5 is 80 mm tall and sits behind slot 2/.test(w))).toBe(true)
+    expect(PARTIAL_REAR_MAX_HEIGHT_MM).toBe(57)
+  })
+})
+
+describe('sample plates fill completely before the next one is started', () => {
+  // 5 part-columns of 4 = 20 wells a time point; 96 is not a multiple of 20, so
+  // this is the case where a round meets the edge of a plate part-way through.
+  const run = (mutate = () => {}) => gen(fullPlate(), cfg => {
+    cfg.prefilled = true
+    cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' }
+    cfg.target = { on: 'deck', slot: '1', labware: 'corning_96_wellplate_360ul_flat' }
+    cfg.sampleSlots = ['2', '3']
+    cfg.steps = [Object.assign(newOt2Step('series'), { count: 11, intervalMinutes: 1, volume: 25, wells: 'A1-D1 A2-D2 A3-D3 A4-D4 A5-D5' })]
+    mutate(cfg)
+  })
+  const startsOf = (code) => /series_starts = \[([^\]]*)\]/.exec(code)[1].split(',').map(x => Number(x.trim()))
+
+  it('spends wells in one unbroken run, leaving no gap at a plate edge', () => {
+    const { code, summary, warnings } = run()
+    const starts = startsOf(code)
+    // 192 wells on the deck: nine time points of 20 fit, the tenth starts over.
+    expect(starts.slice(0, 9)).toEqual([0, 20, 40, 60, 80, 100, 120, 140, 160])
+    expect(starts.slice(9)).toEqual([0, 20])
+    expect(summary.sampleSwaps).toBe(1)
+    // Slot 9 is in front of the trash, so the third tip rack is not placed at
+    // all — one refill pause beats a run that fails when it reaches for it.
+    expect(warnings).toEqual([expect.stringContaining('only 2 racks fit on the deck')])
+    expect(summary.pipettes.flatMap(p => p.tipSlots)).not.toContain('9')
+    assertPythonShape(code)
+  })
+
+  it('carries a round over the edge into the plate beside it', () => {
+    const { actions } = run()
+    const straddle = actions.filter(a => (a.dst?.spans || []).length > 1)
+    expect(straddle).toHaveLength(1)
+    // Time point 5 starts at well 80 of 96: sixteen wells here, four next door.
+    expect(straddle[0].dst.spans).toEqual([
+      { slot: '2', wells: ['A11', 'B11', 'C11', 'D11', 'E11', 'F11', 'G11', 'H11', 'A12', 'B12', 'C12', 'D12', 'E12', 'F12', 'G12', 'H12'] },
+      { slot: '3', wells: ['A1', 'B1', 'C1', 'D1'] },
+    ])
+    expect(straddle[0].text).toContain('into slot 2 A11–H12 + slot 3 A1–D1')
+  })
+
+  it('still refuses to straddle the swap, so no time point is split over a plate change', () => {
+    const { code, actions } = run()
+    const starts = startsOf(code)
+    // The tenth point would run past the last well of the deck load, so it waits
+    // for the fresh set instead of putting half its samples on a plate you remove.
+    expect(starts[9]).toBe(0)
+    const swap = actions.find(a => a.kind === 'swap')
+    const after = actions.indexOf(swap)
+    expect(actions.slice(0, after).every(a => (a.dst?.spans || []).every(sp => ['2', '3'].includes(sp.slot)))).toBe(true)
+  })
+
+  it('one time point may not need more wells than the whole deck holds', () => {
+    // 96 wells a time point into a single 24-tube rack.
+    const { warnings } = run(cfg => {
+      cfg.sampleSlots = ['2']
+      cfg.samplesLabware = 'opentrons_24_tuberack_nest_1.5ml_snapcap'
+      Object.assign(cfg.steps[0], { wells: 'all', multi: 'off' })
+    })
+    expect(warnings.some(w => /one time point needs 96 sample wells but the .* on the deck hold 24/.test(w))).toBe(true)
+  })
+})
+
+describe('a module behind a slot blocks a partial stroke', () => {
+  // Reported from a real run: "Moving to Samples 1 in slot 4 with H1 nozzle
+  // partial configuration will result in collision with items in deck slot 7."
+  const onTc = (slots) => gen(fullPlate(), cfg => {
+    cfg.prefilled = true
+    cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' }
+    cfg.target = { on: 'thermocycler', slot: '1', labware: 'nest_96_wellplate_100ul_pcr_full_skirt' }
+    cfg.sampleSlots = slots
+    cfg.steps = [
+      Object.assign(newOt2Step('thermocycler'), { lid: 'close', blockTemp: 37 }),
+      Object.assign(newOt2Step('series'), { count: 4, intervalMinutes: 1, wells: 'A1-D1 A2-D2', volume: 25 }),
+    ]
+  })
+
+  it('names the Thermocycler in slot 7 when a sample plate sits in slot 4', () => {
+    const { warnings, summary } = onTc(['4', '5'])
+    expect(warnings).toContain('Partial tip pickup: the Thermocycler in slot 7 sits behind slot 4, which the 8-channel reaches into with only some of its nozzles tipped — the robot refuses that move (PartialTipMovementNotAllowedError). Move what is in slot 4 to a slot with nothing, or nothing over 57 mm, behind it — or set this step\'s 8-channel to "whole columns only".')
+    expect(warnings.some(w => /the Thermocycler in slot 8 sits behind slot 5/.test(w))).toBe(true)
+    // Slots 4 and 5 are unusable whatever is in them; 7 and 8 are the module itself.
+    expect(summary.partialBlockedSlots).toEqual(['4', '5', '9'])
+    expect(summary.usesPartial).toBe(true)
+  })
+
+  it('is happy once the sample plates move in front of the Thermocycler', () => {
+    const { warnings, code } = onTc(['2', '3'])
+    expect(warnings).toEqual([])
+    expect(code).toContain('PARTIAL_COLUMN')
+    assertPythonShape(code)
+  })
+
+  it('lets the Thermocycler reach over itself — its plate on slot 7 has slot 10 behind', () => {
+    const { warnings } = onTc(['2', '3'])
+    expect(warnings.some(w => /behind slot 7/.test(w))).toBe(false)
+  })
+
+  it('keeps tip racks out of the slots a module blocks', () => {
+    const { summary } = onTc(['2', '3'])
+    expect(summary.pipettes.flatMap(p => p.tipSlots).some(s => ['4', '5'].includes(s))).toBe(false)
+  })
+
+  it('says nothing about modules when no step uses partial pickup', () => {
+    const { warnings, summary } = gen(fullPlate(), cfg => {
+      cfg.prefilled = true
+      cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' }
+      cfg.target = { on: 'thermocycler', slot: '1', labware: 'nest_96_wellplate_100ul_pcr_full_skirt' }
+      cfg.sampleSlots = ['4']
+      cfg.steps = [Object.assign(newOt2Step('series'), { count: 2, intervalMinutes: 1, wells: 'A1-H1', volume: 25 })]
+    })
+    expect(summary.usesPartial).toBe(false)
+    expect(warnings.some(w => /Partial tip pickup/.test(w))).toBe(false)
+  })
+})
+
+describe('the fixed trash behind slot 9', () => {
+  // Reported from a real run: the protocol analysed clean in the Opentrons App,
+  // then failed once the series moved onto the tip rack in slot 9. The trash is
+  // a TrashBin rather than deck labware, so `deck["12"]` is empty and neither
+  // the robot's own conflict check nor a simulation catches it.
+  const cti138 = (mutate = () => {}) => gen(fullPlate(), cfg => {
+    cfg.prefilled = true
+    cfg.pipettes = { left: 'p20_multi_gen2', right: 'p300_single_gen2' }
+    cfg.tipRacks = { left: 'opentrons_96_tiprack_10ul', right: '' }
+    cfg.target = { on: 'thermocycler', slot: '1', labware: 'armadillo_96_wellplate_200ul_pcr_full_skirt' }
+    cfg.sampleSlots = ['2']
+    cfg.steps = [Object.assign(newOt2Step('series'), { count: 17, intervalMinutes: 15, wells: 'A1-D1 A2-D2 A3-D3', volume: 1.5 })]
+    mutate(cfg)
+  })
+
+  it('keeps tip racks out of slot 9 now that the trash counts', () => {
+    const { summary, warnings } = cti138()
+    expect(summary.pipettes.flatMap(p => p.tipSlots)).not.toContain('9')
+    expect(summary.partialBlockedSlots).toContain('9')
+    expect(warnings.some(w => /fixed trash/.test(w))).toBe(false)
+  })
+
+  it('says the App will not catch it when something reached still ends up in slot 9', () => {
+    const { warnings } = cti138(cfg => { cfg.sampleSlots = ['9'] })
+    const w = warnings.find(x => /fixed trash/.test(x))
+    expect(w).toContain('the fixed trash stands behind slot 9')
+    expect(w).toContain('does NOT catch this')
+  })
+
+  it('leaves slot 9 alone when nothing uses partial pickup', () => {
+    const { summary } = cti138(cfg => { cfg.steps[0].multi = 'auto' })
+    expect(summary.usesPartial).toBe(false)
+    expect(summary.partialBlockedSlots).toContain('9')   // still true of the deck
+    expect(summary.pipettes.flatMap(p => p.tipSlots)).toContain('9')
   })
 })

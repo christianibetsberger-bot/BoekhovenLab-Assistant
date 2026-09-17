@@ -412,7 +412,7 @@
           </div>
           <div class="tt-progress-bar" style="margin-top:8px;">
             <div class="tt-progress-fill"
-              :style="{ width: Math.min(100, (vacationUsedThisYear / totalVacationThisYear) * 100) + '%', background: 'var(--warning, #f59e0b)' }"></div>
+              :style="{ width: Math.min(100, (vacationUsedThisYear / totalVacationThisYear) * 100) + '%', background: 'var(--warning)' }"></div>
           </div>
           <div style="font-size:0.72rem; opacity:0.6; margin-top:4px; text-align:right;">
             {{ vacationUsedThisYear }} / {{ totalVacationThisYear }} vacation days used
@@ -475,7 +475,7 @@
               <input type="number" min="0" max="365" v-model.number="settings.vacation_carryover" @change="saveSettings"
                 :placeholder="'Auto: ' + vacationCarriedOver" />
             </div>
-            <div style="font-size:0.73rem; opacity:0.7; padding:6px 8px; background:var(--input-bg); border-radius:6px; border-left:3px solid var(--warning,#f59e0b); display:flex; align-items:center;">
+            <div style="font-size:0.73rem; opacity:0.7; padding:6px 8px; background:var(--input-bg); border-radius:6px; border-left:3px solid var(--warning); display:flex; align-items:center;">
               Auto: <strong style="margin:0 3px;">{{ vacationCarriedOver }}</strong> · Total: <strong style="margin-left:3px;">{{ totalVacationThisYear }}</strong> days (0 = use auto)
             </div>
           </div>
@@ -587,6 +587,7 @@ import Plotly from 'plotly.js-dist-min'
 import * as XLSX from 'xlsx'
 import { db } from '../services/supabase'
 import { useLabStore } from '../stores/labStore'
+import { plotTheme } from '../utils/plotStyle'
 import { ttBumpCounter, bumpTT, signalModuleActive, ttProjectList } from '../composables/timeTrackerBus'
 
 const store = useLabStore()
@@ -1592,8 +1593,8 @@ function buildYearSummarySheet() {
 function plotLayout() {
   const dark = store.isDarkMode
   return {
-    paper_bgcolor: dark ? '#111827' : '#ffffff',
-    plot_bgcolor:  dark ? '#111827' : '#ffffff',
+    paper_bgcolor: plotTheme(store.theme).paper,
+    plot_bgcolor:  plotTheme(store.theme).plot,
     font:          { color: dark ? '#f3f4f6' : '#1f2937', size: 10 },
     margin:        { l: 32, r: 8, b: 30, t: 6 },
     // No gridlines — keep only a subtle zero baseline so values are readable.
@@ -1914,8 +1915,8 @@ function renderSankey() {
   tasks.forEach((t, i) => { taskColor[t] = CHART_PALETTE[i % CHART_PALETTE.length] })
 
   const baseLayout = {
-    paper_bgcolor: dark ? '#111827' : '#ffffff',
-    plot_bgcolor:  dark ? '#111827' : '#ffffff',
+    paper_bgcolor: plotTheme(store.theme).paper,
+    plot_bgcolor:  plotTheme(store.theme).plot,
     font:   { color: dark ? '#f3f4f6' : '#1f2937', size: 10 },
     margin: { l: 4, r: 4, t: 20, b: 4 },
   }
@@ -2045,7 +2046,7 @@ function renderSankey() {
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
-watch(() => store.isDarkMode, renderCharts)
+watch(() => store.theme, renderCharts)
 watch(chartPeriod, renderCharts)
 watch(entries, () => nextTick(renderCharts), { deep: true })
 watch(absences, () => nextTick(renderCharts), { deep: true })
@@ -2099,7 +2100,7 @@ onBeforeUnmount(() => {
   color: var(--success); letter-spacing: 0.4px;
 }
 .tt-live-dot {
-  width: 8px; height: 8px; border-radius: 50%; background: var(--success);
+  width: 8px; height: 8px; border-radius: 50%; background: var(--ok-fill);
   animation: tt-pulse 1.6s ease-in-out infinite;
 }
 @keyframes tt-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
@@ -2145,8 +2146,8 @@ onBeforeUnmount(() => {
 }
 .tt-checkin-btn:hover:not(:disabled) { filter: brightness(.9); }
 .tt-checkin-btn:disabled { opacity: .55; cursor: not-allowed; }
-.tt-checkin-btn.checkin  { background: var(--success); color: #fff; }
-.tt-checkin-btn.checkout { background: #ef4444; color: #fff; }
+.tt-checkin-btn.checkin  { background: var(--ok-fill); color: #fff; }
+.tt-checkin-btn.checkout { background: var(--danger-fill); color: #fff; }
 
 .tt-week-grid, .tt-year-grid {
   display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; margin-bottom: 7px;
@@ -2176,7 +2177,7 @@ onBeforeUnmount(() => {
 }
 .tt-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
 .tt-row-active td { background: color-mix(in srgb, var(--success) 8%, transparent); }
-.tt-edit-row td { background: var(--summary-bg, #f8fafc); }
+.tt-edit-row td { background: var(--summary-bg); }
 
 .tt-task-chip {
   display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: .7rem; white-space: nowrap;
@@ -2222,9 +2223,9 @@ onBeforeUnmount(() => {
 .tt-chip-list {
   display: flex; flex-wrap: wrap; gap: 4px;
   min-height: 32px; padding: 6px;
-  border: 1px solid var(--border-color, #cbd5e1);
+  border: 1px solid var(--ln2);
   border-radius: 4px;
-  background: var(--input-bg, transparent);
+  background: var(--input-bg);
 }
 .tt-chip {
   display: inline-flex; align-items: center; gap: 4px;

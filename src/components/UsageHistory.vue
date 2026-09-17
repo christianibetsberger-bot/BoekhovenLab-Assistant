@@ -84,7 +84,7 @@ watch(() => props.itemId, () => {
     <div v-if="open" class="uh-body">
       <div v-if="loading" class="uh-empty"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
       <div v-else-if="missing" class="uh-empty">Run <code>supabase/inventory_usage.sql</code> to start tracking usage.</div>
-      <div v-else-if="loadError" class="uh-empty" style="color: var(--wr, #dc2626);">
+      <div v-else-if="loadError" class="uh-empty" style="color: var(--wr);">
         Could not load the history — {{ loadError }}.
         <button class="uh-retry" @click="load()">Retry</button>
       </div>
@@ -118,19 +118,19 @@ watch(() => props.itemId, () => {
 </template>
 
 <style scoped>
-.uh { margin-top: 14px; border: 1px solid var(--ln, #e2e8f0); border-radius: 10px; overflow: hidden; }
-.uh-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: var(--fl, #f8fafc); border: none; box-shadow: none; color: inherit; font-size: 0.82rem; font-weight: 600; cursor: pointer; text-align: left; }
-.uh-count { margin-left: 6px; font-size: 0.7rem; font-weight: 700; background: var(--primary, #2563eb); color: #fff; border-radius: 999px; padding: 1px 7px; }
+.uh { margin-top: 14px; border: 1px solid var(--ln); border-radius: 10px; overflow: hidden; }
+.uh-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: var(--fl); border: none; box-shadow: none; color: inherit; font-size: 0.82rem; font-weight: 600; cursor: pointer; text-align: left; }
+.uh-count { margin-left: 6px; font-size: 0.7rem; font-weight: 700; background: var(--acc-fill); color: #fff; border-radius: 999px; padding: 1px 7px; }
 .uh-body { padding: 10px 12px; max-height: 340px; overflow-y: auto; }
-.uh-as { font-size: 0.68rem; color: var(--tx2, #64748b); font-family: ui-monospace, monospace; margin-top: 1px; }
+.uh-as { font-size: 0.68rem; color: var(--tx2); font-family: ui-monospace, monospace; margin-top: 1px; }
 .uh-retry { margin-left: 8px; font-size: 0.7rem; padding: 2px 8px; border: 1px solid currentColor; background: transparent; color: inherit; border-radius: 6px; cursor: pointer; box-shadow: none; }
-.uh-empty { font-size: 0.76rem; color: var(--tx2, #64748b); line-height: 1.5; }
+.uh-empty { font-size: 0.76rem; color: var(--tx2); line-height: 1.5; }
 .uh-year + .uh-year { margin-top: 6px; }
 .uh-year-head { display: flex; align-items: center; gap: 6px; width: 100%; background: transparent; border: none; box-shadow: none; color: inherit; font-size: 0.78rem; padding: 4px 2px; cursor: pointer; text-align: left; }
-.uh-list { list-style: none; margin: 2px 0 0; padding: 0 0 0 14px; border-left: 1px dashed var(--ln2, #cbd5e1); }
+.uh-list { list-style: none; margin: 2px 0 0; padding: 0 0 0 14px; border-left: 1px dashed var(--ln2); }
 .uh-item { display: flex; gap: 9px; align-items: flex-start; padding: 6px 0 6px 8px; }
-.uh-ico { margin-top: 2px; color: var(--primary, #2563eb); font-size: 0.78rem; width: 14px; text-align: center; }
+.uh-ico { margin-top: 2px; color: var(--acc); font-size: 0.78rem; width: 14px; text-align: center; }
 .uh-main { min-width: 0; }
 .uh-title { font-size: 0.79rem; font-weight: 600; word-break: break-word; }
-.uh-meta { font-size: 0.7rem; color: var(--tx2, #64748b); display: flex; flex-wrap: wrap; gap: 4px; margin-top: 1px; }
+.uh-meta { font-size: 0.7rem; color: var(--tx2); display: flex; flex-wrap: wrap; gap: 4px; margin-top: 1px; }
 </style>

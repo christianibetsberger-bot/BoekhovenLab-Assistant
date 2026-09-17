@@ -138,13 +138,13 @@
           <div style="margin-top: 8px;">
             <button type="button"
               @click="toggleCompD"
-              style="width:100%; text-align:left; background:transparent; border:1px dashed var(--border-color,#cbd5e1); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
+              style="width:100%; text-align:left; background:transparent; border:1px dashed var(--ln2); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
               <i class="fas" :class="config.enableCompD ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
               <span title="Sweeps a 4th component through the design and adds a D slider to the 3D scatter. Opening this panel turns it on.">4th component (D)</span>
               <span v-if="config.enableCompD" style="margin-left:auto; background:rgba(139,92,246,0.2); color:#8b5cf6; border-radius:10px; padding:1px 7px; font-size:0.7rem;">on</span>
             </button>
 
-            <div v-if="config.enableCompD" style="margin-top:8px; padding:10px 12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px;">
+            <div v-if="config.enableCompD" style="margin-top:8px; padding:10px 12px; border:1px solid var(--ln2); border-radius:6px;">
               <div class="input-group" style="margin:0;">
                 <label>Component<select class="slot-select" :value="'compD'" @change="swapComponentTo('compD', $event.target.value)" title="Which letter this compound sits on. Pick another letter and the two swap places — ranges, stocks and every logged value move with them, so nothing changes meaning."><option v-for="k in COMP_KEYS" :key="k" :value="k">{{ SLOT_LETTER[k] }}</option></select> <select :value="config.compDUnit" @change="changeUnit('compD', config.compDUnit, $event.target.value)" class="unit-select"><option v-for="u in unitOptions" :key="u" :value="u">{{ u }}</option></select></label>
                 <div style="display: flex; gap: 5px; align-items: flex-end;">
@@ -181,13 +181,13 @@
           <div style="margin-top: 8px;">
             <button type="button"
               @click="config.showConstants = !config.showConstants"
-              style="width:100%; text-align:left; background:transparent; border:1px dashed var(--border-color,#cbd5e1); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
+              style="width:100%; text-align:left; background:transparent; border:1px dashed var(--ln2); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
               <i class="fas" :class="config.showConstants ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
               <span title="A fixed final concentration in every well (a dye, a background buffer), taken from the fill-up.">Constant components</span>
               <span v-if="config.constants && config.constants.length" style="margin-left:auto; background:rgba(139,92,246,0.2); color:#8b5cf6; border-radius:10px; padding:1px 7px; font-size:0.7rem;">{{ config.constants.length }}</span>
             </button>
 
-            <div v-if="config.showConstants" style="margin-top:8px; padding:10px 12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
+            <div v-if="config.showConstants" style="margin-top:8px; padding:10px 12px; border:1px solid var(--ln2); border-radius:6px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
               <template v-if="config.constants && config.constants.length">
                 <div style="display:grid; grid-template-columns:1.7fr 74px 66px 74px 66px 24px; gap:6px; font-size:0.66rem; font-weight:700; opacity:0.5; padding:0 2px;">
                   <span>Component</span><span>Final</span><span>unit</span><span>Stock</span><span>unit</span><span></span>
@@ -243,13 +243,13 @@
           <div style="margin-top: 8px;">
             <button type="button"
               @click="config.showDependencies = !config.showDependencies"
-              style="width:100%; text-align:left; background:transparent; border:1px dashed var(--border-color,#cbd5e1); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
+              style="width:100%; text-align:left; background:transparent; border:1px dashed var(--ln2); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
               <i class="fas" :class="config.showDependencies ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
               <span title="Tie one component to another — either pinned to an exact value (D = 2 × C) or held within a range (D between 1× and 3× C). Values are in each component's configured unit.">Component Links</span>
               <span v-if="config.dependencies && config.dependencies.length" style="margin-left:auto; background:rgba(139,92,246,0.2); color:#8b5cf6; border-radius:10px; padding:1px 7px; font-size:0.7rem;">{{ config.dependencies.length }} link{{ config.dependencies.length > 1 ? 's' : '' }}</span>
             </button>
 
-            <div v-if="config.showDependencies" style="margin-top:8px; padding:10px 12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
+            <div v-if="config.showDependencies" style="margin-top:8px; padding:10px 12px; border:1px solid var(--ln2); border-radius:6px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
               <!-- Existing links -->
               <div v-for="(dep, di) in (config.dependencies || [])" :key="di"
                 style="display:flex; gap:5px; align-items:center; flex-wrap:wrap;">
@@ -302,12 +302,12 @@
           <div style="margin-top: 10px;">
             <button type="button"
               @click="config.showMediumSettings = !config.showMediumSettings"
-              style="width:100%; text-align:left; background:transparent; border:1px dashed var(--border-color,#cbd5e1); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
+              style="width:100%; text-align:left; background:transparent; border:1px dashed var(--ln2); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
               <i class="fas" :class="config.showMediumSettings ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
               <span title="Analysis only: reports the Na⁺ each well carries from the component solvents and the fill-up, and estimates the well pH from volume-weighted H⁺ mixing. Pipetted volumes are not affected.">Advanced: solvents · background Na⁺ · pH</span>
             </button>
 
-            <div v-if="config.showMediumSettings" style="margin-top:8px; padding:12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.8rem; display:flex; flex-direction:column; gap:10px;">
+            <div v-if="config.showMediumSettings" style="margin-top:8px; padding:12px; border:1px solid var(--ln2); border-radius:6px; font-size:0.8rem; display:flex; flex-direction:column; gap:10px;">
               <!-- Header row -->
               <div style="display:grid; grid-template-columns:120px 100px 1fr 130px 80px; gap:6px; align-items:center; font-size:0.7rem; font-weight:700; opacity:0.55; text-transform: none; letter-spacing:0.04em;">
                 <span>Component</span>
@@ -390,7 +390,7 @@
               </div>
 
               <!-- Divider -->
-              <div style="border-top:1px dashed var(--border-color,#cbd5e1); padding-top:8px; font-size:0.72rem; font-weight:700; opacity:0.55; text-transform: none; letter-spacing:0.04em;">Fill-up solution</div>
+              <div style="border-top:1px dashed var(--ln2); padding-top:8px; font-size:0.72rem; font-weight:700; opacity:0.55; text-transform: none; letter-spacing:0.04em;">Fill-up solution</div>
 
               <!-- Fill-up -->
               <div style="display:grid; grid-template-columns:120px 100px 1fr 130px 80px; gap:6px; align-items:center;">
@@ -438,14 +438,14 @@
                 <span v-else style="opacity:0.3; font-size:0.72rem;">—</span>
               </div>
 
-              <div style="border-top:1px solid var(--border-color,#e2e8f0); padding-top:8px; font-size:0.7rem; opacity:0.6;">
+              <div style="border-top:1px solid var(--ln2); padding-top:8px; font-size:0.7rem; opacity:0.6;">
                 These solvent settings are read-only analysis: they report the Na⁺ each well carries from the
                 buffers and estimate its pH. Pipetted volumes are always the plain dilution from each stock.
               </div>
 
               <!-- Live preview for first suggestion -->
               <template v-if="suggestions.length > 0">
-                <div style="border-top:1px solid var(--border-color,#e2e8f0); padding-top:8px;">
+                <div style="border-top:1px solid var(--ln2); padding-top:8px;">
                   <div style="font-size:0.7rem; font-weight:700; opacity:0.55; text-transform: none; letter-spacing:0.04em; margin-bottom:4px;">Preview (first AI target)</div>
                   <div style="font-size:0.78rem; display:flex; gap:16px; flex-wrap:wrap;">
                     <span>A: <strong>{{ computeWellVolumes(suggestions[0]).vA.toFixed(2) }} µL</strong></span>
@@ -468,13 +468,13 @@
           <div style="margin-top: 8px;">
             <button type="button"
               @click="additiveConfig.enabled = !additiveConfig.enabled"
-              style="width:100%; text-align:left; background:transparent; border:1px dashed var(--border-color,#cbd5e1); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
+              style="width:100%; text-align:left; background:transparent; border:1px dashed var(--ln2); border-radius:6px; padding:5px 10px; cursor:pointer; color:inherit; font-size:0.78rem; opacity:0.75; display:flex; align-items:center; gap:8px;">
               <i class="fas" :class="additiveConfig.enabled ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
               <span title="Spike a new component on top of existing wells. Concentrations of all existing components are automatically diluted by the added volume.">Additive Experiment Layer</span>
               <span v-if="additiveConfig.enabled && additivePreviewRows.length" style="margin-left:auto; background:rgba(139,92,246,0.2); color:#8b5cf6; border-radius:10px; padding:1px 7px; font-size:0.7rem;">{{ additivePreviewRows.length }} wells</span>
             </button>
 
-            <div v-if="additiveConfig.enabled" style="margin-top:8px; padding:10px 12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px;">
+            <div v-if="additiveConfig.enabled" style="margin-top:8px; padding:10px 12px; border:1px solid var(--ln2); border-radius:6px;">
               <!-- Row 1: source + additive component definition -->
               <!-- auto-fit: this panel now lives in the narrow left column, so the four
                    controls reflow onto as many rows as the width allows. -->
@@ -556,7 +556,7 @@
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="(row, ri) in additivePreviewRows.slice(0, 24)" :key="ri" :style="ri % additiveVolumes.length === 0 ? 'border-top:2px solid var(--border-color,#e2e8f0);' : ''">
+                    <tr v-for="(row, ri) in additivePreviewRows.slice(0, 24)" :key="ri" :style="ri % additiveVolumes.length === 0 ? 'border-top:2px solid var(--ln2);' : ''">
                       <td style="opacity:0.6;">{{ row._baseId }}</td>
                       <td><strong>{{ row._vAdd }}</strong></td>
                       <td>{{ row.anion }}</td>
@@ -584,7 +584,7 @@
                 </select>
                 <input type="text" v-model="targetStartWell" placeholder="A1" class="compact-input" />
                 <button class="small" @click="exportAdditiveToPlate"
-                  style="background:var(--wr); color:#fff; border:none; padding:4px 14px; border-radius:var(--rc); cursor:pointer; font-weight:600;">
+                  style="background:var(--wr-fill); color:#fff; border:none; padding:4px 14px; border-radius:var(--rc); cursor:pointer; font-weight:600;">
                   <i class="fas fa-arrow-down"></i> Send to Plate
                 </button>
                 <span style="font-size:0.72rem; opacity:0.5;">
@@ -612,9 +612,9 @@
               <i class="fas fa-circle-dot"></i> Unsaved workspace
             </span>
           </div>
-          <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px; padding:6px 8px; background:var(--summary-bg,#f1f5f9); border:1px solid var(--border-color,#e2e8f0); border-radius:6px; flex-wrap:wrap;">
+          <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px; padding:6px 8px; background:var(--summary-bg); border:1px solid var(--ln2); border-radius:6px; flex-wrap:wrap;">
             <input type="text" v-model="datasetNameInput" placeholder="Dataset name…"
-              style="flex:1 1 160px; min-width:120px; padding:5px 8px; font-size:0.82rem; border:1px solid var(--border-color,#cbd5e1); border-radius:4px; background:transparent; color:inherit;" />
+              style="flex:1 1 160px; min-width:120px; padding:5px 8px; font-size:0.82rem; border:1px solid var(--ln2); border-radius:4px; background:transparent; color:inherit;" />
             <div style="display:flex; gap:6px; align-items:center; padding:0 4px; font-size:0.72rem;">
               <label class="checkbox-label" style="margin:0;"><input type="radio" value="Personal" v-model="datasetScope"> Personal</label>
               <label class="checkbox-label" style="margin:0;"><input type="radio" value="Global" v-model="datasetScope"> Global</label>
@@ -624,7 +624,7 @@
               {{ isSavingData ? 'Saving…' : 'Save' }}
             </button>
             <select :value="activeDatasetId || ''" @change="loadDataset($event.target.value)"
-              style="flex:0 0 auto; padding:5px 8px; font-size:0.82rem; border:1px solid var(--border-color,#cbd5e1); border-radius:4px; background:transparent; color:inherit;">
+              style="flex:0 0 auto; padding:5px 8px; font-size:0.82rem; border:1px solid var(--ln2); border-radius:4px; background:transparent; color:inherit;">
               <option value="" disabled>Load dataset…</option>
               <optgroup label="Personal">
                 <option v-for="d in datasets.filter(x => (x.scope || 'Personal') === 'Personal' && x.ownerId === store.user?.id)" :key="d.id" :value="d.id">
@@ -682,7 +682,7 @@
           <div class="flex-between" style="margin-top: 10px;">
             <div style="display: flex; gap: 10px;">
               <button class="small" @click="addManualRow"><i class="fas fa-plus"></i> Add Manual Data</button>
-              <button class="small" @click="csvInputRef.click()" style="background: var(--summary-bg, #f1f5f9); color: inherit; border: 1px solid var(--border-color, #cbd5e1);">
+              <button class="small" @click="csvInputRef.click()" style="background: var(--summary-bg); color: inherit; border: 1px solid var(--ln2);">
                 <i class="fas fa-file-csv"></i> Import CSV
               </button>
               <input type="file" ref="csvInputRef" accept=".csv" style="display: none" @change="onCsvFileSelected" />
@@ -706,18 +706,18 @@
                 <i class="fas fa-upload"></i> Load {{ prIsKinetic ? 'XML' : 'CSV' }}
               </button>
               <input type="file" ref="prInputRef" :accept="prIsKinetic ? '.xml,.XML' : '.csv,.CSV,.txt'" style="display:none" @change="onPlatereaderCsvSelected" />
-              <span v-if="prHasData" style="font-size:0.75rem; color:var(--success-color,#10b981); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              <span v-if="prHasData" style="font-size:0.75rem; color:var(--success-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
                 <i class="fas fa-check-circle"></i> {{ prWellCount }} wells loaded
               </span>
               <button v-if="prHasData" class="small danger-btn" @click="prODMap = null; clearKinetic()" style="padding:2px 8px;"><i class="fas fa-times"></i></button>
             </div>
-            <button v-if="!prIsKinetic" class="small" @click="prShowSettings = !prShowSettings" :style="prShowSettings ? 'background:var(--primary);color:#fff;' : ''" style="white-space:nowrap; padding:4px 8px;">
+            <button v-if="!prIsKinetic" class="small" @click="prShowSettings = !prShowSettings" :style="prShowSettings ? 'background:var(--acc-fill);color:#fff;' : ''" style="white-space:nowrap; padding:4px 8px;">
               <i class="fas fa-sliders"></i> Settings
             </button>
           </div>
 
           <!-- Kinetic run header: what was actually measured -->
-          <div v-if="prIsKinetic && prKinetic" style="margin-bottom:8px; padding:7px 10px; border-radius:6px; background:var(--summary-bg,#f1f5f9); font-size:0.72rem; line-height:1.5;">
+          <div v-if="prIsKinetic && prKinetic" style="margin-bottom:8px; padding:7px 10px; border-radius:6px; background:var(--summary-bg); font-size:0.72rem; line-height:1.5;">
             <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
               <strong style="font-size:0.75rem;">{{ prKinFileName }}</strong>
               <select v-if="prKinetic.channels.length > 1" v-model="prChannelKey" style="font-size:0.72rem; padding:2px 5px;">
@@ -746,7 +746,7 @@
           </div>
 
           <!-- Settings panel (endpoint reader only — the kinetic thresholds live in the review dialog) -->
-          <div v-if="prShowSettings" style="border:1px solid var(--border-color,#e2e8f0); border-radius:6px; padding:10px; margin-bottom:8px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
+          <div v-if="prShowSettings" style="border:1px solid var(--ln2); border-radius:6px; padding:10px; margin-bottom:8px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
             <div style="font-weight:700; font-size:0.75rem; text-transform: none; letter-spacing:.4px; opacity:.7;">OD → Phase Thresholds</div>
             <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px;">
               <div class="input-group" style="margin:0;">
@@ -787,7 +787,7 @@
               <option :value="null">— none (positional fallback) —</option>
               <option v-for="p in prAvailablePlates" :key="p.id" :value="p.id">{{ p.name }}</option>
             </select>
-            <span v-if="prLinkedPlateId && prMappedWellCount" style="color:var(--success-color,#10b981); white-space:nowrap;">
+            <span v-if="prLinkedPlateId && prMappedWellCount" style="color:var(--success-color); white-space:nowrap;">
               <i class="fas fa-link"></i> {{ prMappedWellCount }} wells mapped
             </span>
           </div>
@@ -796,7 +796,7 @@
           </p>
 
           <!-- What the plate turned out to be screening, when it had to be worked out -->
-          <div v-if="prInference" style="margin:-4px 0 8px; padding:7px 10px; border-radius:6px; background:var(--summary-bg,#f1f5f9); font-size:0.72rem; line-height:1.6;">
+          <div v-if="prInference" style="margin:-4px 0 8px; padding:7px 10px; border-radius:6px; background:var(--summary-bg); font-size:0.72rem; line-height:1.6;">
             <div style="font-weight:700; opacity:.7;">Read from the plate — {{ prInference.wellCount }} wells</div>
             <div v-for="s in prInference.screened" :key="s.slot">
               <strong>{{ SLOT_LETTER[s.slot] }}</strong> = {{ s.name }}
@@ -850,7 +850,7 @@
             </div>
 
             <!-- Legend: OD bands for the endpoint reader, coacervation classes for the kinetic one -->
-            <div v-if="!prIsKinetic" style="display:flex; gap:6px; flex-wrap:wrap; font-size:0.7rem; margin-bottom:8px; padding:5px 8px; background:var(--summary-bg,#f1f5f9); border-radius:4px;">
+            <div v-if="!prIsKinetic" style="display:flex; gap:6px; flex-wrap:wrap; font-size:0.7rem; margin-bottom:8px; padding:5px 8px; background:var(--summary-bg); border-radius:4px;">
               <span v-for="t in OD_THRESHOLDS_DISPLAY" :key="t.phase" style="display:flex; align-items:center; gap:3px;">
                 <span :style="{ display:'inline-block', width:'10px', height:'10px', borderRadius:'2px', background: getPhaseColor(t.phase, 0.35), border:`1px solid ${getPhaseColor(t.phase,1)}` }"></span>
                 {{ t.label }}: {{ t.range }}
@@ -859,7 +859,7 @@
                 <i class="fas fa-arrow-down" style="font-size:0.65rem;"></i> Dissolved if OD&nbsp;≤&nbsp;{{ prDissolutionThreshold }} after peak
               </span>
             </div>
-            <div v-else style="display:flex; gap:8px; flex-wrap:wrap; font-size:0.7rem; margin-bottom:8px; padding:5px 8px; background:var(--summary-bg,#f1f5f9); border-radius:4px;">
+            <div v-else style="display:flex; gap:8px; flex-wrap:wrap; font-size:0.7rem; margin-bottom:8px; padding:5px 8px; background:var(--summary-bg); border-radius:4px;">
               <span v-for="c in KINETIC_CLASSES" :key="c.key" style="display:flex; align-items:center; gap:3px;">
                 <span :style="{ display:'inline-block', width:'10px', height:'10px', borderRadius:'2px', background: getPhaseColor(kinPhaseOf(c.key), 0.35), border:`1px solid ${getPhaseColor(kinPhaseOf(c.key),1)}` }"></span>
                 {{ c.label }} → {{ phaseLabel(kinPhaseOf(c.key)) }}
@@ -964,7 +964,7 @@
             </div>
           </div>
           <!-- Slice-grid axis pickers: the two components NOT chosen here become the facets -->
-          <div v-if="mapView === 'grid'" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; padding:6px 10px; background:var(--summary-bg,#f1f5f9); border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.76rem;">
+          <div v-if="mapView === 'grid'" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; padding:6px 10px; background:var(--summary-bg); border:1px solid var(--ln2); border-radius:6px; font-size:0.76rem;">
             <span style="font-weight:600;">Axes</span>
             <select v-model="gridXKey" @change="renderPlot" style="font-size:0.76rem; padding:3px 5px; max-width:150px;">
               <option v-for="k in activeComps" :key="'gx'+k" :value="k" :disabled="k === gridYKey">{{ compPickerLabel(k) }}</option>
@@ -1007,7 +1007,7 @@
             </span>
             <button class="small" @click="fitSearchSpaceToData()" style="padding:2px 8px; font-size:0.7rem;">Fit to data</button>
           </p>
-          <div v-if="config.enableCompD && mapView === '3d'" style="display:flex; align-items:center; gap:10px; margin-top:8px; padding:6px 10px; background:var(--summary-bg,#f1f5f9); border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.78rem;">
+          <div v-if="config.enableCompD && mapView === '3d'" style="display:flex; align-items:center; gap:10px; margin-top:8px; padding:6px 10px; background:var(--summary-bg); border:1px solid var(--ln2); border-radius:6px; font-size:0.78rem;">
             <span style="font-weight:600; white-space:nowrap;">
               <i class="fas fa-sliders-h" style="opacity:0.6;"></i>
               {{ config.compDName || 'Component D' }} slice
@@ -1028,17 +1028,17 @@
         <div class="internal-section">
           <h3>Active Learning Engine</h3>
           
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; padding: 10px; background: rgba(59, 130, 246, 0.05); border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; padding: 10px; background: rgba(59, 130, 246, 0.05); border: 1px solid var(--ln2); border-radius: 6px;">
               <div class="input-group" style="margin: 0;">
-                  <label style="font-size: 0.75rem; font-weight: bold; color: var(--primary, #3b82f6);">Targets to Suggest:</label>
+                  <label style="font-size: 0.75rem; font-weight: bold; color: var(--acc);">Targets to Suggest:</label>
                   <input type="number" v-model.number="config.numSuggestions" min="1" max="384" style="padding: 6px;" title="How many wells should the AI generate?" />
               </div>
               <div class="input-group" style="margin: 0;">
-                  <label style="font-size: 0.75rem; font-weight: bold; color: var(--primary, #3b82f6);">Min Distance Filter (0-1):</label>
+                  <label style="font-size: 0.75rem; font-weight: bold; color: var(--acc);">Min Distance Filter (0-1):</label>
                   <input type="number" v-model.number="config.minDistanceFactor" step="0.01" min="0" max="1" style="padding: 6px;" title="0.0 = Tightly Clustered, 0.1+ = Spread Apart" />
               </div>
               <div style="grid-column: span 2; margin-top: 5px;">
-                  <label style="display: block; font-size: 0.75rem; font-weight: bold; margin-bottom: 8px; color: var(--primary, #3b82f6);">Sampling Strategy:</label>
+                  <label style="display: block; font-size: 0.75rem; font-weight: bold; margin-bottom: 8px; color: var(--acc);">Sampling Strategy:</label>
                   <div style="display: flex; gap: 15px;">
                     <label class="checkbox-label">
                       <input type="radio" value="safe" v-model="config.strategy"> Multi-Phase Entropy (Boundary)
@@ -1086,7 +1086,7 @@
     </div>
 
     <div class="internal-section full-width-section" v-if="existingPlateData.length > 0 || suggestions.length > 0">
-      <div class="flex-between" style="border-bottom: 1px solid var(--border-color, #e2e8f0); padding-bottom: 8px; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+      <div class="flex-between" style="border-bottom: 1px solid var(--ln2); padding-bottom: 8px; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
         <h3 style="margin: 0; border: none; padding: 0;">Wet Lab Mapping: 96-Well Plates</h3>
         <div v-if="suggestedPlateData.length > 0" class="export-controls">
             <span style="font-size: 0.85rem; font-weight: bold; opacity: 0.7;">Export AI Targets with Volumes:</span>
@@ -1105,7 +1105,7 @@
            and lay it on a fresh plate with the volumes worked out for the new well
            volume — the way you go from "which of these coacervated" to "let me look
            at those properly". -->
-      <div v-if="experiments.length" class="export-controls" style="margin-bottom: 15px; flex-wrap: wrap; padding: 8px 10px; background: var(--summary-bg,#f1f5f9); border-radius: 6px;">
+      <div v-if="experiments.length" class="export-controls" style="margin-bottom: 15px; flex-wrap: wrap; padding: 8px 10px; background: var(--summary-bg); border-radius: 6px;">
         <span style="font-size: 0.85rem; font-weight: bold; opacity: 0.7;">
           <i class="fas fa-flask" style="opacity:.6;"></i> Replate one phase:
         </span>
@@ -1136,7 +1136,7 @@
 
       <!-- Added to every replated well. Dosed like a constant, taken out of the
            fill-up, so the total volume is untouched and the water is recomputed. -->
-      <div v-if="phaseExtras.length" style="margin:-8px 0 15px; padding:10px 12px; border:1px solid var(--border-color,#e2e8f0); border-radius:6px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
+      <div v-if="phaseExtras.length" style="margin:-8px 0 15px; padding:10px 12px; border:1px solid var(--ln2); border-radius:6px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
         <div style="display:grid; grid-template-columns:1.7fr 74px 66px 74px 66px 64px 24px; gap:6px; font-size:0.66rem; font-weight:700; opacity:0.5; padding:0 2px;">
           <span>Added to every well</span><span>Final</span><span>unit</span><span>Stock</span><span>unit</span><span>µL/well</span><span></span>
         </div>
@@ -3624,7 +3624,7 @@ const kinGrid = computed(() => {
 
 const kinGridStyle = (wellId) => {
   const cls = kinClassOf(wellId)
-  if (!cls) return { background: 'transparent', borderColor: 'var(--border-color,#334155)', cursor: 'default' }
+  if (!cls) return { background: 'transparent', borderColor: 'var(--ln2)', cursor: 'default' }
   const phase = kinPhaseOf(cls)
   const style = {
     background: getPhaseColor(phase, wellId === kinSelected.value ? 0.85 : 0.45),
@@ -3786,7 +3786,7 @@ const prWellStyle = (row, col) => {
   const clickable = prIsKinetic.value && !!kinAnalysis.value?.wells[wellId]
   const base = item
     ? { background: getPhaseColor(item.newPhase, 0.4), borderColor: getPhaseColor(item.newPhase, 1) }
-    : { background: 'transparent', borderColor: 'var(--border-color,#e2e8f0)' }
+    : { background: 'transparent', borderColor: 'var(--ln2)' }
   // A hand-set well wears a heavier ring: the thresholds no longer speak for it.
   if (item?.manual) { base.borderWidth = '2px'; base.boxShadow = '0 0 0 1px rgba(15,23,42,0.35)' }
   base.cursor = clickable ? 'pointer' : 'default'
@@ -4407,10 +4407,10 @@ onMounted(async () => {
 /* Point-colour mode toggle (Distinct hues vs. intensity Gradient) */
 /* flex-shrink:0 — the segmented control has no room to give; without it the label
    text inside gets clipped by the wrapper's overflow:hidden when the row is tight. */
-.color-mode-toggle { display: inline-flex; flex-shrink: 0; border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px; overflow: hidden; }
+.color-mode-toggle { display: inline-flex; flex-shrink: 0; border: 1px solid var(--ln2); border-radius: 6px; overflow: hidden; }
 .color-mode-toggle button { background: transparent; border: none; padding: 3px 9px; font-size: 0.72rem; cursor: pointer; color: inherit; opacity: 0.7; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
-.color-mode-toggle button + button { border-left: 1px solid var(--border-color, #cbd5e1); }
-.color-mode-toggle button.active { background: var(--primary, #3b82f6); color: #fff; opacity: 1; }
+.color-mode-toggle button + button { border-left: 1px solid var(--ln2); }
+.color-mode-toggle button.active { background: var(--acc-fill); color: #fff; opacity: 1; }
 
 /* 2-Column Condensed Grid */
 .layout-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
@@ -4419,12 +4419,12 @@ onMounted(async () => {
 .col-left { display: flex; flex-direction: column; gap: 15px; }
 .col-right { display: flex; flex-direction: column; gap: 15px; }
 
-.internal-section h3 { font-size: 1.05rem; border-bottom: 1px solid var(--border-color, #e2e8f0); padding-bottom: 6px; margin-bottom: 10px; color: var(--primary, #3b82f6); }
+.internal-section h3 { font-size: 1.05rem; border-bottom: 1px solid var(--ln2); padding-bottom: 6px; margin-bottom: 10px; color: var(--acc); }
 .full-width-section { width: 100%; margin-top: 5px; }
 
 /* Inputs and Config */
 .target-vol-input { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: bold; }
-.target-vol-input input { width: 80px; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; }
+.target-vol-input input { width: 80px; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--ln2); background: transparent; color: inherit; }
 .config-grid-complex { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .input-group label { display: block; font-size: 0.8rem; margin-bottom: 4px; font-weight: bold; opacity: 0.8; }
 /* The letter a component sits on — a picker, because the allocation is a choice
@@ -4435,8 +4435,8 @@ onMounted(async () => {
 .unit-select { display: inline-block; font-size: 0.7rem; font-weight: normal; text-transform: none; letter-spacing: 0; background: rgba(59, 130, 246, 0.15); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 3px; padding: 1px 3px; margin-left: 4px; cursor: pointer; width: auto; max-width: 80px; outline: none; vertical-align: middle; }
 .unit-select option { text-transform: none; color: var(--text); background: var(--surface); }
 .unit-text { text-transform: none; }
-.input-group input { width: 100%; padding: 6px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; font-size: 0.85rem; }
-.inventory-select-box { border: 1px solid var(--border-color, #cbd5e1); padding: 6px 10px; background: transparent; color: inherit; cursor: pointer; border-radius: 4px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; min-height: 32px; }
+.input-group input { width: 100%; padding: 6px; border-radius: 4px; border: 1px solid var(--ln2); background: transparent; color: inherit; font-size: 0.85rem; }
+.inventory-select-box { border: 1px solid var(--ln2); padding: 6px 10px; background: transparent; color: inherit; cursor: pointer; border-radius: 4px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; min-height: 32px; }
 
 /* Dropdown */
 .inventory-dropdown { position: absolute; top: 100%; left: 0; z-index: 1000; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2); width: 100%; min-width: 250px; border-radius: 6px; overflow: hidden; color: var(--text); }
@@ -4449,24 +4449,24 @@ onMounted(async () => {
 .truncate-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
 
 /* Ledger Table */
-.ledger-table-container { max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; }
+.ledger-table-container { max-height: 200px; overflow-y: auto; border: 1px solid var(--ln2); border-radius: 6px; }
 .ledger-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; table-layout: fixed; }
-.ledger-table th, .ledger-table td { padding: 8px; text-align: left; border-bottom: 1px solid var(--border-color, #f1f5f9); }
-.ledger-table th { background: var(--summary-bg, #f8fafc); font-weight: bold; position: sticky; top: 0; z-index: 5; }
-.small-input { width: 100%; padding: 4px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); font-size: 0.8rem; background-color: transparent !important; color: inherit !important; }
-.small-select { padding: 4px; border-radius: 4px; border: 1px solid var(--border-color, #ddd); font-size: 0.8rem; outline: none; background-color: transparent !important; color: inherit !important; }
+.ledger-table th, .ledger-table td { padding: 8px; text-align: left; border-bottom: 1px solid var(--ln2); }
+.ledger-table th { background: var(--summary-bg); font-weight: bold; position: sticky; top: 0; z-index: 5; }
+.small-input { width: 100%; padding: 4px; border-radius: 4px; border: 1px solid var(--ln2); font-size: 0.8rem; background-color: transparent !important; color: inherit !important; }
+.small-select { padding: 4px; border-radius: 4px; border: 1px solid var(--ln2); font-size: 0.8rem; outline: none; background-color: transparent !important; color: inherit !important; }
 
 /* Plot Area */
-.plot-area { height: 280px; background: #000; border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0); padding: 5px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); overflow: hidden; }
+.plot-area { height: 280px; background: #000; border-radius: 8px; border: 1px solid var(--ln2); padding: 5px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); overflow: hidden; }
 
 /* Buttons & Engine */
 .action-btn { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: all 0.2s; border: none; font-size: 0.85rem; }
-.auto-btn { background: #3b82f6; color: white; box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3); }
-.auto-btn:hover:not(:disabled) { background: #2563eb; transform: translateY(-1px); }
-.clear-btn { background: transparent; border: none; color: #ef4444; cursor: pointer; padding: 2px; border-radius: 4px; }
-.success-btn { background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
-.danger-btn { background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid #ef4444; }
-.danger-btn:hover { background: #ef4444; color: white; }
+.auto-btn { background: var(--acc-fill); color: white; box-shadow: 0 2px 6px var(--acsh); }
+.auto-btn:hover:not(:disabled) { background: var(--acc-fill); transform: translateY(-1px); }
+.clear-btn { background: transparent; border: none; color: var(--danger-color); cursor: pointer; padding: 2px; border-radius: 4px; }
+.success-btn { background: var(--ok-fill); color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+.danger-btn { background: var(--danger-bg); color: var(--danger-color); border: 1px solid var(--danger-color); }
+.danger-btn:hover { background: var(--danger-fill); color: white; }
 
 /* Side-by-Side Plates Grid */
 .plates-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; align-items: start; }
@@ -4489,40 +4489,40 @@ onMounted(async () => {
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
 .checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; cursor: pointer; color: #475569; font-weight: bold; }
 .export-controls { display: flex; align-items: center; gap: 10px; }
-.compact-select { width: 120px; padding: 4px; background: transparent; color: inherit; border: 1px solid var(--border-color, #475569); border-radius: 4px; font-size: 0.8rem; }
-.compact-input { width: 60px; padding: 4px; background: transparent; color: inherit; border: 1px solid var(--border-color, #475569); border-radius: 4px; font-size: 0.8rem; text-align: center; }
-.na-locked { display: inline-flex; align-items: center; gap: 4px; font-size: 0.76rem; font-weight: 600; color: var(--acc, #2563eb); font-variant-numeric: tabular-nums; }
+.compact-select { width: 120px; padding: 4px; background: transparent; color: inherit; border: 1px solid var(--ln2); border-radius: 4px; font-size: 0.8rem; }
+.compact-input { width: 60px; padding: 4px; background: transparent; color: inherit; border: 1px solid var(--ln2); border-radius: 4px; font-size: 0.8rem; text-align: center; }
+.na-locked { display: inline-flex; align-items: center; gap: 4px; font-size: 0.76rem; font-weight: 600; color: var(--acc); font-variant-numeric: tabular-nums; }
 .na-locked i { font-size: 0.62rem; opacity: 0.7; }
 
 /* Saved conditions toolbar + dialog */
 .cond-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 14px; }
 .cond-blabel { font-size: 0.78rem; font-weight: 700; opacity: 0.6; display: inline-flex; align-items: center; gap: 6px; }
-.cond-select { min-width: 180px; padding: 5px 8px; font-size: 0.8rem; border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px; background: var(--fl, transparent); color: inherit; }
-.cond-btn { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; padding: 6px 12px; border: none; border-radius: 6px; background: var(--acc, #2563eb); color: #fff; cursor: pointer; box-shadow: none; }
-.cond-btn.ghost { background: var(--fl, #eef2f7); color: var(--tx2, #64748b); }
+.cond-select { min-width: 180px; padding: 5px 8px; font-size: 0.8rem; border: 1px solid var(--ln2); border-radius: 6px; background: var(--fl); color: inherit; }
+.cond-btn { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; padding: 6px 12px; border: none; border-radius: 6px; background: var(--acc-fill); color: #fff; cursor: pointer; box-shadow: none; }
+.cond-btn.ghost { background: var(--fl); color: var(--tx2); }
 .cond-modal { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 16px; }
-.cond-dialog { background: var(--modal, #fff); border: 1px solid var(--cdl, #e2e8f0); border-radius: var(--r, 14px); box-shadow: var(--sh, 0 10px 40px rgba(0,0,0,.2)); width: 100%; max-width: 400px; padding: 16px; color: var(--tx, inherit); }
+.cond-dialog { background: var(--modal); border: 1px solid var(--cdl); border-radius: var(--r); box-shadow: var(--sh); width: 100%; max-width: 400px; padding: 16px; color: var(--tx); }
 .cond-dhead { display: flex; align-items: center; justify-content: space-between; font-weight: 600; margin-bottom: 14px; }
-.cond-x { width: 28px; height: 28px; border-radius: 50%; background: var(--fl, #eef2f7); color: var(--tx2, #64748b); border: none; cursor: pointer; box-shadow: none; }
+.cond-x { width: 28px; height: 28px; border-radius: 50%; background: var(--fl); color: var(--tx2); border: none; cursor: pointer; box-shadow: none; }
 .cond-f { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; font-size: 0.8rem; }
 .cond-f > span { font-size: 0.72rem; font-weight: 600; opacity: 0.7; }
-.cond-f input { padding: 7px 9px; border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px; background: var(--fl, transparent); color: inherit; }
+.cond-f input { padding: 7px 9px; border: 1px solid var(--ln2); border-radius: 6px; background: var(--fl); color: inherit; }
 .cond-dfoot { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-.cond-msg { font-size: 0.76rem; color: var(--wr, #dc2626); }
+.cond-msg { font-size: 0.76rem; color: var(--wr); }
 .cond-note { font-size: 0.72rem; opacity: 0.7; margin: 0 0 12px; display: flex; gap: 6px; align-items: baseline; }
 
 /* Kinetics review dialog */
 .kin-modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 16px; }
-.kin-dialog { background: var(--modal, #fff); border: 1px solid var(--cdl, #e2e8f0); border-radius: var(--r, 14px); box-shadow: var(--sh, 0 10px 40px rgba(0,0,0,.25)); width: 100%; max-width: 1120px; max-height: 92vh; padding: 14px 16px; color: var(--tx, inherit); display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+.kin-dialog { background: var(--modal); border: 1px solid var(--cdl); border-radius: var(--r); box-shadow: var(--sh); width: 100%; max-width: 1120px; max-height: 92vh; padding: 14px 16px; color: var(--tx); display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
 .kin-head { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 0.92rem; }
 .kin-head .cond-x { margin-left: auto; }
 .kin-sub { font-size: 0.72rem; opacity: 0.6; font-weight: 400; }
 
-.kin-controls { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 8px 10px; border: 1px solid var(--cdl, #e2e8f0); border-radius: 8px; font-size: 0.75rem; }
+.kin-controls { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 8px 10px; border: 1px solid var(--cdl); border-radius: 8px; font-size: 0.75rem; }
 .kin-ctl { display: flex; align-items: center; gap: 5px; }
 .kin-ctl > label { font-weight: 700; opacity: 0.75; }
-.kin-ctl select { font-size: 0.75rem; padding: 2px 4px; border: 1px solid var(--cdl, #cbd5e1); border-radius: 4px; background: transparent; color: inherit; }
-.kin-ctl input[type=number] { width: 62px; font-size: 0.75rem; padding: 2px 4px; border: 1px solid var(--cdl, #cbd5e1); border-radius: 4px; background: transparent; color: inherit; }
+.kin-ctl select { font-size: 0.75rem; padding: 2px 4px; border: 1px solid var(--cdl); border-radius: 4px; background: transparent; color: inherit; }
+.kin-ctl input[type=number] { width: 62px; font-size: 0.75rem; padding: 2px 4px; border: 1px solid var(--cdl); border-radius: 4px; background: transparent; color: inherit; }
 .kin-unit { opacity: 0.6; }
 
 .kin-body { display: grid; grid-template-columns: minmax(260px, 0.9fr) 1.35fr; gap: 14px; align-items: start; }
@@ -4539,36 +4539,36 @@ onMounted(async () => {
 .kin-legend > span { display: inline-flex; align-items: center; gap: 5px; }
 .kin-dot { width: 10px; height: 10px; border-radius: 3px; border-width: 1px; border-style: solid; display: inline-block; }
 .kin-manual-note { opacity: 0.75; }
-.kin-linkbtn { background: none; border: none; color: var(--acc, #2563eb); font-size: 0.72rem; cursor: pointer; padding: 0 2px; text-decoration: underline; box-shadow: none; }
+.kin-linkbtn { background: none; border: none; color: var(--acc); font-size: 0.72rem; cursor: pointer; padding: 0 2px; text-decoration: underline; box-shadow: none; }
 
 .kin-plot-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .kin-plot-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.kin-plot { height: 250px; background: #000; border-radius: 8px; border: 1px solid var(--cdl, #e2e8f0); }
+.kin-plot { height: 250px; background: #000; border-radius: 8px; border: 1px solid var(--cdl); }
 .kin-metrics { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
 @media (max-width: 700px) { .kin-metrics { grid-template-columns: repeat(3, 1fr); } }
-.kin-metrics > div { display: flex; flex-direction: column; gap: 1px; padding: 5px 7px; background: var(--fl, #f1f5f9); border-radius: 6px; }
+.kin-metrics > div { display: flex; flex-direction: column; gap: 1px; padding: 5px 7px; background: var(--fl); border-radius: 6px; }
 .kin-metrics span { font-size: 0.62rem; opacity: 0.6; text-transform: none; }
 .kin-metrics strong { font-size: 0.8rem; font-variant-numeric: tabular-nums; }
 .kin-warn { margin: 0; font-size: 0.72rem; line-height: 1.45; padding: 6px 9px; border-radius: 6px; border: 1px solid rgba(217,119,6,0.4); background: rgba(217,119,6,0.08); display: flex; gap: 7px; align-items: baseline; }
 .kin-override { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 0.75rem; }
-.kin-cbtn { font-size: 0.72rem; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--cdl, #cbd5e1); background: transparent; color: inherit; cursor: pointer; box-shadow: none; }
+.kin-cbtn { font-size: 0.72rem; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--cdl); background: transparent; color: inherit; cursor: pointer; box-shadow: none; }
 .kin-cbtn.active { font-weight: 700; }
 
-.kin-table-wrap { max-height: 210px; overflow-y: auto; border: 1px solid var(--cdl, #e2e8f0); border-radius: 8px; }
+.kin-table-wrap { max-height: 210px; overflow-y: auto; border: 1px solid var(--cdl); border-radius: 8px; }
 .kin-table { width: 100%; border-collapse: collapse; font-size: 0.74rem; }
-.kin-table th, .kin-table td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--ln, #f1f5f9); white-space: nowrap; }
-.kin-table th { position: sticky; top: 0; background: var(--surface-solid, #f8fafc); font-weight: 700; z-index: 2; }
+.kin-table th, .kin-table td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--ln); white-space: nowrap; }
+.kin-table th { position: sticky; top: 0; background: var(--surface-solid); font-weight: 700; z-index: 2; }
 .kin-table tbody tr { cursor: pointer; }
 .kin-table tbody tr:hover { background: rgba(59,130,246,0.08); }
 .kin-table tbody tr.sel { background: rgba(59,130,246,0.16); }
 .kin-sortable { cursor: pointer; }
-.kin-sortable.on { color: var(--acc, #2563eb); }
+.kin-sortable.on { color: var(--acc); }
 .kin-flag { color: #d97706; font-size: 0.6rem; margin-left: 4px; }
 .kin-cls-select { font-size: 0.7rem; padding: 1px 3px; border-width: 1px; border-style: solid; border-radius: 4px; color: inherit; }
 
 .kin-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .kin-map { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.73rem; }
 .kin-mapitem { display: inline-flex; align-items: center; gap: 4px; }
-.kin-mapitem select { font-size: 0.72rem; padding: 1px 3px; border: 1px solid var(--cdl, #cbd5e1); border-radius: 4px; background: transparent; color: inherit; }
+.kin-mapitem select { font-size: 0.72rem; padding: 1px 3px; border: 1px solid var(--cdl); border-radius: 4px; background: transparent; color: inherit; }
 .kin-clash { font-size: 0.72rem; color: #d97706; }
 </style>

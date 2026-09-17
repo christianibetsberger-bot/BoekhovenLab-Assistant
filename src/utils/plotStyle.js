@@ -89,21 +89,33 @@ export function axisTitle(quantity, unit, preset) {
   return unit ? `${q}${sep}${unit}` : q
 }
 
-// Theme-aware fg/bg so figures read in both light and dark app themes. The
-// publication export always forces light (see the export worker).
-function themeColors(isDark) {
-  return isDark
-    ? { paper: '#0f172a', plot: '#0f172a', fg: '#e2e8f0', axis: '#475569' }
-    : { paper: '#ffffff', plot: '#ffffff', fg: '#0f172a', axis: '#334155' }
+// Theme-aware fg/bg so figures read in every app theme. The publication export
+// always forces light (see the export worker).
+//
+// Night is a light-family theme on warm paper: a #ffffff plot would sit on a
+// cream card as a bright rectangle, which is exactly what the theme is trying to
+// avoid, so it gets base3/base2 and the theme's own ink.
+const PLOT_THEMES = {
+  light: { paper: '#ffffff', plot: '#ffffff', fg: '#0f172a', axis: '#334155' },
+  night: { paper: '#FBF4E1', plot: '#FBF4E1', fg: '#1C4550', axis: '#3A5962' },
+  dark:  { paper: '#0f172a', plot: '#0f172a', fg: '#e2e8f0', axis: '#475569' },
 }
+/** Plot chrome for 'light' | 'night' | 'dark'. A boolean is still accepted so
+ *  older callers passing isDark keep working. */
+export function plotTheme(theme) {
+  if (theme === true) return PLOT_THEMES.dark
+  if (theme === false || theme == null) return PLOT_THEMES.light
+  return PLOT_THEMES[theme] || PLOT_THEMES.light
+}
+function themeColors(isDark) { return plotTheme(isDark) }
 
 // A despined, Arial, palette-coloured Plotly layout. Pass axis {quantity,unit}
 // so titles follow the "q | u" convention.
 export function boekhovenPlotlyLayout(preset, palette, opts = {}) {
   const p = resolvePreset(preset)
   const pal = palette || BOEKHOVEN_PALETTE
-  const { isDark = false, x = {}, y = {}, title = '' } = opts
-  const c = themeColors(isDark)
+  const { isDark = false, theme, x = {}, y = {}, title = '' } = opts
+  const c = plotTheme(theme !== undefined ? theme : isDark)
 
   // Tick / axis-title sizes fall back to base-derived values (Wilke: base−1 and
   // base+0.5) when a preset doesn't specify them.

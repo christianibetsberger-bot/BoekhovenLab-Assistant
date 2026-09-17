@@ -904,13 +904,13 @@ watch(view, (v) => { if (v === 'calendar') scrollToMorning(); if (v === 'meeting
 .bk-error code { font-family: ui-monospace, monospace; }
 
 .bk-daybar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.bk-daybar .is-today { background: var(--acc); color: #fff; border-color: transparent; }
+.bk-daybar .is-today { background: var(--acc-fill); color: #fff; border-color: transparent; }
 .bk-daylabel { font-size: 1rem; font-weight: 600; color: var(--tx); margin-left: 6px; }
 
 .bk-cats { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .bk-cat { padding: 5px 13px; border-radius: 999px; border: 1px solid var(--ln2); background: var(--fl); color: var(--tx2); font-size: 0.78rem; font-weight: 600; cursor: pointer; box-shadow: none; }
 .bk-cat:hover { filter: none; color: var(--tx); }
-.bk-cat.active { background: var(--acc); color: #fff; border-color: transparent; box-shadow: 0 2px 6px var(--acsh); }
+.bk-cat.active { background: var(--acc-fill); color: #fff; border-color: transparent; box-shadow: 0 2px 6px var(--acsh); }
 
 /* Day calendar (columns = instruments, vertical = hours, bands = bookings) */
 .cal { overflow: auto; max-height: 64vh; border: 1px solid var(--ln2); border-radius: var(--rc); background: var(--surface-solid); position: relative; }
@@ -947,8 +947,8 @@ watch(view, (v) => { if (v === 'calendar') scrollToMorning(); if (v === 'meeting
 /* My Planner todos: right half of the meetings day, dashed = personal, not shared.
    Meetings keep the left edge, so a busy day still shows both side by side. */
 .todo-band {
-  left: 50%; right: 4px; background: var(--acs, rgba(37,99,235,.1)); color: var(--tx, inherit);
-  border: 1.5px dashed var(--acc, #2563eb); box-shadow: none; cursor: default;
+  left: 50%; right: 4px; background: var(--acs); color: var(--tx);
+  border: 1.5px dashed var(--acc); box-shadow: none; cursor: default;
 }
 .todo-band.done { opacity: 0.45; }
 .todo-band.done .mtg-band-title { text-decoration: line-through; }
@@ -965,7 +965,7 @@ watch(view, (v) => { if (v === 'calendar') scrollToMorning(); if (v === 'meeting
 .bk-statrow { display: flex; align-items: center; gap: 10px; }
 .bk-stat-name { width: 200px; flex: none; font-size: 0.8rem; color: var(--tx); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bk-stat-track { flex: 1; height: 14px; background: var(--fl); border-radius: 7px; overflow: hidden; }
-.bk-stat-bar { height: 100%; border-radius: 7px; min-width: 3px; background: var(--acc); }
+.bk-stat-bar { height: 100%; border-radius: 7px; min-width: 3px; background: var(--acc-fill); }
 
 /* Per-user colour legend */
 .bk-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 12px; }
@@ -980,8 +980,8 @@ watch(view, (v) => { if (v === 'calendar') scrollToMorning(); if (v === 'meeting
 .bk-err.resolved { border-color: var(--ln2); background: var(--fl); }
 .bk-err.in_repair { border-color: #C77700; background: rgba(199, 119, 0, 0.10); }
 .bk-err-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 0.7rem; font-weight: 700; padding: 3px 8px; border-radius: 999px; flex: none; }
-.bk-err-tag.bad { background: var(--wr); color: #fff; }
-.bk-err-tag.ok { background: var(--ok); color: #fff; }
+.bk-err-tag.bad { background: var(--wr-fill); color: #fff; }
+.bk-err-tag.ok { background: var(--ok-fill); color: #fff; }
 .bk-err-tag.warn { background: #C77700; color: #fff; }
 .bk-err-inst { font-size: 0.82rem; font-weight: 600; color: var(--tx); flex: none; }
 .bk-err-body { flex: 1; min-width: 0; }
@@ -1016,7 +1016,7 @@ watch(view, (v) => { if (v === 'calendar') scrollToMorning(); if (v === 'meeting
 .lb-head:hover { background: var(--acs); filter: none; }
 .lb-chev { font-size: 0.72rem; color: var(--tx3); flex: none; width: 12px; }
 .lb-name { font-size: 0.9rem; font-weight: 600; color: var(--tx); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lb-flag { display: inline-flex; align-items: center; gap: 4px; font-size: 0.7rem; font-weight: 700; color: #fff; background: var(--wr); border-radius: 999px; padding: 2px 8px; flex: none; }
+.lb-flag { display: inline-flex; align-items: center; gap: 4px; font-size: 0.7rem; font-weight: 700; color: #fff; background: var(--wr-fill); border-radius: 999px; padding: 2px 8px; flex: none; }
 .lb-counts { display: inline-flex; gap: 10px; flex: none; font-size: 0.74rem; color: var(--tx2); font-variant-numeric: tabular-nums; }
 .lb-counts span { display: inline-flex; align-items: center; gap: 4px; }
 .lb-counts i { font-size: 0.68rem; color: var(--tx3); }
@@ -1071,7 +1071,7 @@ watch(view, (v) => { if (v === 'calendar') scrollToMorning(); if (v === 'meeting
 .sy-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .sy-btn { flex: 1; min-width: 150px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 12px; border-radius: var(--rc); border: 1px solid var(--ln2); background: var(--fl); color: var(--tx); font-size: 0.82rem; font-weight: 600; text-decoration: none; cursor: pointer; }
 .sy-btn:hover { border-color: var(--acc); color: var(--acc); }
-.sy-btn.primary { background: var(--acc); color: #fff; border-color: transparent; box-shadow: 0 2px 6px var(--acsh); }
+.sy-btn.primary { background: var(--acc-fill); color: #fff; border-color: transparent; box-shadow: 0 2px 6px var(--acsh); }
 .sy-btn.primary:hover { color: #fff; filter: brightness(1.05); }
 .sy-link { margin-bottom: 12px; }
 .sy-link-label { display: block; font-size: 0.72rem; font-weight: 600; color: var(--tx2); margin-bottom: 4px; }

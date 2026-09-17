@@ -27,6 +27,12 @@ import lidaIcon from './assets/lida-icon.svg?raw'
 import { MODULE_ICONS } from './utils/moduleIcons.js'
 
 const store = useLabStore()
+
+// The theme buttons cycle Light → Night → Dark; the icon shows where you are.
+const THEME_ICON = { light: 'fa-sun', night: 'fa-mug-hot', dark: 'fa-moon' }
+const THEME_NEXT = { light: 'Night (warm, dimmer)', night: 'Dark', dark: 'Light' }
+const themeIcon = computed(() => THEME_ICON[store.theme] || 'fa-sun')
+const themeTip = computed(() => `${store.themeLabel} — switch to ${THEME_NEXT[store.theme] || 'Light'}`)
 useDynamicIcon()
 
 // Icons match each component's actual <h2> fa- class
@@ -1132,8 +1138,8 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
           </button>
 
           <div class="tb-right">
-            <button class="tb-icon" @click="store.toggleDarkMode()" :title="store.isDarkMode ? 'Light mode' : 'Dark mode'">
-              <i class="fas" :class="store.isDarkMode ? 'fa-sun' : 'fa-moon'"></i>
+            <button class="tb-icon" @click="store.cycleTheme()" :title="themeTip">
+              <i class="fas" :class="themeIcon"></i>
             </button>
             <div class="tb-avatar-wrap">
               <button class="tb-avatar" :title="store.user.email" @click.stop="avatarMenuOpen = !avatarMenuOpen">{{ userInitials }}</button>
@@ -1155,8 +1161,8 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
                 <span class="hub-lab">Boekhoven Lab</span>
               </div>
               <div class="hub-head-actions">
-                <button class="hub-icon-btn" @click="store.toggleDarkMode()" :title="store.isDarkMode ? 'Light mode' : 'Dark mode'">
-                  <i class="fas" :class="store.isDarkMode ? 'fa-sun' : 'fa-moon'"></i>
+                <button class="hub-icon-btn" @click="store.cycleTheme()" :title="themeTip">
+                  <i class="fas" :class="themeIcon"></i>
                 </button>
                 <div class="tb-avatar-wrap">
                   <button class="tb-avatar hub-avatar" :title="store.user.email" @click.stop="avatarMenuOpen = !avatarMenuOpen">{{ userInitials }}</button>
@@ -1318,7 +1324,7 @@ body { padding: 0 !important; margin: 0 !important; }
   flex-direction: column;
   padding: 10px 7px;
   width: 56px;
-  border-radius: var(--rd, 18px);
+  border-radius: var(--rd);
   border: 1px solid var(--chl);
   max-height: calc(100vh - 40px);
   overflow-y: auto; overflow-x: hidden;
@@ -1331,7 +1337,7 @@ body { padding: 0 !important; margin: 0 !important; }
   flex-direction: column;
   padding: 10px 7px;
   width: 56px;
-  border-radius: var(--rd, 18px);
+  border-radius: var(--rd);
   border: 1px solid var(--chl);
   max-height: calc(100vh - 40px);
   overflow-y: auto; overflow-x: hidden;
@@ -1345,7 +1351,7 @@ body { padding: 0 !important; margin: 0 !important; }
   padding: 7px 10px;
   height: 56px;
   width: auto; max-width: calc(100vw - 40px);
-  border-radius: var(--rd, 18px);
+  border-radius: var(--rd);
   border: 1px solid var(--chl);
   overflow-x: auto; overflow-y: hidden;
 }
@@ -1456,7 +1462,7 @@ body { padding: 0 !important; margin: 0 !important; }
 
 /* Active module (currently on the dashboard): solid accent + white icon */
 .sidebar-btn.is-active .sidebar-icon {
-  background: var(--acc); color: #fff;
+  background: var(--acc-fill); color: #fff;
   box-shadow: 0 3px 10px var(--acsh);
 }
 /* Inactive module: transparent, tertiary text */
@@ -1566,7 +1572,7 @@ body { padding: 0 !important; margin: 0 !important; }
 .tb-avatar-wrap { position: relative; }
 .tb-avatar {
   width: 30px; height: 30px; border-radius: 50%; padding: 0;
-  background: var(--acc); color: #fff; font-size: 11px; font-weight: 700;
+  background: var(--acc-fill); color: #fff; font-size: 11px; font-weight: 700;
   border: none; box-shadow: 0 1px 4px var(--acsh); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
 }
@@ -1587,7 +1593,7 @@ body { padding: 0 !important; margin: 0 !important; }
 /* ── ⌘K command palette ── */
 .cmdk-overlay {
   position: fixed; inset: 0; z-index: 900;
-  background: rgba(20,30,60,.28); backdrop-filter: blur(2px);
+  background: color-mix(in srgb, var(--tx) 26%, transparent); backdrop-filter: blur(2px);
   display: flex; align-items: flex-start; justify-content: center; padding-top: 14vh;
 }
 .cmdk-overlay.dark-mode { background: rgba(0,0,0,.5); }
@@ -1608,7 +1614,7 @@ body { padding: 0 !important; margin: 0 !important; }
   font-size: 13px; font-weight: 500; text-align: left;
 }
 .cmdk-item:hover { filter: none; background: var(--acs); }
-.cmdk-ic { width: 26px; height: 26px; border-radius: 7px; background: var(--acc); color: #fff; display: flex; align-items: center; justify-content: center; flex: none; box-shadow: 0 2px 5px var(--acsh); }
+.cmdk-ic { width: 26px; height: 26px; border-radius: 7px; background: var(--acc-fill); color: #fff; display: flex; align-items: center; justify-content: center; flex: none; box-shadow: 0 2px 5px var(--acsh); }
 .cmdk-ic .sidebar-svg { width: 15px; height: 15px; }
 .cmdk-ic i { font-size: 0.8rem; }
 .cmdk-label { flex: 1; }
@@ -1916,7 +1922,7 @@ body { padding: 0 !important; margin: 0 !important; }
   padding: 6px 0;
   border-radius: 8px;
   border: none;
-  background: var(--primary);
+  background: var(--acc-fill);
   color: #fff;
   font-size: 0.78rem;
   font-weight: 600;
@@ -2004,7 +2010,7 @@ body { padding: 0 !important; margin: 0 !important; }
 .hub-pinned { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .hub-tile { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 15px; border-radius: var(--r); background: var(--cd); border: 1px solid var(--cdl); box-shadow: var(--sh); cursor: pointer; text-align: left; }
 .hub-tile:hover { filter: none; }
-.hub-tile-ic { width: 40px; height: 40px; border-radius: 11px; background: var(--acc); color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 3px 10px var(--acsh); }
+.hub-tile-ic { width: 40px; height: 40px; border-radius: 11px; background: var(--acc-fill); color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 3px 10px var(--acsh); }
 .hub-tile-ic .sidebar-svg { width: 22px; height: 22px; }
 .hub-tile-label { font-size: 14px; font-weight: 600; color: var(--tx); }
 .hub-tile-alpha { font-size: 10px; font-weight: 700; color: var(--wr); background: var(--wrs); border-radius: 8px; padding: 1px 6px; }

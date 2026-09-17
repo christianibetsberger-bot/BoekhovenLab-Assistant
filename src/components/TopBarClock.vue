@@ -412,8 +412,8 @@ onBeforeUnmount(() => {
   gap: 5px;
   padding: 3px 8px;
   border-radius: 999px;
-  border: 1px solid var(--border, #e2e8f0);
-  background: var(--panel-bg, #f8fafc);
+  border: 1px solid var(--border);
+  background: var(--panel-bg);
   font-size: 0.78rem;
   transition: background .25s, border-color .25s;
 }
@@ -423,11 +423,11 @@ onBeforeUnmount(() => {
   border-color: var(--ok);
 }
 .tbc.tbc-private {
-  background: var(--panel-bg, #f8fafc);
-  border-color: var(--border, #e2e8f0);
+  background: var(--panel-bg);
+  border-color: var(--border);
   opacity: 0.85;
 }
-.tbc.tbc-private .tbc-timer { opacity: 0.5; color: var(--text, #64748b); letter-spacing: 1px; }
+.tbc.tbc-private .tbc-timer { opacity: 0.5; color: var(--text); letter-spacing: 1px; }
 .tbc.tbc-private .tbc-dot { background: #94a3b8; animation: none; }
 .tbc.tbc-private .tbc-start,
 .tbc.tbc-private .tbc-stop {
@@ -441,19 +441,19 @@ onBeforeUnmount(() => {
   font-size: 0.78rem;
   border-radius: 4px;
   background: var(--input-bg);
-  border: 1px solid var(--border, #e2e8f0);
-  color: var(--text, #64748b);
+  border: 1px solid var(--border);
+  color: var(--text);
   opacity: 0.65;
   font-style: italic;
 }
 
 .tbc-privacy {
   background: transparent;
-  border: 1px solid var(--border, #e2e8f0) !important;
-  color: var(--text, #64748b);
+  border: 1px solid var(--border) !important;
+  color: var(--text);
   padding: 3px 8px;
 }
-.tbc-privacy:hover { background: var(--input-bg, #f1f5f9); }
+.tbc-privacy:hover { background: var(--input-bg); }
 .tbc.tbc-private .tbc-privacy {
   background: #64748b;
   color: #fff;
@@ -475,7 +475,7 @@ onBeforeUnmount(() => {
 
 .tbc-dot {
   width: 8px; height: 8px; border-radius: 50%;
-  background: var(--ok);
+  background: var(--ok-fill);
   animation: dot-blink 1.6s ease-in-out infinite;
   flex-shrink: 0;
 }
@@ -494,7 +494,7 @@ onBeforeUnmount(() => {
 .tbc-select {
   padding: 2px 6px;
   font-size: 0.78rem;
-  border: 1px solid var(--border, #e2e8f0);
+  border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--input-bg);
   max-width: 130px;
@@ -509,8 +509,8 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .tbc-btn:hover { filter: brightness(.9); }
-.tbc-start { background: var(--ok); color: #fff; }
-.tbc-stop  { background: var(--danger-color); color: #fff; }
+.tbc-start { background: var(--ok-fill); color: #fff; }
+.tbc-stop  { background: var(--danger-fill); color: #fff; }
 
 .tbc-label { display: inline; }
 @media (max-width: 900px) { .tbc-label { display: none; } }

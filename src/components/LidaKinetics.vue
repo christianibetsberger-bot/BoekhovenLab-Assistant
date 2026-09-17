@@ -297,7 +297,7 @@
                   <th class="no-upper"><span class="no-upper">c A'B' (µM)</span></th>
                   <th class="no-upper"><span class="no-upper">[R] (µM)</span></th>
                   <th class="no-upper"><span class="no-upper">Conv. %</span></th>
-                  <th class="no-upper" style="border-left:2px solid var(--border-color,#e2e8f0);"><span class="no-upper">T (°C)</span></th>
+                  <th class="no-upper" style="border-left:2px solid var(--ln2);"><span class="no-upper">T (°C)</span></th>
                   <th class="no-upper"><span class="no-upper">Ligase</span></th>
                   <th class="no-upper"><span class="no-upper">ATP (mM)</span></th>
                   <th class="no-upper"><span class="no-upper">Mg²⁺ (mM)</span></th>
@@ -316,7 +316,7 @@
                   <td><strong>{{ r.R_uM.toFixed(3) }}</strong></td>
                   <td>{{ r.conversion.toFixed(1) }}</td>
                   <template v-if="hplcFileConditions[r.name]">
-                    <td style="border-left:2px solid var(--border-color,#e2e8f0);">
+                    <td style="border-left:2px solid var(--ln2);">
                       <input type="number" step="0.5" class="cond-input" v-model.number="hplcFileConditions[r.name].temperature">
                     </td>
                     <td><input type="number" step="any" class="cond-input" v-model.number="hplcFileConditions[r.name].ligase"></td>
@@ -688,7 +688,7 @@
                   <span class="sug-seq" :title="s.sequence">{{ s.sequence }}</span>
                   <span v-if="seqNameOf(s.sequence)" class="sug-name">{{ seqNameOf(s.sequence) }}</span>
                 </div>
-                <span style="font-size:0.78rem; color:var(--primary, #3b82f6); font-weight:bold;">
+                <span style="font-size:0.78rem; color:var(--acc); font-weight:bold;">
                   {{ formatNum(s.predicted_conversion) }}%
                 </span>
               </div>
@@ -993,7 +993,7 @@
                   <span class="sug-id">#{{ i + 1 }}</span>
                   <span class="sug-seq">{{ c.sequence }}</span>
                 </div>
-                <span style="font-size:0.78rem; color:var(--primary, #3b82f6); font-weight:bold;">
+                <span style="font-size:0.78rem; color:var(--acc); font-weight:bold;">
                   {{ formatNum(c.predicted_conversion) }}%
                 </span>
               </div>
@@ -1101,6 +1101,7 @@
 import { onMounted, onBeforeUnmount, ref, reactive, computed, watch, nextTick } from 'vue'
 import Plotly from 'plotly.js-dist-min'
 import { useLabStore } from '../stores/labStore'
+import { plotTheme } from '../utils/plotStyle'
 import ExpStatusPicker from './ExpStatusPicker.vue'
 import { db } from '../services/supabase'
 import { ENDPOINTS } from '../services/kineticsBackend'
@@ -2176,15 +2177,18 @@ function setFitChartRef(key, el)   { if (el) fitChartRefs.value[key] = el;   els
 
 // Force a Plotly div to light-mode, download PNG, then restore original theme.
 async function downloadPngLightMode(el, opts) {
-  const wasDark = store.isDarkMode
-  if (wasDark) {
-    await Plotly.relayout(el, { paper_bgcolor: '#ffffff', plot_bgcolor: '#ffffff', font: { color: '#0f172a' } })
+  // Night is warm paper and dark is slate; a published figure is neither.
+  const themed = store.theme !== 'light'
+  if (themed) {
+    const light = plotTheme('light')
+    await Plotly.relayout(el, { paper_bgcolor: light.paper, plot_bgcolor: light.plot, font: { color: light.fg } })
   }
   try {
     await Plotly.downloadImage(el, opts)
   } finally {
-    if (wasDark) {
-      await Plotly.relayout(el, { paper_bgcolor: '#0f172a', plot_bgcolor: '#0f172a', font: { color: '#e2e8f0' } })
+    if (themed) {
+      const back = plotTheme(store.theme)
+      await Plotly.relayout(el, { paper_bgcolor: back.paper, plot_bgcolor: back.plot, font: { color: back.fg } })
     }
   }
 }
@@ -2409,8 +2413,8 @@ function plotLayoutDark() {
   const isDark = store.isDarkMode
   const lineCol = isDark ? '#374151' : '#d1d5db'
   return {
-    paper_bgcolor: isDark ? '#111827' : '#ffffff',
-    plot_bgcolor:  isDark ? '#111827' : '#ffffff',
+    paper_bgcolor: plotTheme(store.theme).paper,
+    plot_bgcolor:  plotTheme(store.theme).plot,
     font: { color: isDark ? '#f3f4f6' : '#1f2937', size: 10 },
     // Generous margins so the plot content has breathing room from the
     // plot-area container's border and the axis labels never crop.
@@ -3126,8 +3130,8 @@ function renderHplcCharts() {
       shapes,
       margin: { l: 50, r: 10, t: 30, b: 35 },
       showlegend: false,
-      paper_bgcolor: store.isDarkMode ? '#0f172a' : '#ffffff',
-      plot_bgcolor: store.isDarkMode ? '#0f172a' : '#ffffff',
+      paper_bgcolor: plotTheme(store.theme).paper,
+      plot_bgcolor: plotTheme(store.theme).plot,
       font: { color: store.isDarkMode ? '#e2e8f0' : '#0f172a' },
     }
     Plotly.react(el, traces, layout, { responsive: true, displayModeBar: false })
@@ -3196,8 +3200,8 @@ function renderFitCharts() {
         : { title: 'conversion %', range: [0, 105] },
       margin: { l: 50, r: 10, t: 40, b: 35 },
       showlegend: false,
-      paper_bgcolor: store.isDarkMode ? '#0f172a' : '#ffffff',
-      plot_bgcolor: store.isDarkMode ? '#0f172a' : '#ffffff',
+      paper_bgcolor: plotTheme(store.theme).paper,
+      plot_bgcolor: plotTheme(store.theme).plot,
       font: { color: store.isDarkMode ? '#e2e8f0' : '#0f172a' },
     }
     Plotly.react(el, traces, layout, { responsive: true, displayModeBar: false })
@@ -3213,7 +3217,7 @@ watch(() => dataset.experiments.map(e => ({ id: e.groupId, fit: e.fit })),
 
 // ════════════════ Mount ════════════════
 
-watch(() => [dataset.experiments, dataset.config.yieldThreshold, heatX.value, heatY.value, store.isDarkMode], renderAll, { deep: true })
+watch(() => [dataset.experiments, dataset.config.yieldThreshold, heatX.value, heatY.value, store.theme], renderAll, { deep: true })
 watch(seqHeatTimeIdx, () => nextTick(renderSeqMatrix))
 watch(seqCandidates, computePredictedLogo, { deep: true })
 watch(nnCandidates, computeNNLogo, { deep: true })
@@ -3260,17 +3264,17 @@ onBeforeUnmount(() => {
 /* ── Header ─────────────────────────────────────────────── */
 .full-width-header { margin-bottom: 5px; }
 .dataset-name-input {
-  font-size: 1.1rem; font-weight: 700; color: var(--primary, #3b82f6);
-  border: none; border-bottom: 2px solid var(--primary, #3b82f6);
+  font-size: 1.1rem; font-weight: 700; color: var(--acc);
+  border: none; border-bottom: 2px solid var(--acc);
   background: transparent; padding: 2px 0; min-width: 200px; outline: none;
 }
 
 /* ── Sections ────────────────────────────────────────────── */
 .internal-section h3 {
   font-size: 1.05rem;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  border-bottom: 1px solid var(--ln2);
   padding-bottom: 6px; margin-bottom: 10px; margin-top: 0;
-  color: var(--primary, #3b82f6);
+  color: var(--acc);
 }
 
 /* ── Grids & range inputs ─────────────────────────────────── */
@@ -3287,7 +3291,7 @@ onBeforeUnmount(() => {
 
 /* ── Sequence library ─────────────────────────────────────── */
 .seq-lib {
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid var(--ln2);
   border-radius: 6px;
   padding: 6px 8px;
   margin-bottom: 8px;
@@ -3305,15 +3309,15 @@ onBeforeUnmount(() => {
 .seq-lib-add { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .seq-lib-in {
   padding: 4px 6px; font-size: 0.78rem;
-  border: 1px solid var(--border-color, #e2e8f0); border-radius: 4px;
-  background: var(--input-bg, #fff); color: inherit;
+  border: 1px solid var(--ln2); border-radius: 4px;
+  background: var(--input-bg); color: inherit;
 }
 .seq-lib-in.name { flex: 0 0 120px; }
 .seq-lib-in.seq { flex: 1 1 160px; font-family: ui-monospace, Menlo, monospace; }
 .seq-lib-table { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
 .seq-lib-table th, .seq-lib-table td {
   text-align: left; padding: 3px 6px;
-  border-bottom: 1px solid var(--border-color, #eef1f5);
+  border-bottom: 1px solid var(--ln2);
 }
 .seq-lib-table th { opacity: 0.65; font-weight: 600; }
 .seq-lib-table td.name { font-weight: 600; white-space: nowrap; }
@@ -3324,14 +3328,14 @@ onBeforeUnmount(() => {
 .seq-lib-table .icon-btn {
   background: none; border: none; cursor: pointer; opacity: 0.5; color: inherit;
 }
-.seq-lib-table .icon-btn:hover { opacity: 1; color: #ef4444; }
+.seq-lib-table .icon-btn:hover { opacity: 1; color: var(--danger-color); }
 
 .hplc-schema {
   display: flex; align-items: center; justify-content: space-between;
   gap: 10px; flex-wrap: wrap;
   font-size: 0.72rem; opacity: 0.8;
   padding: 4px 8px;
-  background: var(--summary-bg, #f1f5f9);
+  background: var(--summary-bg);
   border-radius: 4px;
   margin-bottom: 8px;
 }
@@ -3341,7 +3345,7 @@ onBeforeUnmount(() => {
 .hplc-settings {
   margin-bottom: 10px;
   padding: 8px 10px;
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid var(--ln2);
   border-radius: 6px;
   display: flex; flex-direction: column; gap: 4px;
 }
@@ -3351,7 +3355,7 @@ onBeforeUnmount(() => {
   padding: 4px 2px; user-select: none;
   text-transform: none;
 }
-.hplc-settings summary::marker { color: var(--primary, #3b82f6); }
+.hplc-settings summary::marker { color: var(--acc); }
 .hplc-settings details > *:not(summary) { margin-top: 6px; }
 .hplc-settings .input-group { margin: 0; }
 .hplc-settings .input-group label { font-size: 0.7rem; text-transform: none; letter-spacing: 0; }
@@ -3363,7 +3367,7 @@ onBeforeUnmount(() => {
 .hplc-window {
   margin: 8px 0;
   padding: 6px 10px;
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid var(--ln2);
   border-radius: 6px;
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
 }
@@ -3389,11 +3393,11 @@ onBeforeUnmount(() => {
 
 .hplc-preview {
   margin-top: 8px; max-height: 220px; overflow: auto;
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid var(--ln2);
   border-radius: 6px;
 }
 .hplc-preview table { width: 100%; font-size: 0.72rem; border-collapse: collapse; }
-.hplc-preview thead { background: var(--summary-bg, #f1f5f9); position: sticky; top: 0; }
+.hplc-preview thead { background: var(--summary-bg); position: sticky; top: 0; }
 .hplc-preview th, .hplc-preview td {
   padding: 3px 6px; text-align: right; white-space: nowrap;
   text-transform: none;
@@ -3414,10 +3418,10 @@ onBeforeUnmount(() => {
   padding: 6px 2px;
 }
 .hplc-gallery-card {
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid var(--ln2);
   border-radius: 6px;
   padding: 6px;
-  background: var(--surface, #ffffff);
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -3436,7 +3440,7 @@ onBeforeUnmount(() => {
 /* ── Input groups ───────────────────────────────────────── */
 .input-group label { display: block; font-size: 0.8rem; margin-bottom: 4px; font-weight: bold; opacity: 0.8; }
 .input-group input,
-.input-group select { width: 100%; padding: 6px; border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; font-size: 0.85rem; }
+.input-group select { width: 100%; padding: 6px; border-radius: 4px; border: 1px solid var(--ln2); background: transparent; color: inherit; font-size: 0.85rem; }
 
 /* ── Status banners ─────────────────────────────────────── */
 .section-error {
@@ -3452,8 +3456,8 @@ onBeforeUnmount(() => {
   font-size: 0.8rem; display: flex; align-items: center; gap: 8px;
 }
 .section-warn {
-  background: rgba(59,130,246,0.08); color: var(--primary, #3b82f6);
-  border: 1px solid var(--primary, #3b82f6); border-radius: 4px;
+  background: rgba(59,130,246,0.08); color: var(--acc);
+  border: 1px solid var(--acc); border-radius: 4px;
   padding: 6px 10px; margin-bottom: 8px;
   font-size: 0.75rem; display: flex; align-items: center; gap: 8px;
 }
@@ -3464,7 +3468,7 @@ onBeforeUnmount(() => {
   font-size: 0.72rem; opacity: 0.85;
   margin-bottom: 6px; padding: 4px 0;
 }
-.engine-label { font-weight: 700; color: var(--primary, #3b82f6); text-transform: none; letter-spacing: 0.4px; }
+.engine-label { font-weight: 700; color: var(--acc); text-transform: none; letter-spacing: 0.4px; }
 .engine-opt { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 .engine-opt input { margin: 0; }
 
@@ -3474,30 +3478,30 @@ onBeforeUnmount(() => {
   display: flex; align-items: center; justify-content: center; gap: 5px;
   padding: 7px 6px; border-radius: 6px; border: none;
   font-weight: bold; font-size: 0.76rem;
-  background: #3b82f6; color: white;
+  background: var(--acc-fill); color: white;
   box-shadow: 0 2px 4px rgba(59,130,246,0.3);
   cursor: pointer; transition: all 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.compact-btn:hover:not(:disabled) { background: #2563eb; transform: translateY(-1px); }
+.compact-btn:hover:not(:disabled) { background: var(--acc-fill); transform: translateY(-1px); }
 .compact-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Scoped button variants ─────────────────────────────── */
-.success-btn { background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
-.danger-btn  { background: rgba(239,68,68,0.1); color: #ef4444; border: 1px solid #ef4444; border-radius: 4px; padding: 4px 10px; cursor: pointer; }
-.danger-btn:hover { background: #ef4444; color: white; }
-.clear-btn   { background: transparent; border: none; color: #ef4444; cursor: pointer; padding: 2px; border-radius: 4px; }
+.success-btn { background: var(--ok-fill); color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+.danger-btn  { background: var(--danger-bg); color: var(--danger-color); border: 1px solid var(--danger-color); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+.danger-btn:hover { background: var(--danger-fill); color: white; }
+.clear-btn   { background: transparent; border: none; color: var(--danger-color); cursor: pointer; padding: 2px; border-radius: 4px; }
 
 /* ── Ledger ─────────────────────────────────────────────── */
-.ledger-table-container { max-height: 280px; overflow-y: auto; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; }
+.ledger-table-container { max-height: 280px; overflow-y: auto; border: 1px solid var(--ln2); border-radius: 6px; }
 .ledger-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
 .ledger-table th {
-  position: sticky; top: 0; background: var(--input-bg, #f8fafc); z-index: 1;
-  padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border-color, #e2e8f0);
+  position: sticky; top: 0; background: var(--input-bg); z-index: 1;
+  padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--ln2);
   font-weight: 700; font-size: 0.72rem; text-transform: none; letter-spacing: 0.4px;
 }
 /* Disable uppercasing for chemical symbols (Mg, Cl, etc.) */
 .no-upper { text-transform: none !important; }
-.ledger-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-color, #f1f5f9); }
+.ledger-table td { padding: 6px 8px; border-bottom: 1px solid var(--ln2); }
 .seq-cell { font-family: monospace; font-size: 0.75rem; }
 .env-cell { font-size: 0.75rem; opacity: 0.85; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -3509,12 +3513,12 @@ onBeforeUnmount(() => {
   min-height: 22px;
 }
 .plot-title { font-size: 0.8rem; font-weight: 700; opacity: 0.85; }
-.axis-select { font-size: 0.72rem; padding: 2px 4px; border-radius: 3px; border: 1px solid var(--border-color, #cbd5e1); background: transparent; color: inherit; }
+.axis-select { font-size: 0.72rem; padding: 2px 4px; border-radius: 3px; border: 1px solid var(--ln2); background: transparent; color: inherit; }
 
 /* ── Plot areas ─────────────────────────────────────────── */
 .plot-area {
   width: 100%; aspect-ratio: 1 / 1;
-  border-radius: 6px; border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px; border: 1px solid var(--ln2);
   overflow: hidden;
 }
 
@@ -3543,18 +3547,18 @@ onBeforeUnmount(() => {
   margin-bottom: 10px;
   padding: 9px 10px;
   background: rgba(59,130,246,0.05);
-  border: 1px solid var(--border-color, #cbd5e1);
+  border: 1px solid var(--ln2);
   border-radius: 6px;
   display: flex; flex-direction: column; gap: 7px;
 }
 .al-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .al-input label {
   display: block; font-size: 0.7rem; font-weight: bold;
-  color: var(--primary, #3b82f6); margin-bottom: 2px;
+  color: var(--acc); margin-bottom: 2px;
 }
 .al-input input {
   width: 100%; padding: 4px 6px; font-size: 0.78rem;
-  border-radius: 4px; border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 4px; border: 1px solid var(--ln2);
   background: transparent; color: inherit;
 }
 
@@ -3562,7 +3566,7 @@ onBeforeUnmount(() => {
 .slider-row { display: flex; align-items: center; gap: 8px; }
 .slider-label {
   flex-shrink: 0; min-width: 50px;
-  font-size: 0.7rem; font-weight: bold; color: var(--primary, #3b82f6);
+  font-size: 0.7rem; font-weight: bold; color: var(--acc);
 }
 .slider-input { flex: 1; min-width: 0; margin: 0; }
 .slider-value {
@@ -3584,7 +3588,7 @@ onBeforeUnmount(() => {
 .logo-col { display: flex; flex-direction: column; min-width: 0; }
 .logo-col-header {
   font-size: 0.75rem; font-weight: 700; opacity: 0.85;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  border-bottom: 1px solid var(--ln2);
   padding-bottom: 4px; margin-bottom: 6px;
 }
 .logo-empty {
@@ -3595,7 +3599,7 @@ onBeforeUnmount(() => {
 .wellplate-export {
   margin-top: 12px;
   padding: 10px;
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid var(--ln2);
   border-radius: 6px;
   background: rgba(139, 92, 246, 0.04);
 }
@@ -3636,7 +3640,7 @@ onBeforeUnmount(() => {
 .stock-input-row input[type="number"] {
   flex: 0 0 110px;
   padding: 4px 6px; font-size: 0.78rem;
-  border: 1px solid var(--border-color, #cbd5e1);
+  border: 1px solid var(--ln2);
   border-radius: 4px;
   background: transparent; color: inherit;
 }
@@ -3646,33 +3650,33 @@ onBeforeUnmount(() => {
 .inv-pick-btn {
   flex: 1; min-width: 0;
   padding: 4px 8px; font-size: 0.72rem;
-  border: 1px solid var(--border-color, #cbd5e1); border-radius: 4px;
+  border: 1px solid var(--ln2); border-radius: 4px;
   background: transparent; color: inherit; cursor: pointer;
   text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .inv-pick-btn:hover { background: rgba(139, 92, 246, 0.08); }
 .inv-clear-btn {
-  border: none; background: transparent; color: #ef4444; cursor: pointer;
+  border: none; background: transparent; color: var(--danger-color); cursor: pointer;
   padding: 0 4px; font-size: 0.85rem;
 }
 
 .inv-dropdown {
   position: absolute; top: 100%; left: 0; right: 0; z-index: 50;
-  background: var(--surface, #fff);
-  border: 1px solid var(--border-color, #cbd5e1); border-radius: 6px;
+  background: var(--surface);
+  border: 1px solid var(--ln2); border-radius: 6px;
   box-shadow: 0 10px 15px -3px rgba(0,0,0,0.18);
   overflow: hidden;
   min-width: 240px;
 }
 .inv-dropdown input[type="text"] {
   width: 100%; padding: 6px 8px; font-size: 0.78rem;
-  border: none; border-bottom: 1px solid var(--border-color, #cbd5e1);
-  background: var(--input-bg, transparent); color: inherit; outline: none;
+  border: none; border-bottom: 1px solid var(--ln2);
+  background: var(--input-bg); color: inherit; outline: none;
 }
 .inv-results { max-height: 180px; overflow-y: auto; }
 .inv-item {
   padding: 6px 10px; font-size: 0.75rem; cursor: pointer;
-  border-bottom: 1px solid var(--border-color, #f1f5f9);
+  border-bottom: 1px solid var(--ln2);
 }
 .inv-item:hover { background: rgba(139, 92, 246, 0.10); }
 .inv-stock { opacity: 0.65; font-size: 0.7rem; }
@@ -3686,13 +3690,13 @@ onBeforeUnmount(() => {
 /* ── Suggestion cards ───────────────────────────────────── */
 .suggestion-card {
   padding: 8px 10px;
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid var(--ln2);
   border-radius: 6px;
-  background: var(--summary-bg, #f8fafc);
+  background: var(--summary-bg);
   margin-bottom: 6px;
   font-size: 0.8rem;
 }
-.sug-id  { font-weight: 700; color: var(--primary, #3b82f6); margin-right: 5px; font-size: 0.75rem; }
+.sug-id  { font-weight: 700; color: var(--acc); margin-right: 5px; font-size: 0.75rem; }
 .sug-seq { font-family: monospace; font-size: 0.78rem; word-break: break-all; }
 .sug-name { font-size: 0.72rem; font-weight: 700; color: #8b5cf6; margin-left: 6px; }
 
@@ -3724,19 +3728,19 @@ onBeforeUnmount(() => {
   width: 92%; max-width: 720px; max-height: 80vh;
   display: flex; flex-direction: column; overflow: hidden;
 }
-.modal-header { padding: 14px 18px; border-bottom: 1px solid var(--border-color, #e2e8f0); }
+.modal-header { padding: 14px 18px; border-bottom: 1px solid var(--ln2); }
 .modal-content { padding: 14px 18px; overflow-y: auto; }
 
 /* ── Library ────────────────────────────────────────────── */
 .library-row {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 12px; border: 1px solid var(--border-color, #e2e8f0);
+  padding: 10px 12px; border: 1px solid var(--ln2);
   border-radius: 6px; background: var(--surface); margin-bottom: 8px;
 }
 .lib-scope {
   display: inline-block; padding: 1px 8px; border-radius: 999px;
   font-size: 0.7rem; margin-left: 6px;
-  background: var(--summary-bg); border: 1px solid var(--border-color, #e2e8f0);
+  background: var(--summary-bg); border: 1px solid var(--ln2);
 }
 .scope-global   { background: rgba(16,185,129,0.18); border-color: #10b981; }
 .scope-personal { background: rgba(59,130,246,0.12); border-color: #3b82f6; }

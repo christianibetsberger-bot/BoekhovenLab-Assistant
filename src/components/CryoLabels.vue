@@ -414,54 +414,54 @@ async function printToDymo() {
 
 <style scoped>
 .cl-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 2200; padding: 16px; }
-.cl-modal { background: var(--modal, #fff); color: var(--tx, #1a1a1a); border: 1px solid var(--cdl, #e2e8f0); border-radius: var(--r, 14px); box-shadow: var(--sh, 0 12px 48px rgba(0,0,0,.25)); width: 100%; max-width: 1000px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; }
-.cl-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; font-weight: 600; border-bottom: 1px solid var(--ln, #eee); }
-.cl-x { width: 28px; height: 28px; border-radius: 50%; background: var(--fl, #eef2f7); color: var(--tx2, #64748b); border: none; cursor: pointer; }
-.cl-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--ln, #eee); }
-.cl-seg { display: inline-flex; border: 1px solid var(--ln2, #cbd5e1); border-radius: 8px; overflow: hidden; }
-.cl-seg button { font: 500 12.5px/1 inherit; padding: 7px 12px; border: none; border-left: 1px solid var(--ln2, #cbd5e1); background: transparent; color: var(--tx2, #475569); cursor: pointer; box-shadow: none; }
+.cl-modal { background: var(--modal); color: var(--tx); border: 1px solid var(--cdl); border-radius: var(--r); box-shadow: var(--sh); width: 100%; max-width: 1000px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; }
+.cl-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; font-weight: 600; border-bottom: 1px solid var(--ln); }
+.cl-x { width: 28px; height: 28px; border-radius: 50%; background: var(--fl); color: var(--tx2); border: none; cursor: pointer; }
+.cl-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--ln); }
+.cl-seg { display: inline-flex; border: 1px solid var(--ln2); border-radius: 8px; overflow: hidden; }
+.cl-seg button { font: 500 12.5px/1 inherit; padding: 7px 12px; border: none; border-left: 1px solid var(--ln2); background: transparent; color: var(--tx2); cursor: pointer; box-shadow: none; }
 .cl-seg button:first-child { border-left: none; }
-.cl-seg button.on { background: var(--acc, #2563eb); color: #fff; }
-.cl-host { padding: 6px 9px; border: 1px solid var(--ln2, #cbd5e1); border-radius: 8px; background: var(--fl, transparent); color: inherit; font: 500 12.5px/1 ui-monospace, monospace; width: 120px; }
-.cl-print { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; font: 600 13px/1 inherit; padding: 8px 14px; border: none; border-radius: 8px; background: var(--acc, #2563eb); color: #fff; cursor: pointer; }
+.cl-seg button.on { background: var(--acc-fill); color: #fff; }
+.cl-host { padding: 6px 9px; border: 1px solid var(--ln2); border-radius: 8px; background: var(--fl); color: inherit; font: 500 12.5px/1 ui-monospace, monospace; width: 120px; }
+.cl-print { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; font: 600 13px/1 inherit; padding: 8px 14px; border: none; border-radius: 8px; background: var(--acc-fill); color: #fff; cursor: pointer; }
 .cl-print:disabled { opacity: .5; cursor: default; }
-.cl-print.ghost { background: var(--fl, #eef2f7); color: var(--tx2, #475569); }
+.cl-print.ghost { background: var(--fl); color: var(--tx2); }
 .cl-print ~ .cl-print { margin-left: 0; }   /* only the first print button gets the auto margin */
-.cl-scan { font-size: 0.78rem; padding: 8px 16px; border-bottom: 1px solid var(--ln, #eee); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cl-scan { font-size: 0.78rem; padding: 8px 16px; border-bottom: 1px solid var(--ln); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cl-scan-tip { opacity: .7; font-style: italic; }
 .cl-shortnote { font-size: 0.74rem; color: #9a6b00; background: rgba(154,107,0,.09); padding: 7px 16px; display: flex; gap: 7px; align-items: baseline; }
 .cl-shortnote code { font-family: ui-monospace, monospace; }
 .cl-body { display: flex; min-height: 0; flex: 1; }
-.cl-picker { width: 260px; flex: none; border-right: 1px solid var(--ln, #eee); display: flex; flex-direction: column; min-height: 0; }
-.cl-search { display: flex; align-items: center; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--ln, #eee); color: var(--tx2, #64748b); }
+.cl-picker { width: 260px; flex: none; border-right: 1px solid var(--ln); display: flex; flex-direction: column; min-height: 0; }
+.cl-search { display: flex; align-items: center; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--ln); color: var(--tx2); }
 .cl-search input { border: none; background: none; outline: none; flex: 1; color: inherit; font-size: 0.85rem; }
 .cl-picklist { overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
-.cl-pickrow { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: none; background: none; box-shadow: none; cursor: pointer; text-align: left; border-radius: 6px; color: var(--tx, inherit); }
-.cl-pickrow:hover { background: var(--acs, #eef2ff); }
-.cl-pickcode { font: 600 0.74rem/1 ui-monospace, monospace; color: var(--acc, #2563eb); flex: none; }
+.cl-pickrow { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: none; background: none; box-shadow: none; cursor: pointer; text-align: left; border-radius: 6px; color: var(--tx); }
+.cl-pickrow:hover { background: var(--acs); }
+.cl-pickcode { font: 600 0.74rem/1 ui-monospace, monospace; color: var(--acc); flex: none; }
 .cl-pickname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem; }
 .cl-pickrow i { opacity: .4; font-size: 0.72rem; }
-.cl-selected { border-top: 1px solid var(--ln, #eee); padding: 8px 6px; overflow-y: auto; max-height: 42%; }
-.cl-sel-title { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--tx2, #64748b); padding: 2px 6px 6px; }
+.cl-selected { border-top: 1px solid var(--ln); padding: 8px 6px; overflow-y: auto; max-height: 42%; }
+.cl-sel-title { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--tx2); padding: 2px 6px 6px; }
 .cl-sel-item { padding: 2px 0; }
 .cl-sel-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; }
 .cl-shortrow { display: flex; align-items: center; gap: 6px; padding: 0 6px 5px 6px; }
-.cl-shortrow > span { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--tx3, #94a3b8); flex: none; }
-.cl-shortrow input { flex: 1; min-width: 0; font-size: 0.76rem; padding: 3px 6px; border: 1px solid var(--ln2, #cbd5e1); border-radius: 5px; background: var(--fl, transparent); color: inherit; }
-.cl-selcode { font: 600 0.72rem/1 ui-monospace, monospace; color: var(--acc, #2563eb); flex: none; }
+.cl-shortrow > span { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--tx3); flex: none; }
+.cl-shortrow input { flex: 1; min-width: 0; font-size: 0.76rem; padding: 3px 6px; border: 1px solid var(--ln2); border-radius: 5px; background: var(--fl); color: inherit; }
+.cl-selcode { font: 600 0.72rem/1 ui-monospace, monospace; color: var(--acc); flex: none; }
 .cl-selname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.76rem; }
-.cl-copies { display: inline-flex; align-items: center; flex: none; border: 1px solid var(--ln2, #cbd5e1); border-radius: 6px; overflow: hidden; }
-.cl-copies button { width: 20px; height: 22px; border: none; background: var(--fl, #eef2f7); color: var(--tx2, #475569); cursor: pointer; font-size: 0.9rem; line-height: 1; box-shadow: none; }
+.cl-copies { display: inline-flex; align-items: center; flex: none; border: 1px solid var(--ln2); border-radius: 6px; overflow: hidden; }
+.cl-copies button { width: 20px; height: 22px; border: none; background: var(--fl); color: var(--tx2); cursor: pointer; font-size: 0.9rem; line-height: 1; box-shadow: none; }
 .cl-copies button:disabled { opacity: .4; cursor: default; }
-.cl-copies input { width: 30px; height: 22px; border: none; border-left: 1px solid var(--ln2, #cbd5e1); border-right: 1px solid var(--ln2, #cbd5e1); text-align: center; background: transparent; color: inherit; font-size: 0.76rem; -moz-appearance: textfield; }
+.cl-copies input { width: 30px; height: 22px; border: none; border-left: 1px solid var(--ln2); border-right: 1px solid var(--ln2); text-align: center; background: transparent; color: inherit; font-size: 0.76rem; -moz-appearance: textfield; }
 .cl-copies input::-webkit-outer-spin-button, .cl-copies input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.cl-sel-x { width: 18px; height: 18px; border-radius: 50%; border: none; background: none; color: var(--tx3, #94a3b8); cursor: pointer; font-size: 11px; flex: none; }
-.cl-sel-x:hover { color: var(--wr, #dc2626); }
+.cl-sel-x { width: 18px; height: 18px; border-radius: 50%; border: none; background: none; color: var(--tx3); cursor: pointer; font-size: 11px; flex: none; }
+.cl-sel-x:hover { color: var(--wr); }
 .cl-preview { flex: 1; min-width: 0; overflow: auto; background: repeating-conic-gradient(#f4f4f2 0 25%, #ececea 0 50%) 0 0 / 16px 16px; padding: 20px; }
 .cl-sheet { display: flex; flex-wrap: wrap; gap: 18px; align-content: flex-start; }
 .cl-unit { position: relative; background: #fff; padding: 10px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,.12); display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.cl-unit-x { position: absolute; top: 5px; right: 5px; width: 16px; height: 14px; border-radius: 3px; border: none; background: var(--wr, #dc2626); color: #fff; font-size: 9px; line-height: 1; cursor: pointer; z-index: 3; display: flex; align-items: center; justify-content: center; padding: 0; transition: background .12s; }
+.cl-unit-x { position: absolute; top: 5px; right: 5px; width: 16px; height: 14px; border-radius: 3px; border: none; background: var(--wr); color: #fff; font-size: 9px; line-height: 1; cursor: pointer; z-index: 3; display: flex; align-items: center; justify-content: center; padding: 0; transition: background .12s; }
 .cl-unit-x:hover { background: #b91c1c; }
 .cl-unit-cap { font: 500 0.66rem/1 ui-monospace, monospace; color: #64748b; }
-.cl-empty { font-size: 0.82rem; color: var(--tx3, #94a3b8); font-style: italic; padding: 14px; text-align: center; }
+.cl-empty { font-size: 0.82rem; color: var(--tx3); font-style: italic; padding: 14px; text-align: center; }
 </style>

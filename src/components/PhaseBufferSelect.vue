@@ -67,6 +67,6 @@ function saveDraft() {
 .pbuf-add { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
 .pbuf-af { font-size: 0.72rem; padding: 2px 4px; width: 62px; }
 .pbuf-af.name { width: 90px; }
-.pbuf-btn { font-size: 0.68rem; padding: 2px 7px; border: none; border-radius: 5px; background: var(--acc); color: #fff; cursor: pointer; box-shadow: none; }
+.pbuf-btn { font-size: 0.68rem; padding: 2px 7px; border: none; border-radius: 5px; background: var(--acc-fill); color: #fff; cursor: pointer; box-shadow: none; }
 .pbuf-btn.ghost { background: var(--fl); color: var(--tx2); }
 </style>

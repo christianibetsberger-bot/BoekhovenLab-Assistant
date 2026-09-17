@@ -1540,7 +1540,7 @@ const exportAndrewPlusMulti = () => {
                         <Teleport to="body">
                         <div v-if="activeDropdown === 'xch_' + plate.id + '_' + ri" data-menu @click.stop
                              :style="{ position: 'fixed', left: xchPos.left + 'px', top: xchPos.top + 'px', transform: xchPos.up ? 'translateY(-100%)' : 'none', zIndex: 12000 }"
-                             style="width:340px; background:var(--surface-solid, var(--surface)); color:var(--tx, inherit); border:1px solid var(--border); box-shadow:var(--sh, 0 8px 28px rgba(0,0,0,.15)); border-radius:var(--radius); font-size:0.8rem;">
+                             style="width:340px; background:var(--surface-solid); color:var(--tx); border:1px solid var(--border); box-shadow:var(--sh); border-radius:var(--radius); font-size:0.8rem;">
                             <div style="padding:8px 8px 0; font-size:0.72rem; opacity:0.7;">
                                 Exchange <strong>{{ row.name }}</strong> for…
                             </div>
@@ -1604,7 +1604,7 @@ const exportAndrewPlusMulti = () => {
                     <span v-if="plate.targetVolume && wellTotal(plate) > plate.targetVolume + 1e-9" style="color:#ef4444;">
                         overfilled — the concentrations above are what this well really holds, not what was planned
                     </span>
-                    <span v-if="wellUnlinked(plate).total > 0" style="color:#f59e0b;"
+                    <span v-if="wellUnlinked(plate).total > 0" style="color:var(--wr);"
                           :title="'These lines state a volume but carry no inventory chip, so nothing records which stock they came from. They are not in the Σ and the robot export skips them. Add a chip to include them.'">
                         <i class="fas fa-triangle-exclamation"></i>
                         + {{ wellUnlinked(plate).total.toFixed(2) }} µL not linked to a stock ({{ wellUnlinked(plate).names }}) — not counted, not exported
@@ -1652,7 +1652,7 @@ const exportAndrewPlusMulti = () => {
 /* A named well carries a small marker so names are discoverable from the grid. */
 .well-name-dot {
   position: absolute; top: 1px; right: 1px; width: 5px; height: 5px;
-  border-radius: 50%; background: var(--acc, #2563eb); pointer-events: none;
+  border-radius: 50%; background: var(--acc-fill); pointer-events: none;
 }
 .plate-legend-dot { width: 12px; height: 12px; border-radius: 3px; flex: none; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
 
@@ -1666,8 +1666,8 @@ const exportAndrewPlusMulti = () => {
   height: 30px; padding: 0 11px; border-radius: 8px;
   font-size: 0.74rem; font-weight: 600; line-height: 1; white-space: nowrap;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  background: var(--btn2, rgba(0,0,0,.05)); color: var(--tx, inherit);
-  border: 1px solid var(--ln2, rgba(0,0,0,.12));
+  background: var(--btn2); color: var(--tx);
+  border: 1px solid var(--ln2);
   box-shadow: none; cursor: pointer; transition: filter .15s, background .15s, color .15s, border-color .15s;
 }
 .pt-btn:hover:not(:disabled) { filter: brightness(1.06); }
@@ -1675,11 +1675,11 @@ const exportAndrewPlusMulti = () => {
 .pt-btn i { font-size: 0.78rem; }
 
 /* One filled button per row — the action you came to this row for. */
-.pt-btn.primary { background: var(--acc, #2563eb); border-color: transparent; color: #fff; }
+.pt-btn.primary { background: var(--acc-fill); border-color: transparent; color: #fff; }
 /* A toggle that is currently on. */
-.pt-btn.on { background: var(--acs, rgba(37,99,235,.14)); border-color: var(--acc, #2563eb); color: var(--acc, #2563eb); }
+.pt-btn.on { background: var(--acs); border-color: var(--acc); color: var(--acc); }
 /* Destructive: quiet until you reach for it. */
-.pt-btn.danger:hover { background: var(--danger-color, #ef4444); border-color: transparent; color: #fff; filter: none; }
+.pt-btn.danger:hover { background: var(--danger-color); border-color: transparent; color: #fff; filter: none; }
 
 .pt-icon { width: 30px; padding: 0; }
 .pt-icon i { font-size: 0.8rem; }
@@ -1687,17 +1687,17 @@ const exportAndrewPlusMulti = () => {
 .pt-select {
   height: 30px; max-width: 170px; padding: 0 8px; border-radius: 8px;
   font-size: 0.74rem; color: inherit;
-  background: var(--fl, transparent); border: 1px solid var(--ln2, rgba(0,0,0,.12));
+  background: var(--fl); border: 1px solid var(--ln2);
 }
 
-.pt-sep { width: 1px; height: 18px; background: var(--ln2, rgba(0,0,0,.12)); margin: 0 2px; flex: none; }
+.pt-sep { width: 1px; height: 18px; background: var(--ln2); margin: 0 2px; flex: none; }
 
 /* Exchange button on a composition row: quiet until hovered, lit while its menu is open. */
 .xch-btn {
   width: 22px; height: 22px; padding: 0; flex: none; border-radius: 6px;
-  background: var(--fl, rgba(0,0,0,.05)); color: var(--tx2, inherit); border: 1px solid var(--ln2, rgba(0,0,0,.12));
+  background: var(--fl); color: var(--tx2); border: 1px solid var(--ln2);
   box-shadow: none; font-size: 0.66rem; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
 }
-.xch-btn:hover { color: var(--acc, #2563eb); border-color: var(--acc, #2563eb); filter: none; }
-.xch-btn.on { background: var(--acs, rgba(37,99,235,.14)); color: var(--acc, #2563eb); border-color: var(--acc, #2563eb); }
+.xch-btn:hover { color: var(--acc); border-color: var(--acc); filter: none; }
+.xch-btn.on { background: var(--acs); color: var(--acc); border-color: var(--acc); }
 </style>

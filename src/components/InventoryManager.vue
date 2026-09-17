@@ -1349,7 +1349,7 @@ const generateLabelsPDF = () => {
           </div>
           <div style="display: flex; align-items: center; justify-content: space-between;">
             <span style="font-size: 0.8rem; opacity: 0.65;">
-              <span v-if="parsedBulkRows.length > 0" style="color: var(--success, #4caf50); font-weight: 600;"><i class="fas fa-check" style="margin-right: 4px;"></i>{{ parsedBulkRows.length }} rows detected</span>
+              <span v-if="parsedBulkRows.length > 0" style="color: var(--success); font-weight: 600;"><i class="fas fa-check" style="margin-right: 4px;"></i>{{ parsedBulkRows.length }} rows detected</span>
               <span v-else-if="bulkPasteText.trim()">No rows detected — check header column names</span>
               <span v-else>Paste your data above</span>
             </span>
@@ -1414,7 +1414,7 @@ const generateLabelsPDF = () => {
             <p style="font-size: 0.76rem; color: var(--tx2); margin: 0 0 10px;">Deleted compounds are kept here with their full data and usage history, so past experiments stay traceable. Restore one to put it back in the active inventory.</p>
             <div v-if="archiveMissing" style="font-size: 0.8rem; color: var(--tx2); padding: 14px 0;">Run <code>supabase/inventory_usage.sql</code> to enable the archive.</div>
             <div v-else-if="archiveLoading" style="font-size: 0.8rem; color: var(--tx2); padding: 14px 0;"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
-            <div v-else-if="archiveError" style="font-size: 0.8rem; color: var(--wr, #dc2626); padding: 14px 0;">
+            <div v-else-if="archiveError" style="font-size: 0.8rem; color: var(--wr); padding: 14px 0;">
                 Could not load the archive — {{ archiveError }}.
                 <button class="secondary small" @click="openArchive" style="margin-left: 8px;">Retry</button>
             </div>
@@ -1584,7 +1584,7 @@ const generateLabelsPDF = () => {
 .inc-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; background: none; border: none; box-shadow: none; cursor: pointer; color: var(--tx); text-align: left; }
 .inc-head:hover { filter: none; }
 .inc-title { font-weight: 700; font-size: 0.9rem; color: var(--acc); }
-.inc-count { font-size: 0.72rem; font-weight: 700; color: #fff; background: var(--acc); border-radius: 999px; padding: 1px 8px; }
+.inc-count { font-size: 0.72rem; font-weight: 700; color: #fff; background: var(--acc-fill); border-radius: 999px; padding: 1px 8px; }
 .inc-sub { font-size: 0.74rem; color: var(--tx2); }
 .inc-refresh { margin-left: auto; color: var(--tx2); font-size: 0.82rem; padding: 2px 6px; }
 .inc-refresh:hover { color: var(--acc); }
@@ -1597,7 +1597,7 @@ const generateLabelsPDF = () => {
 
 /* Add-from-incoming window */
 .inc-modal { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 16px; }
-.inc-dialog { background: var(--modal, var(--surface)); border: 1px solid var(--cdl, var(--border)); border-radius: var(--r, 14px); box-shadow: var(--sh); width: 100%; max-width: 620px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; }
+.inc-dialog { background: var(--modal); border: 1px solid var(--cdl); border-radius: var(--r); box-shadow: var(--sh); width: 100%; max-width: 620px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; }
 .inc-dialog-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; font-weight: 600; color: var(--tx); border-bottom: 1px solid var(--ln); }
 .inc-x { width: 28px; height: 28px; border-radius: 50%; background: var(--fl); color: var(--tx2); border: none; box-shadow: none; cursor: pointer; }
 .inc-dialog-body { padding: 14px 16px; overflow-y: auto; }

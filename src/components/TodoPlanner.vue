@@ -668,13 +668,13 @@ async function recolorCategory(c, color) {
 .tp-btn {
   height: 30px; padding: 0 11px; border-radius: 8px; font-size: 0.74rem; font-weight: 600;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  background: var(--btn2, rgba(0,0,0,.05)); color: var(--tx, inherit);
-  border: 1px solid var(--ln2, rgba(0,0,0,.12)); cursor: pointer; box-shadow: none;
+  background: var(--btn2); color: var(--tx);
+  border: 1px solid var(--ln2); cursor: pointer; box-shadow: none;
 }
 .tp-btn:hover:not(:disabled) { filter: brightness(1.06); }
 .tp-btn:disabled { opacity: .55; cursor: default; }
-.tp-btn.primary { background: var(--acc, #2563eb); border-color: transparent; color: #fff; }
-.tp-btn.on { background: var(--acs, rgba(37,99,235,.14)); border-color: var(--acc, #2563eb); color: var(--acc, #2563eb); }
+.tp-btn.primary { background: var(--acc-fill); border-color: transparent; color: #fff; }
+.tp-btn.on { background: var(--acs); border-color: var(--acc); color: var(--acc); }
 .tp-icon { width: 30px; padding: 0; }
 
 .tp-inbox-head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 0.9rem; padding-bottom: 4px; border-bottom: 1px solid var(--ln); }
@@ -698,31 +698,31 @@ async function recolorCategory(c, color) {
 .tp-wday:hover { background: var(--panel-bg); }
 .tp-wday .tp-wd { font-size: 0.68rem; opacity: 0.55; }
 .tp-wday .tp-wnum { font-size: 0.95rem; font-weight: 700; width: 28px; height: 28px; line-height: 28px; text-align: center; border-radius: 50%; }
-.tp-wday.today .tp-wnum { color: var(--acc, #2563eb); }
-.tp-wday.sel .tp-wnum { background: var(--acc, #2563eb); color: #fff; }
+.tp-wday.today .tp-wnum { color: var(--acc); }
+.tp-wday.sel .tp-wnum { background: var(--acc-fill); color: #fff; }
 .tp-dots { display: flex; gap: 2px; height: 5px; }
 .tp-dots i { width: 5px; height: 5px; border-radius: 50%; display: inline-block; }
 
 .tp-timeline { position: relative; overflow-y: auto; max-height: 640px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel-bg); }
 .tp-canvas { position: relative; }
-.tp-hour { position: absolute; left: 0; right: 0; border-top: 1px solid var(--ln, rgba(0,0,0,.06)); }
+.tp-hour { position: absolute; left: 0; right: 0; border-top: 1px solid var(--ln); }
 .tp-hour span { position: absolute; left: 6px; top: -0.6em; font-size: 0.68rem; opacity: 0.5; background: var(--panel-bg); padding: 0 3px; }
 /* The spine: a dashed line through the capsule column — visible where the day
    is free, covered by capsules where it is planned (the Structured look). */
-.tp-spine { position: absolute; top: 0; bottom: 0; left: 79px; width: 0; border-left: 2px dashed var(--ln2, rgba(0,0,0,.16)); }
+.tp-spine { position: absolute; top: 0; bottom: 0; left: 79px; width: 0; border-left: 2px dashed var(--ln2); }
 .tp-now { position: absolute; left: 52px; right: 8px; height: 0; border-top: 2px solid #ef4444; z-index: 4; pointer-events: none; }
 .tp-now::before { content: ''; position: absolute; left: -5px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
 
 /* Meetings: read-only busy-time behind the tasks — visible, never in the way. */
 .tp-meeting {
   position: absolute; left: 52px; right: 4px; z-index: 1; pointer-events: none;
-  background: var(--acs, rgba(37,99,235,.08));
-  border-left: 3px solid var(--acc, #2563eb); border-radius: 6px;
+  background: var(--acs);
+  border-left: 3px solid var(--acc); border-radius: 6px;
   padding: 2px 8px; overflow: hidden; box-sizing: border-box;
 }
 .tp-meeting-label {
   float: right; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 0.68rem; font-weight: 600; color: var(--acc, #2563eb); opacity: 0.9;
+  font-size: 0.68rem; font-weight: 600; color: var(--acc); opacity: 0.9;
 }
 
 /* The task capsule ON the line: length = duration, icon at its head. */
@@ -764,11 +764,11 @@ async function recolorCategory(c, color) {
   color: inherit; cursor: pointer; box-shadow: none; display: inline-flex; align-items: center; justify-content: center;
 }
 .tp-ic-pick:hover { background: var(--panel-bg); }
-.tp-ic-pick.sel { background: var(--acs, rgba(37,99,235,.14)); border-color: var(--acc, #2563eb); color: var(--acc, #2563eb); }
+.tp-ic-pick.sel { background: var(--acs); border-color: var(--acc); color: var(--acc); }
 
 .tp-chip {
   padding: 2px 8px; font-size: 0.7rem; border-radius: 10px; background: transparent;
   border: 1px solid var(--border); color: inherit; cursor: pointer; box-shadow: none;
 }
-.tp-chip.sel { background: var(--acc, #2563eb); border-color: transparent; color: #fff; }
+.tp-chip.sel { background: var(--acc-fill); border-color: transparent; color: #fff; }
 </style>

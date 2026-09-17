@@ -6,6 +6,14 @@ import { reconcileUsage, deleteUsageForSource, extractPlanRefs, PLAN_SOURCE_TYPE
 // Debounce timer for layout cloud saves (layout changes on every drag event)
 let _layoutSaveTimer = null
 
+// Saved preferences predate the third theme: they carry only isDarkMode. Prefer
+// an explicit theme, fall back to the boolean, else keep what we have.
+function readTheme(prefs, current) {
+  if (prefs && ['light', 'night', 'dark'].includes(prefs.theme)) return prefs.theme;
+  if (prefs && prefs.isDarkMode !== undefined) return prefs.isDarkMode ? 'dark' : 'light';
+  return current;
+}
+
 export const useLabStore = defineStore('lab', {
   state: () => ({
     user: null,
@@ -15,13 +23,15 @@ export const useLabStore = defineStore('lab', {
     // InventoryManager resolves it once inventoryLoaded flips true.
     pendingQrCode: null,
     inventoryLoaded: false,
-    isDarkMode: false,
-    // primaryColor = accent (Soft Glass --acc-user). radiusName = Sharp|Soft|Round.
-    // borderRadius (legacy px) is retained only to migrate old saved prefs.
-    // showAlpha: reveal alpha-stage modules (per user; off by default).
-    uiSettings: { primaryColor: '#0E396E', radiusName: 'Soft', borderRadius: '14px', showAlpha: false },
-    // Curated accent swatches offered in Settings (dark mode lightens each 38%).
-    accentOptions: ['#0E396E', '#0065BD', '#00786B', '#5E5CE6'],
+    // 'light' | 'night' | 'dark'. Night is a warm low-light theme after Solarized
+    // Light — a LIGHT-family theme, so it never carries the .dark-mode class.
+    // isDarkMode is a getter over this, so every existing binding still works.
+    theme: 'light',
+    // radiusName = Sharp|Soft|Round. borderRadius (legacy px) is retained only to
+    // migrate old saved prefs. showAlpha: reveal alpha-stage modules.
+    // The accent is NO LONGER a preference — it is designed per theme in
+    // style.css, so that every mode keeps a verified contrast ratio.
+    uiSettings: { radiusName: 'Soft', borderRadius: '14px', showAlpha: false },
     globalSettings: { mmReactions: 3.3, decimals: 3 },
     inventorySearch: '',
     archiveReactionSearch: '',
@@ -94,6 +104,13 @@ export const useLabStore = defineStore('lab', {
     // Transient bottom-center toasts (redesign feedback pattern).
     toasts: [],
   }),
+
+  getters: {
+    // Kept so the ~20 components binding store.isDarkMode need no change. Night
+    // is deliberately NOT dark: its ground is cream and its ink is dark.
+    isDarkMode: (st) => st.theme === 'dark',
+    themeLabel: (st) => ({ light: 'Light', night: 'Night', dark: 'Dark' }[st.theme] || 'Light'),
+  },
 
   actions: {
     // Push a bottom-center toast that auto-dismisses (~2.6 s).
@@ -530,7 +547,7 @@ export const useLabStore = defineStore('lab', {
 
       if (data.prefs && Object.keys(data.prefs).length) {
         const p = data.prefs;
-        if (p.isDarkMode     !== undefined) this.isDarkMode     = p.isDarkMode;
+        this.theme = readTheme(p, this.theme);
         if (p.uiSettings)                   this.uiSettings     = { ...this.uiSettings,     ...p.uiSettings };
         if (p.globalSettings)               this.globalSettings = { ...this.globalSettings, ...p.globalSettings };
         if (Array.isArray(p.buffers))       this.buffers        = p.buffers;
@@ -572,7 +589,8 @@ export const useLabStore = defineStore('lab', {
     saveUserPreferences() {
       if (!this.user?.id) return;
       const prefs = {
-        isDarkMode:     this.isDarkMode,
+        theme:          this.theme,
+        isDarkMode:     this.isDarkMode,   // still written so an older build can read it back
         uiSettings:     { ...this.uiSettings },
         globalSettings: { ...this.globalSettings },
         buffers:        [...this.buffers],
@@ -607,7 +625,7 @@ export const useLabStore = defineStore('lab', {
       if (!raw) return;
       try {
         const prefs = JSON.parse(raw);
-        if (prefs.isDarkMode     !== undefined) this.isDarkMode     = prefs.isDarkMode;
+        this.theme = readTheme(prefs, this.theme);
         if (prefs.uiSettings)                   this.uiSettings     = { ...this.uiSettings,     ...prefs.uiSettings };
         if (prefs.globalSettings)               this.globalSettings = { ...this.globalSettings, ...prefs.globalSettings };
         if (Array.isArray(prefs.buffers))       this.buffers        = prefs.buffers;
@@ -615,9 +633,21 @@ export const useLabStore = defineStore('lab', {
       this.applyThemeToDOM();
     },
 
-    toggleDarkMode() {
-      this.isDarkMode = !this.isDarkMode;
+    setTheme(name) {
+      this.theme = ['light', 'night', 'dark'].includes(name) ? name : 'light';
       this.updateThemeColors();
+    },
+
+    // The single-icon buttons in the toolbar and the phone hub cycle rather than
+    // toggle, so all three themes are reachable without opening Settings.
+    cycleTheme() {
+      const order = ['light', 'night', 'dark'];
+      this.setTheme(order[(order.indexOf(this.theme) + 1) % order.length]);
+    },
+
+    // Kept for any caller that still means "flip between light and dark".
+    toggleDarkMode() {
+      this.setTheme(this.theme === 'dark' ? 'light' : 'dark');
     },
 
     // Applies dark-mode classes and CSS variables to the DOM, then persists.
@@ -640,12 +670,10 @@ export const useLabStore = defineStore('lab', {
     },
 
     // DOM-only update — called during load so we don't trigger a redundant save.
-    // Sets ONLY --acc-user and data-radius; the stylesheet derives --acc/--acs/
-    // --acsh (with the dark 38% lift), the radius trio, and every legacy alias
-    // (--primary, --radius, …). Setting --primary inline here would override the
-    // dark-lifted accent, so we deliberately don't.
+    // Sets ONLY the theme and radius attributes; the stylesheet owns every colour,
+    // including the accent, which is designed per theme rather than picked.
     applyThemeToDOM() {
-      const dark = this.isDarkMode;
+      const dark = this.theme === 'dark';
       const root = document.documentElement;
       // CRUCIAL: the legacy aliases (--surface: var(--cd), --text: var(--tx), …)
       // live on :root (<html>) and are resolved THERE. If the dark class is only
@@ -655,7 +683,12 @@ export const useLabStore = defineStore('lab', {
       document.body.classList.toggle('dark-mode', dark);
       const wrapper = document.getElementById('body-wrapper');
       if (wrapper) wrapper.classList.toggle('dark-mode', dark);
-      root.style.setProperty('--acc-user', this.uiSettings.primaryColor);
+      // Night is a light-family theme: it rides an attribute, never the dark
+      // class, so every ".dark-mode .x" component override stays switched off.
+      // Custom properties on a descendant beat :root by inheritance, so the class
+      // must be cleared from <body> and #body-wrapper too — which it is, above.
+      if (this.theme === 'light') root.removeAttribute('data-theme');
+      else root.setAttribute('data-theme', this.theme);
       root.setAttribute('data-radius', this.resolveRadiusName());
       // Force native controls (select popups, spinners, date pickers, scrollbars)
       // to match the theme document-wide — otherwise they render light in dark mode.

@@ -16,16 +16,25 @@ html {
    in terms of the new ones at the bottom of this block, so the existing modules
    adopt the new look through the variables they already consume.
 
-   Theming: JS sets  --acc-user  (accent swatch) and the  data-radius  attribute
-   on <html>; dark mode is the .dark / .dark-mode class. The dark accent is the
-   light accent lifted 38% toward white — reproduced exactly by color-mix 62/38.
+   Theming: JS sets only the  data-radius  attribute and  data-theme  on <html>;
+   dark mode is additionally the .dark / .dark-mode class. Colour is NOT user-
+   configurable — the accent and the status trio are designed per theme below.
    ══════════════════════════════════════════════════════════════════════════ */
 :root {
-    /* Accent — user-themable. Default Boekhoven navy. */
-    --acc-user: #0E396E;
-    --acc:  var(--acc-user);
-    --acs:  color-mix(in srgb, var(--acc) 10%, transparent);  /* accent tint  */
-    --acsh: color-mix(in srgb, var(--acc) 30%, transparent);  /* button glow  */
+    /* Accent — designed per theme, not user-picked, and DIFFERENT in each theme:
+       the accent is chosen against the ground it actually sits on.
+         light  h282° — the Boekhoven navy family, analogous to this theme's cool
+                blue-grey ground (h264°), so it reads as part of the same world
+         night  h266° — Solarized's own blue, which is very nearly the exact
+                complement of the cream ground's h94°; see the night block
+         dark   h278° — the slate's own hue, so the accent belongs to the surface
+       Chroma is capped below max gamut in all three so it stays calm. Each has a
+       fill stop (carries hardcoded #fff) and an ink stop; they coincide on the
+       light-family grounds and separate on the dark one. */
+    --acc-fill: #3762AA;                                     /* L*42 · #fff on it 6.02 */
+    --acc:  var(--acc-fill);                                 /* ink: 5.62 on the light card */
+    --acs:  color-mix(in srgb, var(--acc) 10%, transparent); /* tint — --acc on it 4.90 */
+    --acsh: rgba(20,30,60,.18);                              /* button glow: neutral, not a coloured halo */
 
     /* Radius trio — default "Soft"; data-radius on <html> switches the set. */
     --r:  14px;   /* cards        */
@@ -45,13 +54,25 @@ html {
     /* Text */
     --tx:  #1D1D1F;   /* primary   */
     --tx2: #6E6E73;   /* secondary */
-    --tx3: #8A8A8F;   /* tertiary  */
+    --tx3: #8A8A8F;   /* tertiary — mostly icons/strokes, which owe 3:1 (SC 1.4.11) */
+    --tx-ph: #69696E;     /* placeholder text sits on --fl: 4.62:1 (--tx3 there was 2.91) */
 
     /* Fills, buttons, status */
     --fl:   rgba(20,30,60,.05);
     --btn2: rgba(255,255,255,.8);
-    --ok:   #248A3D;   --wr: #C93400;   --wrs: rgba(201,52,0,.12);
-    --danger-color: #D70015;
+    /* Status — ONE fixed hue per role across all three themes; only lightness
+       moves. Hues are locked at CIELAB h 145° / 78° / 30°, chroma held under
+       max-gamut so they read calm rather than neon. Lightness is staggered
+       (ok 38 · danger 41 · wr 45) so the trio stays separable when colour-vision
+       deficiency flattens hue — success/danger, the pair that matters most, is
+       7.0 ΔL* apart under deuteranopia instead of 1.2.
+       The *-fill tokens are the SAME hex in every theme: a fill is its own
+       background, so white-on-fill stays 5.4-7.0:1 everywhere. Text tones have
+       to move, because no single lightness can clear AA on both a cream ground
+       and a slate one — the two windows are 2.6x apart. */
+    --ok:   #306439;   --wr: #8D620F;   --wrs: rgba(141,98,15,.12);
+    --danger-color: #A93B39;
+    --ok-fill: #306439;   --wr-fill: #8D620F;   --danger-fill: #A93B39;
     --sh:  0 8px 28px rgba(20,30,60,.10);   /* card shadow */
     --tst: rgba(29,29,31,.92);              /* toast       */
     --modal: rgba(255,255,255,.98);         /* dialogs — opaque enough to read */
@@ -71,7 +92,7 @@ html {
     --text:       var(--tx);
     --border:     var(--ln2);
     --danger:     var(--danger-color);
-    --danger-bg:  rgba(215,0,21,.10);
+    --danger-bg:  rgba(169,59,57,.11);
     --success:    var(--ok);
     --success-color: var(--ok);
     --warning:    var(--wr);
@@ -103,23 +124,85 @@ body.dark-mode, .dark-mode, .dark {
     --tx:  #F5F5F7;
     --tx2: #98989D;
     --tx3: #7C7C82;
+    --tx-ph: #A2A2A7;     /* 4.61:1 on the dark input fill (--tx3 there was 2.82) */
     --fl:   rgba(255,255,255,.07);
     --btn2: rgba(255,255,255,.10);
-    --ok:   #30D158;  --wr: #FF9F0A;  --wrs: rgba(255,159,10,.14);
-    --danger-color: #FF453A;
+    /* Same hues, lifted for a dark ground (ok L*79 · wr L*73 · danger L*68).
+       The fills deliberately do NOT lift: #fff on #30D158 measured 2.02:1. */
+    --ok:   #9AD19E;  --wr: #DFAA58;  --wrs: rgba(223,170,88,.14);
+    --danger-color: #FB8279;
     --sh:  0 8px 24px rgba(0,0,0,.4);
     --tst: rgba(70,74,86,.95);
     --modal: rgba(38,40,48,.985);
     --surface-solid: #282B33;
-    /* accent lifted 38% toward white; tint 18%, glow neutral */
-    --acc:  color-mix(in srgb, var(--acc-user) 62%, #fff);
-    --acs:  color-mix(in srgb, var(--acc) 18%, transparent);
+    /* Accent on the slate's own hue (278°). The fill sits in a narrow window —
+       L*49: any lighter and #fff on it drops below 4.5, any darker and the button
+       stops clearing 3:1 against the card, so its edge disappears. */
+    --acc-fill: #4A75B7;                                     /* #fff on it 4.65 · vs card 3.13 */
+    --acc:  #91B6FE;                                         /* ink: 7.14 on the dark card */
+    --acs:  color-mix(in srgb, var(--acc) 18%, transparent); /* --acc on it 4.94 */
     --acsh: rgba(0,0,0,.4);
     /* legacy solids for dark */
     --bg:        #1E2027;
     --panel-bg:  rgba(255,255,255,.05);
-    --danger-bg: rgba(255,69,58,.15);
+    --danger-bg: rgba(251,130,121,.15);
 }
+
+/* ── Night — warm low-light theme, after Solarized Light ──────────────────────
+   A LIGHT-family theme (cream ground, dark ink), so it ships as an attribute on
+   <html> and NOT as the .dark-mode class: every ".dark-mode .x" override in the
+   components stays off and their base styling applies, which is what we want.
+
+   Solarized's own body text (base00 #657b83 on base3 #fdf6e3) measures 4.13:1 —
+   it fails AA, and this app is full of 0.64–0.8rem chips and numeric tables. So
+   the paper and the cool-ink hue are Solarized's; every text role is slid one
+   step darker down that same monotone line. The whole field sits well below the
+   day theme in luminance, which is where the night comfort actually comes from.
+
+   Cards keep the frosted material: base3 at .72 over base2 chrome, so the glass
+   still transmits through its 24px blur and cards read as a plane above the bar. */
+:root[data-theme="night"] {
+    color-scheme: light;
+
+    /* Ground — base2 family, deliberately dimmer than the day gradient */
+    --app-bg: linear-gradient(160deg, #E7DFC9, #D9D0B7);
+    --bg:     #E0D8C0;                /* solid mid — :root sets a literal, so restate it */
+
+    /* Chrome on base2, cards on base3 — two distinct planes */
+    --ch:  rgba(238,232,213,.78);
+    --ch2: rgba(238,232,213,.60);
+    --chl: rgba(255,251,236,.55);
+    --cd:  rgba(253,246,227,.72);     /* same alpha as day: the blur must still transmit */
+    --cdl: rgba(255,251,236,.72);     /* light rim — border-box composites it over the fill */
+    --ln:  rgba(120,98,48,.12);
+    --ln2: rgba(120,98,48,.20);
+
+    /* Ink — Solarized's cool monotone, one step darker for AA on small type */
+    --tx:  #1C4550;
+    --tx2: #3A5962;
+    --tx3: #4E6870;                   /* 4.59:1 on the recessed fill — the theme's thinnest pair */
+    --tx-ph: var(--tx2);              /* 5.59:1 on the night fill */
+
+    --fl:   rgba(120,98,48,.10);
+    --btn2: rgba(253,246,227,.88);
+    /* status tones are inherited from :root — one palette across the themes */
+    --sh:  0 1px 2px rgba(94,72,32,.10), 0 8px 26px rgba(94,72,32,.15);
+    --tst: rgba(60,84,92,.95);        /* toast: .toast hardcodes #fff, so keep it gentle */
+    --modal: rgba(250,243,223,.985);
+    --surface-solid: #EEE8D5;         /* base2 — the canonical background highlight */
+    --panel-bg: rgba(253,246,227,.55);
+
+    /* Accent — Solarized's own blue (h266°), which is within 8° of the exact
+       complement of this theme's cream ground (h94°). That is why Solarized reads
+       the way it does, and a navy borrowed from the day theme does not: it sits on
+       warm paper as a cold foreign object. Darkened to L*40 — canonical #268BD2
+       is L*56, far too light to clear its own tint on cream (4.21). */
+    --acc-fill: #04639A;              /* #fff on it 6.45 */
+    --acc:  var(--acc-fill);          /* ink: 5.43 on the cream card */
+    --acs:  color-mix(in srgb, var(--acc) 8%, transparent);   /* --acc on it 4.84 */
+    --acsh: rgba(94,72,32,.22);       /* warm shade, not a coloured halo */
+}
+
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', "Segoe UI", Helvetica, Arial, sans-serif;
@@ -158,7 +241,7 @@ h2 { margin-top: 0; font-size: 0.95rem; border-bottom: 1px solid var(--ln); padd
 /* Card-header icon chip: accent square + white glyph/line-icon (card anatomy). */
 h2 > i, h2 > .fas, h2 > .far, h2 > .fab, h2 > .fa, h2 > svg {
   width: 24px; height: 24px; border-radius: 8px; flex: none;
-  background: var(--acc); color: #fff;
+  background: var(--acc-fill); color: #fff;
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 12px; box-shadow: 0 2px 5px var(--acsh);
 }
@@ -175,7 +258,22 @@ input[type="number"], input[type="text"], input[type="date"], select, textarea {
 }
 select { background-image: url('data:image/svg+xml;utf8,<svg fill="%23999" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/><path d="M0 0h24v24H0z" fill="none"/></svg>'); background-repeat: no-repeat; background-position-x: 98%; background-position-y: 50%; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--acc); box-shadow: 0 0 0 3px var(--acs) !important; }
-input::placeholder, textarea::placeholder { color: var(--tx3); }
+input::placeholder, textarea::placeholder { color: var(--tx-ph); }
+
+/* The select chevron is a data-URI, so it cannot read a custom property — it is
+   hardcoded #999, which is 2.2:1 on cream. Restate it in the theme's ink.
+
+   :where() is load-bearing, not decoration. Plenty of components style a select
+   with the `background:` SHORTHAND, which resets background-image to none AND
+   background-repeat to `repeat`. A normally-specific override here would win the
+   image back but not the repeat, and the chevron would tile across the whole
+   control. :where() contributes zero specificity, so this rule sits at exactly
+   the weight of the base `select` rule below: it recolours the chevron where the
+   base rule draws one, and loses to the same component rules the base rule loses
+   to. Keep the selector inside :where() if you touch this. */
+:where(:root[data-theme="night"]) select {
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%233A5962" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/><path d="M0 0h24v24H0z" fill="none"/></svg>');
+}
 input[type="color"] { padding: 2px; height: 40px; cursor: pointer; }
 
 .input-with-select { display: flex; }
@@ -184,12 +282,12 @@ input[type="color"] { padding: 2px; height: 40px; cursor: pointer; }
 
 /* Primary button: accent fill, sentence case, soft accent glow. */
 button {
-    background-color: var(--acc); color: white; border: none; padding: 9px 15px; border-radius: var(--rc); cursor: pointer; font-weight: 600; transition: filter 0.15s, border-radius 0.3s, box-shadow 0.15s; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 3px 10px var(--acsh); text-transform: none; font-size: 0.8rem; letter-spacing: 0;
+    background-color: var(--acc-fill); color: white; border: none; padding: 9px 15px; border-radius: var(--rc); cursor: pointer; font-weight: 600; transition: filter 0.15s, border-radius 0.3s, box-shadow 0.15s; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 3px 10px var(--acsh); text-transform: none; font-size: 0.8rem; letter-spacing: 0;
 }
 button:hover { filter: brightness(1.1); }
 button.small { padding: 6px 11px; font-size: 0.72rem; }
-button.danger { background-color: var(--danger-color); box-shadow: none; }
-button.success { background-color: var(--ok); box-shadow: none; }
+button.danger { background-color: var(--danger-fill); box-shadow: none; }
+button.success { background-color: var(--ok-fill); box-shadow: none; }
 /* Secondary button: translucent fill + hairline border, dark text. */
 button.secondary { background-color: var(--btn2); color: var(--tx); border: 1px solid var(--ln2); box-shadow: none; }
 button.secondary:hover { filter: brightness(1.04); }
@@ -213,7 +311,7 @@ th { font-weight: 600; background: transparent; color: var(--tx2); text-transfor
 .scope-chips { display: inline-flex; gap: 3px; padding: 2px; background: var(--fl); border-radius: calc(var(--rc) + 2px); }
 .scope-chip { padding: 5px 12px; border: none; box-shadow: none; border-radius: var(--rc); font-size: 12px; font-weight: 600; background: transparent; color: var(--tx2); cursor: pointer; }
 .scope-chip:hover { filter: none; color: var(--tx); }
-.scope-chip.active { background: var(--acc); color: #fff; box-shadow: 0 2px 6px var(--acsh); }
+.scope-chip.active { background: var(--acc-fill); color: #fff; box-shadow: 0 2px 6px var(--acsh); }
 
 /* ══ Module action bar — consistent primary-action (Save) placement ══
    Convention: a bottom bar with secondary actions left, primary (Save) right.
@@ -272,7 +370,7 @@ th { font-weight: 600; background: transparent; color: var(--tx2); text-transfor
     background: var(--input-bg); color: var(--text); border: 1px solid var(--border); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius); cursor: pointer; transition: all 0.2s; padding: 0; box-shadow: none; font-size: 0.9rem;
 }
 .rtf-btn:hover {
-    background: var(--primary); color: white; border-color: var(--primary); filter: none;
+    background: var(--acc-fill); color: white; border-color: var(--primary); filter: none;
 }
 .rtf-editor:empty:before {
     content: attr(placeholder);
@@ -285,7 +383,7 @@ th { font-weight: 600; background: transparent; color: var(--tx2); text-transfor
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    background-color: var(--primary);
+    background-color: var(--acc-fill);
     color: white;
     padding: 2px 8px;
     border-radius: 12px;
@@ -303,8 +401,8 @@ th { font-weight: 600; background: transparent; color: var(--tx2); text-transfor
 .well { background: var(--surface); border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.6rem; cursor: pointer; user-select: none; aspect-ratio: 1; transition: all 0.1s; color: transparent; position: relative; }
 .well:hover { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
 .well.has-content { background: var(--summary-bg); border-color: var(--primary); color: var(--primary); }
-.well.has-content::after { content: ''; width: 8px; height: 8px; background: var(--primary); border-radius: 50%; }
-.well.selected { background: var(--primary); border-color: var(--primary); box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--primary); }
+.well.has-content::after { content: ''; width: 8px; height: 8px; background: var(--acc-fill); border-radius: 50%; }
+.well.selected { background: var(--acc-fill); border-color: var(--primary); box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--primary); }
 .well.selected.has-content::after { background: white; }
 .plate-label { display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.75rem; opacity: 0.7; }
 .well-editor-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-top: 15px; overflow: hidden; }

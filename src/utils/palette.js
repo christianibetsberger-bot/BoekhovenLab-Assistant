@@ -15,6 +15,11 @@
 // and every form of colour blindness. It is editable/duplicable; nothing here is
 // hard-wired into the plot code — plots read whichever palette is selected.
 
+// The app icon's colour. Each theme now has its own accent, but a favicon and a
+// dock icon are theme-independent, so this mirrors the LIGHT theme's --acc-fill
+// in src/style.css. Keep the two in step if that accent is ever retuned.
+export const UI_ACCENT = '#3762AA'
+
 export const BOEKHOVEN_PALETTE = Object.freeze({
   id: 'boekhoven-lab',
   name: 'Boekhoven Lab',

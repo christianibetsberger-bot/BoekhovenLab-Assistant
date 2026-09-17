@@ -1256,7 +1256,7 @@ onMounted(async () => {
 .jf-filters { display: flex; align-items: center; gap: 5px; margin-top: 8px; }
 .jf-chip { flex: 1; padding: 5px 6px; border-radius: 8px; border: 1px solid var(--ln2); background: var(--fl); color: var(--tx2); font-size: 0.78rem; cursor: pointer; box-shadow: none; }
 .jf-chip:hover { filter: none; color: var(--tx); }
-.jf-chip.active { background: var(--acc); border-color: transparent; color: #fff; }
+.jf-chip.active { background: var(--acc-fill); border-color: transparent; color: #fff; }
 .jf-cat-select { margin-top: 8px; width: 100%; padding: 6px 8px; font-size: 0.82rem; }
 
 /* List item status dot / sharing / category */

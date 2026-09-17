@@ -328,7 +328,7 @@ import {
 import { BOEKHOVEN_PALETTE, hexToRgba } from '../utils/palette'
 import {
   DEFAULT_PRESET, BUILTIN_PRESETS, isBuiltinPreset, resolvePreset,
-  boekhovenPlotlyLayout, boekhovenHeatmapLayout, axisTitle, matplotlibStyleCode,
+  boekhovenPlotlyLayout, boekhovenHeatmapLayout, axisTitle, matplotlibStyleCode, plotTheme,
 } from '../utils/plotStyle'
 
 const store = useLabStore()
@@ -539,7 +539,7 @@ function renderHeatmap() {
   const m = buildMatrix(rows, { value, timeMin: tp })
   const vmax = value === 'conversion_pct' ? 100 : Math.max(...m.z.flat().filter(v => v != null), 0.001)
   const { layout, colorscale } = boekhovenHeatmapLayout(currentPreset.value, currentPalette.value, {
-    isDark: store.isDarkMode, x: { quantity: 'Sequence column' }, y: { quantity: 'Row' },
+    theme: store.theme, x: { quantity: 'Sequence column' }, y: { quantity: 'Row' },
     title: value === 'conversion_pct' ? 'Conversion' : 'Product concentration',
   })
   const annotations = []
@@ -563,7 +563,7 @@ function renderHeatmap() {
 function renderGallery() {
   if (!setFigures.value.includes('chromGallery')) return
   const pal = currentPalette.value
-  const lineColor = store.isDarkMode ? '#e2e8f0' : '#0f172a'
+  const lineColor = plotTheme(store.theme).fg
   for (const r of derivedRows.value) {
     const el = galleryRefs.value[r.name]
     if (!el) continue
@@ -581,7 +581,7 @@ function renderGallery() {
       })
     }
     const layout = boekhovenPlotlyLayout(currentPreset.value, pal, {
-      isDark: store.isDarkMode,
+      theme: store.theme,
       x: { quantity: 't', unit: 'min', range: [params.scanMin, params.scanMax] },
       y: { quantity: 'signal', unit: 'mAU' },
       title: `${r.seqName || r.name} · ${r.product_uM.toFixed(2)} µM`,
@@ -594,7 +594,7 @@ function renderGallery() {
   }
 }
 function renderFigures() { nextTick(() => { renderHeatmap(); renderGallery() }) }
-watch([derivedRows, selectedPaletteId, figureTab, heatmapValue, heatmapTime, () => store.isDarkMode], renderFigures)
+watch([derivedRows, selectedPaletteId, figureTab, heatmapValue, heatmapTime, () => store.theme], renderFigures)
 watch(workingPreset, renderFigures, { deep: true })
 
 // ── matplotlib publication export ────────────────────────────────────────────
@@ -814,11 +814,11 @@ onMounted(() => { loadSeqLibrary(); loadCustom() })
 .df-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
 .df-btn { background: var(--btn2); color: var(--tx); border: 1px solid var(--ln2); border-radius: var(--rc); padding: 8px 14px; cursor: pointer; font-weight: 600; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px; box-shadow: none; }
 .df-btn:hover { filter: brightness(1.04); }
-.df-btn.primary { background: var(--acc); color: #fff; border-color: transparent; box-shadow: 0 3px 10px var(--acsh); }
+.df-btn.primary { background: var(--acc-fill); color: #fff; border-color: transparent; box-shadow: 0 3px 10px var(--acsh); }
 .df-btn.primary:hover { filter: brightness(1.1); }
 .df-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .df-progress { font-size: 0.78rem; opacity: 0.8; }
-.df-count { background: var(--acc); color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 0.7rem; }
+.df-count { background: var(--acc-fill); color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 0.7rem; }
 .df-chip { background: var(--wrs); color: var(--wr); border-radius: 999px; padding: 1px 8px; font-size: 0.68rem; font-weight: 600; }
 
 .df-table-wrap { overflow-x: auto; }
@@ -834,7 +834,7 @@ onMounted(() => { loadSeqLibrary(); loadCustom() })
 .df-seg { display: inline-flex; padding: 2px; gap: 2px; background: var(--fl); border-radius: calc(var(--rc) + 2px); }
 .df-seg-btn { background: transparent; color: var(--tx2); border: none; box-shadow: none; padding: 6px 13px; border-radius: var(--rc); font-size: 0.78rem; font-weight: 600; cursor: pointer; }
 .df-seg-btn:hover { filter: none; color: var(--tx); }
-.df-seg-btn.active { background: var(--acc); color: #fff; box-shadow: 0 2px 6px var(--acsh); }
+.df-seg-btn.active { background: var(--acc-fill); color: #fff; box-shadow: 0 2px 6px var(--acsh); }
 
 /* Data-palette swatch row */
 .df-swatches { display: flex; align-items: center; gap: 5px; margin: 4px 0 12px; }
@@ -845,7 +845,7 @@ onMounted(() => { loadSeqLibrary(); loadCustom() })
 .df-figtabs { display: flex; gap: 6px; margin: 12px 0; }
 .df-figtabs button { background: var(--fl); border: none; border-radius: var(--rc); padding: 6px 14px; cursor: pointer; font-size: 0.8rem; color: var(--tx2); box-shadow: none; }
 .df-figtabs button:hover { filter: none; }
-.df-figtabs button.active { background: var(--acc); color: #fff; box-shadow: 0 2px 6px var(--acsh); }
+.df-figtabs button.active { background: var(--acc-fill); color: #fff; box-shadow: 0 2px 6px var(--acsh); }
 .df-plot { width: 100%; height: 460px; }
 .df-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .df-gallery-item { height: 220px; border: 1px solid var(--border); border-radius: 6px; }

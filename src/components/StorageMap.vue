@@ -1275,7 +1275,7 @@ const fmtTaken = (t) => t ? `${(t.by || '').split('@')[0] || 'someone'} · ${new
         </div>
         <div v-else-if="scanner.mode === 'relocate'" style="margin-top: 10px;">
           <div style="display: flex; gap: 8px; align-items: center; padding: 8px 10px; border: 1.5px dashed var(--border); border-radius: var(--radius);">
-            <i class="fas fa-location-dot" :style="relocate.loc ? 'color: var(--acc, #2563eb);' : 'opacity: 0.4;'"></i>
+            <i class="fas fa-location-dot" :style="relocate.loc ? 'color: var(--acc);' : 'opacity: 0.4;'"></i>
             <template v-if="relocate.loc">
               <strong style="flex: 1;">{{ relocate.loc.name }}</strong>
               <span style="font-size: 0.7rem; opacity: 0.6;">{{ relocate.loc.type === 'box' ? 'box — first free cell is used' : 'unit' }} · armed</span>
@@ -1299,11 +1299,11 @@ const fmtTaken = (t) => t ? `${(t.by || '').split('@')[0] || 'someone'} · ${new
 .sm-btn {
   height: 30px; padding: 0 11px; border-radius: 8px; font-size: 0.74rem; font-weight: 600;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  background: var(--btn2, rgba(0,0,0,.05)); color: var(--tx, inherit);
-  border: 1px solid var(--ln2, rgba(0,0,0,.12)); cursor: pointer; box-shadow: none;
+  background: var(--btn2); color: var(--tx);
+  border: 1px solid var(--ln2); cursor: pointer; box-shadow: none;
 }
 .sm-btn:hover { filter: brightness(1.06); }
-.sm-btn.primary { background: var(--acc, #2563eb); border-color: transparent; color: #fff; }
+.sm-btn.primary { background: var(--acc-fill); border-color: transparent; color: #fff; }
 .sm-btn.small { height: 24px; padding: 0 8px; font-size: 0.68rem; }
 
 .sm-chip {
@@ -1313,8 +1313,8 @@ const fmtTaken = (t) => t ? `${(t.by || '').split('@')[0] || 'someone'} · ${new
 
 .sm-placing {
   display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 9px 13px;
-  border: 1.5px dashed var(--acc, #2563eb); border-radius: var(--radius);
-  background: var(--acs, rgba(37,99,235,.08)); font-size: 0.85rem;
+  border: 1.5px dashed var(--acc); border-radius: var(--radius);
+  background: var(--acs); font-size: 0.85rem;
 }
 
 .sm-crumbs { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 0.85rem; }
@@ -1331,7 +1331,7 @@ const fmtTaken = (t) => t ? `${(t.by || '').split('@')[0] || 'someone'} · ${new
 .sm-unit-card:hover { filter: brightness(1.04); }
 .sm-unit-ic {
   flex: none; width: 40px; height: 40px; border-radius: 10px; font-size: 1rem;
-  background: var(--acs, rgba(37,99,235,.12)); color: var(--acc, #2563eb);
+  background: var(--acs); color: var(--acc);
   display: inline-flex; align-items: center; justify-content: center;
 }
 
@@ -1356,28 +1356,28 @@ const fmtTaken = (t) => t ? `${(t.by || '').split('@')[0] || 'someone'} · ${new
 .sm-box-mini { flex: none; display: grid; gap: 1px; width: 52px; }
 .sm-box-plain-ic {
   flex: none; width: 52px; height: 40px; border-radius: 8px; font-size: 1rem;
-  background: var(--acs, rgba(37,99,235,.1)); color: var(--acc, #2563eb);
+  background: var(--acs); color: var(--acc);
   display: inline-flex; align-items: center; justify-content: center;
 }
-.sm-mini-dot { width: 100%; aspect-ratio: 1; border-radius: 50%; background: var(--ln2, rgba(0,0,0,.14)); opacity: 0.6; }
+.sm-mini-dot { width: 100%; aspect-ratio: 1; border-radius: 50%; background: var(--ln2); opacity: 0.6; }
 .sm-add-box {
   height: 34px; padding: 0 12px; border-radius: 10px; font-size: 0.72rem; font-weight: 600;
   background: transparent; color: inherit; opacity: 0.55; cursor: pointer;
-  border: 1.5px dashed var(--ln2, rgba(0,0,0,.2)); box-shadow: none;
+  border: 1.5px dashed var(--ln2); box-shadow: none;
 }
-.sm-add-box:hover { opacity: 1; border-color: var(--acc, #2563eb); color: var(--acc, #2563eb); }
+.sm-add-box:hover { opacity: 1; border-color: var(--acc); color: var(--acc); }
 
 /* Cryo box grid */
 .sm-grid { display: grid; gap: 3px; min-width: 420px; }
 .sm-grid-label { display: flex; align-items: center; justify-content: center; font-size: 0.68rem; font-weight: 700; opacity: 0.45; }
 .sm-cell {
-  aspect-ratio: 1; border-radius: 50%; border: 1.5px solid var(--ln2, rgba(0,0,0,.12));
+  aspect-ratio: 1; border-radius: 50%; border: 1.5px solid var(--ln2);
   background: var(--panel-bg); cursor: pointer; position: relative;
   display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 40px;
 }
-.sm-cell:hover { border-color: var(--acc, #2563eb); }
+.sm-cell:hover { border-color: var(--acc); }
 .sm-cell.placing { border-style: dashed; }
-.sm-cell.pulse { animation: sm-pulse 0.8s ease 2; border-color: var(--acc, #2563eb); }
+.sm-cell.pulse { animation: sm-pulse 0.8s ease 2; border-color: var(--acc); }
 @keyframes sm-pulse { 0% { box-shadow: 0 0 0 0 rgba(37,99,235,.55); } 100% { box-shadow: 0 0 0 12px rgba(37,99,235,0); } }
 .sm-cell-chip {
   max-width: 92%; padding: 1px 5px; border-radius: 8px; color: #fff;
@@ -1397,18 +1397,18 @@ const fmtTaken = (t) => t ? `${(t.by || '').split('@')[0] || 'someone'} · ${new
   cursor: pointer; color: inherit; box-shadow: none; font: inherit; min-width: 0;
 }
 .sm-loc-card:hover { filter: brightness(1.04); }
-.sm-loc-card.open { border-color: var(--acc, #2563eb); }
+.sm-loc-card.open { border-color: var(--acc); }
 .sm-loc-ic { width: 34px; height: 34px; font-size: 0.9rem; }
 .sm-loc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .sm-loc-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sm-loc-meta { font-size: 0.7rem; opacity: 0.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sm-loc-hint { font-size: 0.68rem; color: var(--acc, #2563eb); }
+.sm-loc-hint { font-size: 0.68rem; color: var(--acc); }
 .sm-loc-chev { flex: none; font-size: 0.7rem; opacity: 0.4; }
 
-.sm-loc-panel { margin-top: 10px; border: 1px solid var(--acc, #2563eb); border-radius: var(--radius); overflow: hidden; }
+.sm-loc-panel { margin-top: 10px; border: 1px solid var(--acc); border-radius: var(--radius); overflow: hidden; }
 .sm-loc-panel-head {
   display: flex; gap: 8px; align-items: center; padding: 9px 12px; font-size: 0.85rem;
-  background: var(--acs, rgba(37,99,235,.07)); border-bottom: 1px solid var(--border);
+  background: var(--acs); border-bottom: 1px solid var(--border);
 }
 .sm-loc-items { max-height: 300px; overflow-y: auto; padding: 6px 12px; }
 .sm-loc-row {

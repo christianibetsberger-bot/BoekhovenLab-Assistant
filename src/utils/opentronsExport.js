@@ -222,6 +222,66 @@ export const columnPositions = (lw) => lw.rows === 1 ? wellNamesOf(lw) : Array.f
 export const columnWells = (lw, address) => lw.rows === 1 ? [address] : ROWS.slice(0, lw.rows).split('').map(r => `${r}${address.slice(1)}`)
 // Two wells count as "the same volume" when they agree to the hundredth of a µL.
 export const MULTI_TOL = 0.005
+
+// ── Partial tip pickup ───────────────────────────────────────────────────────
+// An OT-2 8-channel can work with only some of its nozzles tipped
+// (`configure_nozzle_layout(style=PARTIAL_COLUMN, …)`, apiLevel 2.20 and newer).
+// The tipped nozzles are always the bottom ones, counted up from H1, so a stroke
+// covers the N rows ENDING at the well it addresses: four nozzles at D1 reach
+// A1–D1. Addressing row A with more than one nozzle puts the rest off the plate,
+// which is the crash the Opentrons docs warn about — hence the "last well" rule.
+export const PARTIAL_MIN_API = '2.20'
+export const partialEndNozzle = (n) => `${ROWS[8 - n]}1`
+// Tipped from the front, the pipette body hangs further back, so it fouls
+// anything tall in the slot DIRECTLY BEHIND the one it is reaching into. The
+// robot refuses such a move outright (PartialTipMovementNotAllowedError).
+// Measured against opentrons 8.8.2: 56 mm clears, 65 mm does not; only the
+// slot behind matters, and the back row has nothing behind it.
+export const PARTIAL_REAR_MAX_HEIGHT_MM = 57
+// Slot 12 counts: the fixed trash bin stands there, tall, directly behind slot 9.
+// The robot's own check misses it — the trash is a TrashBin, not deck labware, so
+// `deck["12"]` is empty and the protocol analyses clean, then fouls at run time.
+export const TRASH_SLOT = '12'
+export const slotBehind = (slot) => { const n = Number(slot) + 3; return n <= 12 ? String(n) : null }
+export const tooTallBehindPartial = (lw) => !!lw && lw.h > PARTIAL_REAR_MAX_HEIGHT_MM
+// Any module is tall enough to foul the move, whatever sits on it — verified for
+// the Thermocycler, Temperature Module, Heater-Shaker and Magnetic Module. The
+// one exception is a module reaching over itself: the Thermocycler covers 7, 8,
+// 10 and 11, and pipetting into its own plate on slot 7 is fine.
+export const blocksPartialBehind = (rear, front) => {
+  if (rear?.fixedTrash) return true
+  if (!rear) return false
+  if (rear.module && front?.module && rear.moduleType === front.moduleType) return false
+  return !!rear.module || tooTallBehindPartial(rear.lw)
+}
+/**
+ * The strokes a partly tipped 8-channel can do over `wellIds`: one contiguous
+ * run per column, every run the same length. Returns null when that is not what
+ * the selection looks like, and the single-channel takes over instead.
+ */
+export function partialColumnGroups(wellIds, format) {
+  if (format !== 96 && format !== 'pcr8') return null      // a 384's nozzle pitch skips every other row
+  const byCol = new Map()
+  for (const w of wellIds) {
+    const r = ROWS.indexOf(w[0]), c = Number(w.slice(1))
+    if (r < 0 || r > 7 || !(c >= 1)) return null
+    if (!byCol.has(c)) byCol.set(c, [])
+    byCol.get(c).push(r)
+  }
+  let n = 0
+  const out = []
+  for (const c of [...byCol.keys()].sort((a, b) => a - b)) {
+    const rows = byCol.get(c).sort((a, b) => a - b)
+    if (rows.some((r, i) => i > 0 && r !== rows[i - 1] + 1)) return null   // a gap — not one stroke
+    if (!n) n = rows.length
+    else if (rows.length !== n) return null                               // one nozzle layout per step
+    out.push({ address: `${ROWS[rows[rows.length - 1]]}${c}`, wells: rows.map(r => `${ROWS[r]}${c}`) })
+  }
+  // Sample wells are handed out in blocks of n inside an 8-row column, so a block
+  // never straddles two columns: n has to divide 8 (2 or 4; 8 is the whole column).
+  if (!(n >= 2 && n <= 7) || 8 % n !== 0) return null
+  return { n, groups: out }
+}
 /** The groups of eight target wells an 8-channel fills in one stroke, per plate format. */
 export function multiGroups(format) {
   if (format === 'pcr8') return [{ address: 'A1', wells: ROWS.slice(0, 8).split('').map(r => `${r}1`) }]
@@ -270,8 +330,8 @@ export function newOt2Step(type) {
     case 'delay':         return { ...base, minutes: 10, seconds: 0, message: '' }
     case 'pause':         return { ...base, message: 'Continue when ready' }
     case 'mix':           return { ...base, wells: 'all', reps: 3, volume: '', pipette: 'auto', newTip: 'always' }
-    case 'sample':        return { ...base, wells: 'all', volume: 10, pipette: 'auto', newTip: 'always', mixBeforeReps: 0, mixBeforeUl: '', quenchName: '', quenchUl: '' }
-    case 'series':        return { ...base, count: 6, intervalMinutes: 30, firstAtZero: true, wells: 'all', volume: 10, pipette: 'auto', newTip: 'always', mixBeforeReps: 0, mixBeforeUl: '', quenchName: '', quenchUl: '', pauseEvery: 0, pauseMessage: '' }
+    case 'sample':        return { ...base, wells: 'all', volume: 10, pipette: 'auto', multi: 'partial', newTip: 'always', mixBeforeReps: 0, mixBeforeUl: '', quenchName: '', quenchUl: '' }
+    case 'series':        return { ...base, count: 6, intervalMinutes: 30, firstAtZero: true, wells: 'all', volume: 10, pipette: 'auto', multi: 'partial', newTip: 'always', mixBeforeReps: 0, mixBeforeUl: '', quenchName: '', quenchUl: '', pauseEvery: 0, pauseMessage: '' }
     case 'comment':       return { ...base, text: '' }
     case 'custom':        return { ...base, code: '' }
     default:              return base
@@ -284,16 +344,23 @@ export function defaultOt2Config(plate) {
     protocolName: plate?.name || 'Plate',
     author: '',
     description: '',
+    // A prefilled plate is pipetted by hand and put on the robot ready to go:
+    // no build step, and none of its stocks need a place on the deck.
+    prefilled: false,
     pipettes: { left: 'p300_single_gen2', right: 'p20_single_gen2' },
     tipRacks: { left: '', right: '' },          // '' = the pipette's default rack
     flowRates: { left: { aspirate: '', dispense: '' }, right: { aspirate: '', dispense: '' } },
     target: { on: 'deck', slot: '1', labware: defaultTargetLabware(plate?.format) },
     modules: { thermocycler: 'thermocyclerModuleV1', temperature: 'temperature module gen2', heaterShaker: 'heaterShakerModuleV1', magnetic: 'magnetic module gen2' },
-    deck: { stocks: '4', bulk: '5', samples: '2', column: '6', temperature: '9', heaterShaker: '10', magnetic: '3' },
+    deck: { stocks: '4', bulk: '5', column: '6', temperature: '9', heaterShaker: '10', magnetic: '3' },
     stocksLabware: 'opentrons_24_tuberack_nest_1.5ml_snapcap',
     bulkLabware: 'opentrons_15_tuberack_falcon_15ml_conical',
     columnLabware: 'nest_12_reservoir_15ml',           // where the 8-channel draws from
     samplesLabware: 'nest_96_wellplate_100ul_pcr_full_skirt',
+    sampleSlots: ['2'],                         // one slot per sample plate, filled in this order
+    // Labware Position Check offsets, keyed "<load name>@<slot>": an offset is
+    // measured for one labware type in one place, so it must not follow either.
+    offsets: {},
     headroomPct: 20,
     compounds: {},                              // key -> { included, position: 'stocks:A1' | 'bulk:A1' | '' }
     steps: [newOt2Step('build')],
@@ -311,7 +378,12 @@ export function normalizeOt2Config(cfg, plate) {
   c.modules = { ...d.modules, ...(cfg?.modules || {}) }
   c.deck = { ...d.deck, ...(cfg?.deck || {}) }
   c.compounds = { ...(cfg?.compounds || {}) }
+  c.offsets = { ...(cfg?.offsets || {}) }
   c.steps = Array.isArray(cfg?.steps) && cfg.steps.length ? cfg.steps.map(s => ({ ...newOt2Step(s.type), ...s })) : d.steps
+  // The single sample slot of older configs becomes the first of the list.
+  const slots = Array.isArray(cfg?.sampleSlots) ? cfg.sampleSlots.map(String).filter(Boolean) : (cfg?.deck?.samples ? [String(cfg.deck.samples)] : [])
+  c.sampleSlots = slots.length ? [...new Set(slots)] : d.sampleSlots
+  delete c.deck.samples
   return c
 }
 
@@ -427,6 +499,63 @@ export function loadVolume(demandUl, headroomPct) {
 }
 export const fmtUl = (v) => v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 1 : 2).replace(/\.?0+$/, '')} mL` : `${round2(v)} µL`
 
+// ── Labware Position Check offsets ───────────────────────────────────────────
+// An offset belongs to one labware type in one place — a plate sits differently
+// on the Thermocycler than on the deck — so it is keyed by both and is dropped
+// by itself when either changes. Positive x/y/z move right, back and up, in mm.
+export const offsetKey = (labwareName, slot) => `${labwareName}@${slot}`
+/** The offset to apply, or null when there is none or it is all zeros. */
+export function offsetFor(cfg, labwareName, slot) {
+  const o = cfg?.offsets?.[offsetKey(labwareName, slot)]
+  if (!o) return null
+  const x = num(o.x) || 0, y = num(o.y) || 0, z = num(o.z) || 0
+  return x || y || z ? { x: round2(x), y: round2(y), z: round2(z) } : null
+}
+// set_offset() exists from 2.12, was removed for 2.14–2.17, and is back from
+// 2.18 on. The robot refuses the file outright in that gap.
+export const OFFSET_API_GAP = ['2.14', '2.17']
+export const offsetsWorkAt = (level) => {
+  const [a, b] = String(level).split('.').map(Number)
+  if (!(a >= 2)) return false
+  return a > 2 || (b >= 12 && b <= 13) || b >= 18
+}
+
+/**
+ * Read `set_offset()` lines as the Opentrons App's "Get Labware Offset Data"
+ * writes them: a load per labware (sometimes through a module or adapter), then
+ * the offset on that variable. Returns one entry per offset, with the slot it
+ * belongs to, so the caller can match it against its own deck.
+ */
+export function parseLabwareOffsets(text) {
+  const at = new Map()      // variable -> { name, slot }
+  const slotOf = new Map()  // module/adapter variable -> slot
+  const out = []
+  const loc = (s) => String(s ?? '').replace(/^["']|["']$/g, '')
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const l = raw.trim()
+    let m
+    if ((m = /^(\w+)\s*=\s*protocol\.load_(?:module|adapter)\(\s*["']([^"']+)["']\s*(?:,\s*(?:location\s*=\s*)?(["']?[\w.]+["']?))?\s*\)/.exec(l))) {
+      // A Thermocycler has no location argument — it always sits on slot 7.
+      slotOf.set(m[1], m[3] ? loc(m[3]) : (/thermocycler/i.test(m[2]) ? '7' : ''))
+      if (/adapter/.test(l)) at.set(m[1], { name: m[2], slot: m[3] ? loc(m[3]) : '' })
+      continue
+    }
+    if ((m = /^(\w+)\s*=\s*protocol\.load_labware\(\s*["']([^"']+)["']\s*,\s*(?:location\s*=\s*)?(["']?[\w.]+["']?)/.exec(l))) {
+      at.set(m[1], { name: m[2], slot: loc(m[3]) })
+      continue
+    }
+    if ((m = /^(\w+)\s*=\s*(\w+)\.load_labware\(\s*["']([^"']+)["']/.exec(l))) {
+      at.set(m[1], { name: m[3], slot: slotOf.get(m[2]) ?? at.get(m[2])?.slot ?? '' })
+      continue
+    }
+    if ((m = /^(\w+)\s*\.set_offset\(\s*(?:x\s*=\s*)?(-?[\d.]+)\s*,\s*(?:y\s*=\s*)?(-?[\d.]+)\s*,\s*(?:z\s*=\s*)?(-?[\d.]+)\s*\)/.exec(l))) {
+      const w = at.get(m[1])
+      if (w) out.push({ labware: w.name, slot: w.slot, x: Number(m[2]), y: Number(m[3]), z: Number(m[4]) })
+    }
+  }
+  return out
+}
+
 // Wrap a Python list of literal items to ~96 columns, continuation-indented.
 function pyList(items, indent) {
   const pad = ' '.repeat(indent)
@@ -476,6 +605,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     const short = p.def.name.replace(/_gen2$/, '').replace(/_single$/, '').replace(/_multi$/, 'm')
     p.var = pipettes.filter(q => q !== p && q.def.name === p.def.name).length ? `${short}_${p.mount}` : short
     p.tipVar = `tips_${p.var}`
+    p.nozzles = 8
   }
   const singles = pipettes.filter(p => p.def.channels === 1)
   const multis = pipettes.filter(p => p.def.channels === 8)
@@ -532,7 +662,13 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   const demands = plateDemands(plate).map(d => ({ ...d, included: cfg.compounds?.[d.key]?.included !== false, position: cfg.compounds?.[d.key]?.position || '' }))
   const included = demands.filter(d => d.included)
 
-  const steps = (cfg.steps || []).filter(s => s && s.type)
+  // A prefilled plate arrives on the robot already pipetted: its stocks stay off
+  // the deck (freeing those slots for sample plates and tip racks), and a build
+  // step left over from before has nothing to do.
+  const prefilled = !!cfg.prefilled
+  const allSteps = (cfg.steps || []).filter(s => s && s.type)
+  if (prefilled && allSteps.some(s => s.type === 'build')) warn('The plate is filled by hand, so the Build plate step was skipped. Remove it, or untick "already filled" to have the robot build the plate.')
+  const steps = prefilled ? allSteps.filter(s => s.type !== 'build') : allSteps
   const stepsOf = (...types) => steps.filter(s => types.includes(s.type))
 
   // Quench liquids from sampling steps are sources too: they need a tube and a
@@ -548,7 +684,9 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     if (!quenchDemands.has(key)) quenchDemands.set(key, { key, name: qn, code: '', invId: '', stock: null, unit: '', isFill: false, linked: false, isQuench: true, transfers: [], totalUl: 0, included: true, position: cfg.compounds?.[key]?.position || '' })
     quenchDemands.get(key).totalUl += qv * n * quenchStepCount(s)
   }
-  const sources = [...included, ...quenchDemands.values()]
+  // What the robot draws from a tube or trough. A prefilled plate contributes
+  // nothing here — only the quench liquids a sampling step pours still need one.
+  const sources = prefilled ? [...quenchDemands.values()] : [...included, ...quenchDemands.values()]
 
   const usesTC = targetOn === 'thermocycler' || stepsOf('thermocycler', 'tc_profile').length > 0
   const usesTemp = targetOn === 'temperature' || stepsOf('temperature').length > 0
@@ -604,6 +742,9 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     return wells
   }
   const samplesLw = usesSamples ? (labwareByName(cfg.samplesLabware) || labwareByName('nest_96_wellplate_100ul_pcr_full_skirt')) : null
+  // Several sample plates side by side on the deck are filled one after the
+  // other, so the run only stops when the last of them is full.
+  const sampleSlots = [...new Set((Array.isArray(cfg.sampleSlots) && cfg.sampleSlots.length ? cfg.sampleSlots : ['2']).map(String))]
   const selectionPre = new Map()   // step id -> { wells, groups } for sampling and mixing
   for (const s of stepsOf('sample', 'series', 'mix')) {
     const label = s.type === 'series' ? 'Sampling series' : s.type === 'sample' ? 'Take samples' : 'Mix wells'
@@ -620,7 +761,20 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         mg = []
       }
     }
-    selectionPre.set(s.id, { wells, groups: mg })
+    // Fewer than eight wells in a column is still one stroke if the 8-channel
+    // picks up only some tips — far cheaper than well-by-well single-channel.
+    let nozzles = 8
+    if (!mg.length && s.type !== 'mix' && s.multi !== 'off' && multis.length && !mountIsSingle(s.pipette) && wells.length) {
+      const pc = partialColumnGroups([...tw], format)
+      const vol = num(s.volume)
+      if (pc && s.multi === 'partial') {
+        if (!apiAtLeast(cfg.apiLevel, PARTIAL_MIN_API)) warn(`${label}: ${pc.n} wells per column could be taken in one stroke by the 8-channel, but partial tip pickup needs apiLevel ${PARTIAL_MIN_API} or newer. The single-channel takes them one at a time.`)
+        else if (vol > 0 && !multiCanDo(vol)) warn(`${label}: ${pyNum(vol)} µL is below what any loaded 8-channel can pipette, so the single-channel takes these samples.`)
+        else if (samplesLw && samplesLw.rows !== 8) warn(`${label}: the 8-channel needs an 8-row sample labware and ${samplesLw.label} is not one — the single-channel takes these samples.`)
+        else { mg = pc.groups; nozzles = pc.n }
+      }
+    }
+    selectionPre.set(s.id, { wells, groups: mg, nozzles })
     if (mg.length && s.type !== 'mix') {
       const qn = String(s.quenchName || '').trim()
       const q = qn ? quenchDemands.get('quench:' + qn.toLowerCase()) : null
@@ -672,7 +826,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     if (d.overCapacity) warn(`${d.name} needs about ${fmtUl(d.loadUl)} but one ${racks[d.rack].lw.label} position holds ${fmtUl(d.capacityUl)} — put it in the bulk labware, or choose a larger one.`)
   }
   for (const r of Object.values(racks)) if (r.any) occupy(r.slot, r.label, { lw: r.lw, role: r.var })
-  if (samplesLw) occupy(String(cfg.deck.samples || '2'), 'the sample labware', { lw: samplesLw, role: 'samples' })
+  if (samplesLw) sampleSlots.forEach((slot, i) => occupy(slot, sampleSlots.length > 1 ? `sample plate ${i + 1} of ${sampleSlots.length}` : 'the sample labware', { lw: samplesLw, role: 'samples' }))
 
   // What the Heater-Shaker's neighbours may be — the robot refuses the rest at load time.
   if (usesHS) {
@@ -744,31 +898,39 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   // Sampling: destinations are handed out column by column, continuing across
   // steps and across sample plates. 8-channel sampling starts on a fresh column.
   let sampleCursor = 0
-  let samplePlateIdx = 0, sampleSwaps = 0
+  let sampleLoadIdx = 0, sampleSwaps = 0
   const samplePlans = new Map()
   for (const s of stepsOf('sample', 'series')) {
     const label = s.type === 'series' ? 'Sampling series' : 'Take samples'
     const pre = selectionPre.get(s.id)
     const multi = pre.groups.length > 0
+    const nz = multi ? pre.nozzles : 1                     // nozzles tipped per stroke
+    const perCol = multi ? Math.floor(8 / nz) : 1          // strokes one column of tips covers
     const units = multi ? pre.groups.map(g => g.address) : pre.wells.map(targetWell)
     const vol = num(s.volume) || 0
     if (!(vol > 0)) warn(`${label}: sample volume must be a positive number of µL.`)
     const count = s.type === 'series' ? Math.max(1, Math.floor(Number(s.count) || 0)) : 1
     const pref = multi ? s.pipette : (mountIsMulti(s.pipette) ? 'auto' : s.pipette)
     const p = vol > 0 ? choosePipette(vol, pref, `${label} (${pyNum(vol)} µL)`, { multi }) : null
-    // Where each time point goes: an absolute index across as many sample plates
-    // as the run needs. A time point never straddles two plates; when the plate
-    // is full the robot pauses so a fresh one can be put in, and continues at A1.
+    // Where each time point goes: an absolute index across every sample well the
+    // run will ever use. Wells are spent in one unbroken run, so a plate is filled
+    // to its last well before the next one is started, and a time point that meets
+    // the edge simply carries on into the plate beside it. Only the end of the
+    // whole deck load forces a jump, since that is where the robot has to pause.
     const capacity = samplesLw ? samplesLw.rows * samplesLw.cols : 0
-    const perPoint = units.length * (multi ? 8 : 1)
-    if (capacity && perPoint > capacity) warn(`${label}: one time point needs ${perPoint} sample wells but the ${samplesLw.label} has ${capacity} — sample fewer wells or choose a larger labware.`)
+    const deckCapacity = capacity * sampleSlots.length
+    const perPoint = units.length * nz
+    if (deckCapacity && perPoint > deckCapacity) warn(`${label}: one time point needs ${perPoint} sample wells but the ${sampleSlots.length > 1 ? `${sampleSlots.length} × ` : ''}${samplesLw.label} on the deck hold ${deckCapacity} — sample fewer wells, add a sample plate, or split the step in two.`)
     const starts = [], fresh = new Set()
-    let abs = multi ? Math.ceil(sampleCursor / 8) * 8 : sampleCursor
+    // A single stroke still has to sit inside one column, so the cursor keeps to a
+    // multiple of the nozzle count — which divides 8, and a plate holds a whole
+    // number of 8-well columns, so no stroke can straddle two plates either.
+    let abs = multi ? Math.ceil(sampleCursor / nz) * nz : sampleCursor
     for (let i = 0; i < count; i++) {
-      if (capacity && perPoint <= capacity && (abs % capacity) + perPoint > capacity) abs = Math.ceil(abs / capacity) * capacity
-      const plateIdx = capacity ? Math.floor(abs / capacity) : 0
-      if (plateIdx > samplePlateIdx) { fresh.add(i); samplePlateIdx = plateIdx }
-      starts.push(capacity ? abs % capacity : abs)
+      if (deckCapacity && perPoint <= deckCapacity && (abs % deckCapacity) + perPoint > deckCapacity) abs = Math.ceil(abs / deckCapacity) * deckCapacity
+      const loadIdx = deckCapacity ? Math.floor(abs / deckCapacity) : 0
+      if (loadIdx > sampleLoadIdx) { fresh.add(i); sampleLoadIdx = loadIdx }
+      starts.push(deckCapacity ? abs % deckCapacity : abs)
       abs += perPoint
     }
     sampleCursor = abs
@@ -779,15 +941,17 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     const quench = qn && qv > 0 ? quenchDemands.get('quench:' + qn.toLowerCase()) : null
     const qMulti = !!(multi && quench?.useMulti)
     const qp = quench ? choosePipette(qv, 'auto', `${label}: quench "${qn}"`, { multi: qMulti }) : null
-    const tipsPerPoint = p ? (s.newTip === 'once' ? 1 : units.length * strokes(p, vol)) : 0
+    // Tips are counted in whole columns of a rack; a partial stroke spends only
+    // part of one, which is the point of it.
+    const tipsPerPoint = p ? (s.newTip === 'once' ? 1 : units.length * strokes(p, vol)) / perCol : 0
     tipCount(p, tipsPerPoint * count)
-    if (quench) tipCount(qp, count)
+    if (quench) tipCount(qp, count / (qMulti ? perCol : 1))
     if (s.type === 'series') {
       const iv = num(s.intervalMinutes)
       if (!(iv > 0)) warn('Sampling series: the interval must be a positive number of minutes.')
     }
     const pauseEvery = s.type === 'series' ? Math.max(0, Math.floor(Number(s.pauseEvery) || 0)) : 0
-    samplePlans.set(s.id, { wells: pre.wells, units, multi, vol, count, pip: p, start, starts, fresh, quench, qp, qv, qMulti, tipsPerPoint, pauseEvery, pauseMessage: oneLine(s.pauseMessage || 'Scheduled check — do what is needed, then resume') })
+    samplePlans.set(s.id, { wells: pre.wells, units, multi, nz, perCol, groups: pre.groups, vol, count, pip: p, start, starts, fresh, capacity, quench, qp, qv, qMulti, tipsPerPoint, pauseEvery, pauseMessage: oneLine(s.pauseMessage || 'Scheduled check — do what is needed, then resume') })
   }
   for (const s of stepsOf('mix')) {
     const pre = selectionPre.get(s.id)
@@ -802,21 +966,48 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     samplePlans.set(s.id, { wells: pre.wells, units, multi, vol: p ? Math.min(vol, p.def.max) : vol, pip: p })
   }
   flushTallies()
+  const partialPlans = [...samplePlans.values()].filter(pl => pl.multi && pl.nz < 8)
+  const usesPartial = partialPlans.length > 0
+  // Every slot a partly tipped pipette reaches into. Whatever sits behind one of
+  // these has to be short, so tip racks must keep out of those slots.
+  const targetPlateSlot = targetOn === 'deck' ? targetSlot : targetOn === 'thermocycler' ? '7' : targetOn === 'temperature' ? String(cfg.deck.temperature) : String(cfg.deck.heaterShaker)
+  const partialPipettes = new Set(partialPlans.flatMap(pl => [pl.pip, pl.qMulti ? pl.qp : null]).filter(Boolean))
+  const partialReach = new Set()
+  if (usesPartial) {
+    partialReach.add(targetPlateSlot)
+    for (const s of sampleSlots) partialReach.add(s)
+    for (const pl of partialPlans) if (pl.qMulti && pl.quench?.rack) partialReach.add(racks[pl.quench.rack].slot)
+  }
+  const rearOfReach = new Set([...partialReach].map(slotBehind).filter(Boolean))
+  // What occupies the slot behind `s` — the fixed trash is always in slot 12.
+  const behindEntry = (b) => b === TRASH_SLOT ? { what: 'the fixed trash', fixedTrash: true } : occupancy[b]
 
   // ── Tip racks: as many as the count needs, in the free slots ──
   // Slots beside the Heater-Shaker come last (and never left/right of it for a
   // rack taller than it allows); the racks are all taller than a plate.
   const hsNeighbours = usesHS ? adjacentSlots(hsSlot) : []
   const hsSides = usesHS ? adjacentSlots(hsSlot, { xOnly: true }) : []
-  const freeSlots = (lw) => {
-    const free = TIP_SLOT_ORDER.filter(s => !occupancy[s] && !(tooTallBesideHS(lw) && hsSides.includes(s)))
+  const freeSlots = (lw, p, allowBlocked = false) => {
+    let free = TIP_SLOT_ORDER.filter(s => !occupancy[s] && !(tooTallBesideHS(lw) && hsSides.includes(s))
+      // A rack is tall: it must not land behind anything a partial stroke reaches.
+      && !(tooTallBehindPartial(lw) && rearOfReach.has(s)))
+    // A rack the partial pipette itself visits needs a clear slot behind it too —
+    // a module or the trash there is as much of an obstacle as tall labware. This
+    // is a hard filter: one rack fewer only costs a refill pause, whereas a rack
+    // in a blocked slot fails the run outright when the pipette reaches for it.
+    if (p && partialPipettes.has(p) && !allowBlocked) {
+      free = free.filter(s => { const b = slotBehind(s); return !b || !blocksPartialBehind(behindEntry(b), null) })
+    }
     return [...free.filter(s => !hsNeighbours.includes(s)), ...free.filter(s => hsNeighbours.includes(s))]
   }
-  const takeRack = (p) => {
-    const slot = freeSlots(p.tipLw)[0]
+  const takeRack = (p, { allowBlocked = false } = {}) => {
+    const slot = freeSlots(p.tipLw, p, allowBlocked)[0]
     if (!slot) return false
     occupancy[slot] = { what: `${p.tipLw?.label || p.tipName} (${p.var})`, lw: p.tipLw, role: 'tips', pipette: p.var }
     p.tipSlots.push(slot)
+    // The partial pipette now reaches into this slot as well, so whatever sits
+    // behind it must stay short — no later rack may take that place.
+    if (partialPipettes.has(p)) { const b = slotBehind(slot); if (b) rearOfReach.add(b) }
     return true
   }
   const racksNeeded = (p) => p.tipsNeeded > 0 ? Math.ceil(p.tipsNeeded / p.perRack) : 0   // none for a pipette that never picks up a tip
@@ -824,6 +1015,9 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     p.perRack = p.def.channels === 8 ? 12 : 96     // an 8-channel empties a rack in 12 pickups
     p.tipSlots = []
     for (let i = 0; i < racksNeeded(p); i++) if (!takeRack(p)) break
+    // A pipette with no rack at all cannot pick up a single tip, so for that one
+    // case a flagged slot still beats nothing.
+    if (!p.tipSlots.length && p.tipsNeeded > 0) takeRack(p, { allowBlocked: true })
   }
   // A pipette left without any rack would stop the run at its first pickup,
   // whereas one rack fewer for another pipette only means one more refill pause:
@@ -839,9 +1033,28 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     const need = racksNeeded(p)
     if (p.tipSlots.length >= need) continue
     const unit = p.def.channels === 8 ? 'tip columns' : 'tips'
-    if (!p.tipSlots.length) warn(`No slot is free for a tip rack of the ${p.def.label}, which needs ${p.tipsNeeded} ${unit} — the run would stop at its first pickup. Free a slot: a smaller sample labware, fewer sources, or one pipette for everything.`)
-    else warn(`${p.def.label} needs ${p.tipsNeeded} ${unit} (${need} racks) but only ${p.tipSlots.length} rack${p.tipSlots.length === 1 ? '' : 's'} fit on the deck — the run will pause ${Math.ceil(p.tipsNeeded / p.tipCapacity) - 1}× for you to refill them. "One tip per stock" needs far fewer.`)
+    if (!p.tipSlots.length) warn(`No slot is free for a tip rack of the ${p.def.label}, which needs ${Math.ceil(p.tipsNeeded)} ${unit} — the run would stop at its first pickup. Free a slot: a smaller sample labware, fewer sources, or one pipette for everything.`)
+    else warn(`${p.def.label} needs ${Math.ceil(p.tipsNeeded)} ${unit} (${need} racks) but only ${p.tipSlots.length} rack${p.tipSlots.length === 1 ? '' : 's'} fit on the deck — the run will pause ${Math.ceil(p.tipsNeeded / p.tipCapacity) - 1}× for you to refill them. "One tip per stock" needs far fewer.`)
   }
+  // However the racks landed, name every rear-slot clash the robot would refuse.
+  if (usesPartial) {
+    const reach = new Set(partialReach)
+    for (const pl of partialPlans) {
+      for (const s of pl.pip?.tipSlots || []) reach.add(s)
+      if (pl.qMulti) for (const s of pl.qp?.tipSlots || []) reach.add(s)
+    }
+    for (const s of [...reach].sort((a, b) => Number(a) - Number(b))) {
+      const b = slotBehind(s)
+      const o = b ? behindEntry(b) : null
+      if (!blocksPartialBehind(o, occupancy[s])) continue
+      const fix = `Move what is in slot ${s} to a slot with nothing, or nothing over ${PARTIAL_REAR_MAX_HEIGHT_MM} mm, behind it — or set this step's 8-channel to "whole columns only".`
+      // The trash is the one obstacle the robot's own analysis misses, so the
+      // file uploads clean and only fails once the run reaches that slot.
+      if (o.fixedTrash) warn(`Partial tip pickup: the fixed trash stands behind slot ${s}, and a partly tipped 8-channel fouls it reaching in there. The Opentrons App does NOT catch this — the trash is not deck labware, so the protocol analyses cleanly and then fails mid-run. ${fix}`)
+      else warn(`Partial tip pickup: ${o.module ? `${o.what} in slot ${b}` : `${o.what} in slot ${b} is ${Math.round(o.lw.h)} mm tall and`} sits behind slot ${s}, which the 8-channel reaches into with only some of its nozzles tipped — the robot refuses that move (PartialTipMovementNotAllowedError). ${fix}`)
+    }
+  }
+
   // When any pipette will run dry, the protocol keeps its own count and pauses
   // for a refill just before the step that would fail.
   const needRefill = pipettes.some(p => p.tipsNeeded > p.tipCapacity)
@@ -935,6 +1148,14 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   const deckRows = deckEntries.map(([slot, o]) => [slot, o.what])
   for (const [slot, what] of deckRows) H.push(`#   slot ${slot.padStart(2)}  ${what}`)
   H.push('#   slot 12  fixed trash')
+  if (prefilled && included.length) {
+    H.push('#')
+    H.push('# PIPETTE THE PLATE BY HAND BEFORE STARTING  (the robot does not build it)')
+    for (const d of included) {
+      const desc = `${d.code ? '[' + d.code + '] ' : ''}${d.name}${d.stock != null ? ` (${pyNum(d.stock)} ${d.unit})` : ''}`
+      H.push(`#   ${oneLine(desc).padEnd(54)} ${String(d.transfers.length).padStart(3)} well${d.transfers.length === 1 ? ' ' : 's'}   ${fmtUl(d.totalUl).padStart(9)} in total`)
+    }
+  }
   if (sources.length) {
     H.push('#')
     H.push('# LIQUIDS TO LOAD  (position — liquid — load at least; demand)')
@@ -946,15 +1167,14 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
       H.push(`#   ${d.rack.padEnd(9)} ${d.well.padEnd(4)} ${oneLine(desc).padEnd(44)} ≥ ${fmtUl(d.loadUl).padStart(9)}   (${fmtUl(d.totalUl)} into ${d.isQuench ? 'sample wells' : `${d.transfers.length} well${d.transfers.length === 1 ? '' : 's'}`})${spread}`)
     }
   }
-  if (warnings.length) {
-    H.push('#')
-    H.push('# CHECK BEFORE RUNNING')
-    for (const w of warnings) H.push(`#   - ${oneLine(w)}`)
-  }
+  // Both blocks are spliced in once the body has been written: the offsets are
+  // only known then, and so are the warnings the emission itself raises.
+  const headerAt = H.length
   H.push('#')
   H.push('# Simulate before running:  opentrons_simulate this_file.py')
   H.push('')
   H.push('from opentrons import protocol_api')
+  if (usesPartial) H.push('from opentrons.protocol_api import ALL, PARTIAL_COLUMN')
   if (stepsOf('series').length) H.push('import time')
   H.push('')
   H.push('metadata = {')
@@ -978,6 +1198,17 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
 
   // Labware
   emit('# ── Labware ──')
+  // Labware Position Check offsets: mm to the right (x), to the back (y) and up
+  // (z) from the labware's nominal position, exactly what the Opentrons App's
+  // "Get Labware Offset Data" hands back. set_offset() overrides whatever the
+  // App has stored, so the file carries its own calibration and runs as it is.
+  const appliedOffsets = []
+  const emitOffset = (expr, lwName, slot, what) => {
+    const o = offsetFor(cfg, lwName, slot)
+    if (!o) return
+    appliedOffsets.push({ slot: String(slot), labware: lwName, what, ...o })
+    emit(`${expr}.set_offset(x=${pyNum(o.x)}, y=${pyNum(o.y)}, z=${pyNum(o.z)})`)
+  }
   const plateLabel = oneLine(plate?.name || 'Plate')
   const usedLabels = new Set()
   const uniqueLabel = (l) => { let s = l; let i = 2; while (usedLabels.has(s)) s = `${l} (${i++})`; usedLabels.add(s); return s }
@@ -988,16 +1219,32 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
                      temperature: `temp_mod.load_labware(${py(targetLw.name)}, label=${py(targetLabel)})`,
                      heater_shaker: `hs.load_labware(${py(targetLw.name)}, label=${py(targetLabel)})` }[targetOn]
     emit(`plate = ${loader}`)
+    emitOffset('plate', targetLw.name, plateSlot, `the plate "${plateLabel}"`)
   }
   for (const r of ['stocks', 'bulk', 'reservoir']) {
     if (!racks[r].any) continue
     const label = { stocks: 'Stocks', bulk: 'Bulk liquids', reservoir: '8-channel reservoir' }[r]
     emit(`${racks[r].var} = protocol.load_labware(${py(racks[r].lw.name)}, ${py(racks[r].slot)}, label=${py(uniqueLabel(label))})`)
+    emitOffset(racks[r].var, racks[r].lw.name, racks[r].slot, label)
   }
-  if (samplesLw) emit(`samples = protocol.load_labware(${py(samplesLw.name)}, ${py(String(cfg.deck.samples || '2'))}, label=${py(uniqueLabel('Samples'))})`)
+  // The sample plates are one list, and their wells one flat run of destinations
+  // across all of them, so a step only has to know how far along it is.
+  const sampleMulti = stepsOf('sample', 'series').some(s => samplePlans.get(s.id)?.multi)
+  if (samplesLw) {
+    if (sampleSlots.length === 1) emit(`sample_plates = [protocol.load_labware(${py(samplesLw.name)}, ${py(sampleSlots[0])}, label=${py(uniqueLabel('Samples'))})]`)
+    else {
+      emit('sample_plates = [')
+      sampleSlots.forEach((slot, i) => emit(`    protocol.load_labware(${py(samplesLw.name)}, ${py(slot)}, label=${py(uniqueLabel(`Samples ${i + 1}`))}),`))
+      emit(']')
+    }
+    sampleSlots.forEach((slot, i) => emitOffset(`sample_plates[${i}]`, samplesLw.name, slot, sampleSlots.length > 1 ? `sample plate ${i + 1}` : 'the sample labware'))
+    emit('sample_dests = [w for p in sample_plates for w in p.wells()]')
+    if (sampleMulti) emit('sample_dest_cols = [c[0] for p in sample_plates for c in p.columns()]')
+  }
   for (const p of pipettes) {
     if (!p.tipSlots.length) { emit(`${p.tipVar} = []  # ${p.tipsNeeded > 0 ? 'no free slot for a tip rack — see warnings' : 'this pipette is not used by any step'}`); continue }
     emit(`${p.tipVar} = [protocol.load_labware(${py(p.tipName)}, slot) for slot in [${p.tipSlots.map(py).join(', ')}]]`)
+    p.tipSlots.forEach((slot, i) => emitOffset(`${p.tipVar}[${i}]`, p.tipName, slot, `${p.tipLw?.label || p.tipName} (${p.var})`))
   }
   emit()
 
@@ -1013,12 +1260,17 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
 
   // Liquids
   const liquidSources = sources.filter(d => d.rack)
-  if (liquidSources.length && liquidsOk) {
+  // A prefilled plate declares its contents straight into the plate, so the
+  // Opentrons App shows what every well should already hold before the run.
+  const plateLiquids = prefilled ? included.filter(d => d.byTarget?.size) : []
+  if ((liquidSources.length || plateLiquids.length) && liquidsOk) {
     emit('# ── Liquids (the Opentrons App shows these in Labware Setup) ──')
-    const colors = assignColors(BOEKHOVEN_PALETTE, liquidSources.map(d => d.key))
-    liquidSources.forEach((d, i) => {
-      const desc = [d.code ? `[${d.code}]` : '', d.stock != null ? `${pyNum(d.stock)} ${d.unit}` : '', d.isFill ? 'fill-up' : '', d.isQuench ? 'quench' : ''].filter(Boolean).join(' ')
+    const all = [...liquidSources, ...plateLiquids]
+    const colors = assignColors(BOEKHOVEN_PALETTE, all.map(d => d.key))
+    all.forEach((d, i) => {
+      const desc = [d.code ? `[${d.code}]` : '', d.stock != null ? `${pyNum(d.stock)} ${d.unit}` : '', d.isFill ? 'fill-up' : '', d.isQuench ? 'quench' : '', d.rack ? '' : 'pipetted into the plate by hand'].filter(Boolean).join(' ')
       emit(`liq_${i + 1} = protocol.define_liquid(name=${py(oneLine(d.name))}, description=${py(desc)}, display_color=${py(colors[d.key] || '#0072B2')})`)
+      if (!d.rack) return                       // the plate's own contents follow, as a table
       // A reservoir column of an 8-row labware is eight wells sharing the load.
       const cw = d.rack === 'reservoir' ? columnWells(columnLw, d.well) : [d.well]
       const vol = pyNum(Math.min(d.loadUl, d.capacityUl || d.loadUl) / cw.length)
@@ -1026,6 +1278,32 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
       if (apiAtLeast(cfg.apiLevel, '2.22')) emit(`${d.rack}.load_liquid(wells=[${cw.map(py).join(', ')}], volume=${vol}, liquid=liq_${i + 1})`)
       else for (const w of cw) emit(`${d.rack}[${py(w)}].load_liquid(liquid=liq_${i + 1}, volume=${vol})`)
     })
+    // A hand-filled plate is a table of (liquid, [(µL, wells), …]) rather than one
+    // call per group: a 96-well plate can hold a hundred of them.
+    if (plateLiquids.length) {
+      emit('# What every well should already hold when the plate goes on the robot.')
+      emit('for liq, groups in [')
+      plateLiquids.forEach((d, j) => {
+        const byVol = new Map()
+        for (const [w, v] of d.byTarget) { const k = pyNum(v); if (!byVol.has(k)) byVol.set(k, []); byVol.get(k).push(w) }
+        emit(`    (liq_${liquidSources.length + j + 1}, [`)
+        for (const [vol, wells] of byVol) {
+          const list = wells.map(py).join(', ')
+          if (list.length <= 70) { emit(`        (${vol}, [${list}]),`); continue }
+          emit(`        (${vol}, [`)
+          for (const line of pyList(wells.map(py), 12)) emit(line)
+          emit('        ]),')
+        }
+        emit('    ]),')
+      })
+      emit(']:')
+      emit('    for vol, ws in groups:')
+      if (apiAtLeast(cfg.apiLevel, '2.22')) emit('        plate.load_liquid(wells=ws, volume=vol, liquid=liq)')
+      else {
+        emit('        for w in ws:')
+        emit('            plate[w].load_liquid(liquid=liq, volume=vol)')
+      }
+    }
     emit()
   }
 
@@ -1076,12 +1354,29 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   // put back afterwards, so a step that was set up keeps running.
   // `record` adds the same moves to the preview; the series loop records its
   // time points itself, since the code for them is written once but runs N times.
-  const beforePipetting = ({ record = true } = {}) => {
+  // The lid must be up for the pipette to reach the plate, and belongs down
+  // again whenever the block or the lid heater is on: a plate incubating with
+  // the lid open neither holds its temperature nor keeps its volume. So the lid
+  // also comes down after pipetting that found it open, which is what makes a
+  // sampling series on a heated Thermocycler close between time points.
+  // `loop` is for a body that runs many times over: it has to leave the lid the
+  // way it found it, so one that closes the lid at the end must open it at the
+  // start — the second time round it would otherwise pipette into a closed
+  // Thermocycler. Opening an open lid is a no-op on the robot.
+  const lidPlan = ({ loop = false } = {}) => {
+    if (targetOn !== 'thermocycler') return { open: false, close: false }
+    const close = !lidOpen || mod.tcBlock != null || mod.tcLidTemp != null
+    return { open: !lidOpen || (loop && close), close }
+  }
+  const beforePipetting = ({ record = true, loop = false } = {}) => {
     const undo = []
-    if (targetOn === 'thermocycler' && !lidOpen) {
+    const lid = lidPlan({ loop })
+    if (lid.open) {
       emit('tc.open_lid()'); lidOpen = true
       if (record) act({ kind: 'tc', text: 'Thermocycler: open the lid for pipetting', dst: { slot: '7', var: 'tc', wells: [] }, durationSec: 30 })
-      undo.push(() => { emit('tc.close_lid()'); lidOpen = false; if (record) act({ kind: 'tc', text: 'Thermocycler: close the lid again', dst: { slot: '7', var: 'tc', wells: [] }, durationSec: 30 }) })
+    }
+    if (lid.close) {
+      undo.push(() => { emit('tc.close_lid()'); lidOpen = false; if (record) act({ kind: 'tc', text: `Thermocycler: close the lid again${mod.tcBlock != null ? ` — the block stays at ${pyNum(mod.tcBlock)} °C` : ''}`, dst: { slot: '7', var: 'tc', wells: [] }, durationSec: 30 }) })
     }
     if (usesHS && hsRpm > 0) {
       const rpm = hsRpm
@@ -1090,6 +1385,15 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
       undo.push(() => { emit(`hs.set_and_wait_for_shake_speed(${pyNum(rpm)})`); hsRpm = rpm; if (record) act({ kind: 'hs', text: `Heater-Shaker: shake again at ${pyNum(rpm)} rpm`, dst: { slot: String(cfg.deck.heaterShaker), var: 'hs', wells: [] }, durationSec: 5 }) })
     }
     return () => undo.forEach(fn => fn())
+  }
+
+  // Changing the nozzle layout makes the pipette start on a fresh column of
+  // tips, so it is only emitted when the layout actually has to change.
+  const useNozzles = (p, n) => {
+    if (!p || p.def.channels !== 8 || p.nozzles === n) return
+    p.nozzles = n
+    if (n === 8) emit(`${p.var}.configure_nozzle_layout(style=ALL, tip_racks=${p.tipVar})`)
+    else emit(`${p.var}.configure_nozzle_layout(style=PARTIAL_COLUMN, start="H1", end=${py(partialEndNozzle(n))}, tip_racks=${p.tipVar})  # ${n} of 8 nozzles, tipped from the front`)
   }
 
   const transferKwargs = (s) => {
@@ -1118,6 +1422,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
           const total = b.transfers.reduce((a, t) => a + t.volume * t.wells, 0)
           const what = b.multi ? `${b.transfers.length} column${b.transfers.length === 1 ? '' : 's'} × 8 wells` : `${b.transfers.length} well${b.transfers.length === 1 ? '' : 's'}`
           emit(`# ${oneLine(desc)} — ${what}, ${fmtUl(total)} (${b.pip.var}${b.multi ? ', 8-channel: a well name means its whole column' : ''})`)
+          useNozzles(b.pip, 8)
           const kw = transferKwargs(s).map(k => k.replace('MIX_VOLUME', pyNum(Math.min(b.pip.def.max, Math.max(b.pip.def.min, b.transfers[0].volume)))))
           const oneTip = s.mode === 'distribute' || s.newTip === 'once'
           for (const { items: chunk, tips } of chunked(b.transfers, b.pip, !oneTip)) {
@@ -1263,6 +1568,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         const what = pl.multi ? `${pl.units.length} column${pl.units.length === 1 ? '' : 's'} with the 8-channel` : `${pl.units.length} well${pl.units.length === 1 ? '' : 's'}`
         emit(`# Step ${n}: mix ${what}, ${Math.max(1, Math.floor(Number(s.reps) || 1))} × ${pyNum(vol)} µL (${pl.pip.var})`)
         const restore = beforePipetting()
+        useNozzles(pl.pip, 8)
         if (s.newTip === 'once') tipCall(pl.pip, 1)
         spendTips(pl.pip, s.newTip === 'once' ? 1 : pl.units.length)
         act({ kind: 'mix', pipette: pl.pip.var, multi: pl.multi, text: `Mix ${what}: ${Math.max(1, Math.floor(Number(s.reps) || 1))} × ${pyNum(vol)} µL (${pl.pip.var})`,
@@ -1287,39 +1593,73 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         const kw = [`new_tip=${py(s.newTip === 'once' ? 'once' : 'always')}`, 'blow_out=True', 'blowout_location="destination well"']
         const mb = Math.floor(Number(s.mixBeforeReps) || 0)
         if (mb > 0) kw.push(`mix_before=(${mb}, ${isSet(s.mixBeforeUl) ? pyNum(s.mixBeforeUl) : pyNum(Math.min(pl.pip.def.max, Math.max(pl.pip.def.min, pl.vol)))})`)
-        const srcList = `[plate[w] for w in ${isSeries ? 'series_wells' : 'sample_wells'}]`
-        const fromWhat = pl.multi ? `${nU} column${nU === 1 ? '' : 's'} (${nU * 8} wells) with the 8-channel` : `${nU} well${nU === 1 ? '' : 's'}`
-        // With the 8-channel, destinations are whole columns of the sample labware.
-        const col0 = pl.start / 8
-        const SWAP_MSG = 'Sample plate full: replace it with a fresh one (and top up the quench), then resume'
+        const srcList = `[plate[w] for w in ${isSeries ? 'series_wells' : 'from_wells'}]`
+        const fromWhat = !pl.multi ? `${nU} well${nU === 1 ? '' : 's'}`
+          : pl.nz === 8 ? `${nU} column${nU === 1 ? '' : 's'} (${nU * 8} wells) with the 8-channel`
+          : `${nU} part-column${nU === 1 ? '' : 's'} of ${pl.nz} (${nU * pl.nz} wells) with ${pl.nz} of the 8 channels`
+        // A destination index runs across every sample plate on the deck. A round
+        // that meets the edge of one carries on into the next, so it is described
+        // as the run of wells it fills on each plate it touches.
+        const spansOf = (st, wellCount) => {
+          const cap = pl.capacity || wellCount
+          const out = []
+          for (let i = st, left = wellCount; left > 0;) {
+            const local = i % cap, take = Math.min(left, cap - local)
+            out.push({ slot: sampleSlots[Math.floor(i / cap)] || sampleSlots[0], wells: sampleNames.slice(local, local + take) })
+            i += take; left -= take
+          }
+          return out
+        }
+        const spanWord = (sp) => `${sampleSlots.length > 1 ? `slot ${sp.slot} ` : ''}${sp.wells[0]}–${sp.wells[sp.wells.length - 1]}`
+        const SWAP_MSG = sampleSlots.length > 1
+          ? `All ${sampleSlots.length} sample plates are full: replace them with fresh ones (and top up the quench), then resume`
+          : 'Sample plate full: replace it with a fresh one (and top up the quench), then resume'
         // Destinations for a time point: a literal slice for a single sample step,
         // a computed one inside the series loop.
-        const destsAt = (st) => typeof st === 'number'
-          ? (pl.multi ? `[col[0] for col in samples.columns()[${st / 8}:${st / 8 + nU}]]` : `samples.wells()[${st}:${st + nU}]`)
-          : (pl.multi ? `[col[0] for col in samples.columns()[${st} // 8:${st} // 8 + ${nU}]]` : `samples.wells()[${st}:${st} + ${nU}]`)
-        // A single-channel quench into 8-channel destinations must visit every well of each column.
-        const quenchDests = pl.multi && !pl.qMulti ? '[w for a in dests for w in samples.columns_by_name()[a.well_name[1:]]]' : 'dests'
+        // A whole column is addressed by its A-row well; a partial run by its LAST
+        // well, since only the bottom nozzles carry tips.
+        const destsAt = (st) => {
+          const lit = typeof st === 'number'
+          if (!pl.multi) return lit ? `sample_dests[${st}:${st + nU}]` : `sample_dests[${st}:${st} + ${nU}]`
+          if (pl.nz === 8) return lit ? `sample_dest_cols[${st / 8}:${st / 8 + nU}]` : `sample_dest_cols[${st} // 8:${st} // 8 + ${nU}]`
+          return lit ? `sample_dests[${st + pl.nz - 1}:${st + nU * pl.nz}:${pl.nz}]`
+                     : `sample_dests[${st} + ${pl.nz - 1}:${st} + ${nU * pl.nz}:${pl.nz}]`
+        }
+        // Every well a stroke fills, for a single-channel quench: the destinations
+        // are one unbroken run of the flat list, however they are addressed.
+        const allDestsAt = (st) => typeof st === 'number'
+          ? `sample_dests[${st}:${st + nU * pl.nz}]`
+          : `sample_dests[${st}:${st} + ${nU * pl.nz}]`
+        const quenchDests = (st) => pl.multi && !pl.qMulti ? allDestsAt(st) : 'dests'
         // Preview records for one sampling round into the sample wells `names`.
-        const plateWells = pl.units.flatMap(u => pl.multi ? groupWells(u) : [u])
-        const sampleRound = (names, label) => {
+        const strokeWells = (u) => pl.groups.find(g => g.address === u)?.wells || groupWells(u)
+        const plateWells = pl.units.flatMap(u => pl.multi ? strokeWells(u) : [u])
+        const sampleRound = (spans, label) => {
+          const names = spans.flatMap(sp => sp.wells)
+          // `spans` carries every plate the round touches; `slot`/`wells` keep the
+          // first of them, which is what the deck map highlights.
+          const dst = { slot: spans[0].slot, var: 'sample_plates', wells: spans[0].wells, spans }
+          const where = spans.map(spanWord).join(' + ')
           if (pl.quench && pl.qp) {
             spendTips(pl.qp, 1)
             act({ kind: 'transfer', pipette: pl.qp.var, multi: pl.qMulti, text: `${label}quench: ${pyNum(pl.qv)} µL ${pl.quench.name} into ${names.length} sample well${names.length === 1 ? '' : 's'} (${pl.qp.var})`,
-                  src: srcRef(pl.quench), dst: { slot: String(cfg.deck.samples || '2'), var: 'samples', wells: names }, volume: pl.qv, count: names.length, tipsUsed: 1, durationSec: 6 + 3 * names.length })
+                  src: srcRef(pl.quench), dst, volume: pl.qv, count: names.length, tipsUsed: 1, durationSec: 6 + 3 * names.length })
           }
           spendTips(pl.pip, pl.tipsPerPoint)
-          act({ kind: 'transfer', pipette: pl.pip.var, multi: pl.multi, text: `${label}sample ${pyNum(pl.vol)} µL from ${fromWhat} into sample well${names.length === 1 ? '' : 's'} ${names[0]}–${names[names.length - 1]} (${pl.pip.var})`,
-                src: { slot: plateSlot, var: 'plate', wells: plateWells }, dst: { slot: String(cfg.deck.samples || '2'), var: 'samples', wells: names },
+          act({ kind: 'transfer', pipette: pl.pip.var, multi: pl.multi, text: `${label}sample ${pyNum(pl.vol)} µL from ${fromWhat} into ${where} (${pl.pip.var})`,
+                src: { slot: plateSlot, var: 'plate', wells: plateWells }, dst,
                 volume: pl.vol, count: names.length, tipsUsed: pl.tipsPerPoint, durationSec: pl.units.length * (s.newTip === 'once' ? 5 : 9) })
         }
         if (isSeries) {
           const iv = num(s.intervalMinutes) || 0
           const count = pl.count
           emit(`# Step ${n}: sampling series — ${count} time points every ${pyNum(iv)} min, ${pyNum(pl.vol)} µL from ${fromWhat} (${pl.pip.var})`)
-          emit(`#   each time point fills the next ${pl.multi ? `${nU} column${nU === 1 ? '' : 's'}` : `${nU} well${nU === 1 ? '' : 's'}`} of the sample labware (column order: A1, B1, … H1, A2, …)${pl.fresh.size ? `; the plate is swapped for a fresh one before time point${pl.fresh.size === 1 ? '' : 's'} ${[...pl.fresh].map(i => i + 1).join(', ')}` : ''}`)
+          emit(`#   each time point fills the next ${pl.multi ? `${nU} column${nU === 1 ? '' : 's'}` : `${nU} well${nU === 1 ? '' : 's'}`} of the ${sampleSlots.length > 1 ? `${sampleSlots.length} sample plates (slots ${sampleSlots.join(', ')}), one plate after the other` : 'sample labware'} (column order: A1, B1, … H1, A2, …)${pl.fresh.size ? `; ${sampleSlots.length > 1 ? 'all of them are swapped for fresh ones' : 'the plate is swapped for a fresh one'} before time point${pl.fresh.size === 1 ? '' : 's'} ${[...pl.fresh].map(i => i + 1).join(', ')}` : ''}`)
+          useNozzles(pl.pip, pl.nz)
+          if (pl.qMulti) useNozzles(pl.qp, pl.nz)
           emit(`series_wells = [${pl.units.map(py).join(', ')}]`)
-          emit(`series_starts = [${pl.starts.join(', ')}]  # first sample well of each time point`)
-          emit(`fresh_plate_before = ${pl.fresh.size ? '{' + [...pl.fresh].join(', ') + '}' : 'set()'}  # time points that begin on a fresh sample plate`)
+          emit(`series_starts = [${pl.starts.join(', ')}]  # first sample well of each time point, across all plates on the deck`)
+          emit(`fresh_plate_before = ${pl.fresh.size ? '{' + [...pl.fresh].join(', ') + '}' : 'set()'}  # time points that begin on fresh sample labware`)
           emit(`series_t0 = time.monotonic()`)
           emit(`for i in range(${count}):`)
           const firstAtZero = s.firstAtZero !== false
@@ -1331,10 +1671,13 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
           emit(`    dests = ${destsAt('series_starts[i]')}`)
           // Everything inside the loop is one level deeper: emit, then indent.
           const loopStart = L.length
-          const restore = beforePipetting({ record: false })
+          // What the loop body will do to the lid, captured before the emission
+          // moves it, so the preview below replays exactly the same moves.
+          const lid = lidPlan({ loop: true })
+          const restore = beforePipetting({ record: false, loop: true })
           if (pl.quench && pl.qp) {
-            tipCall(pl.qp, 1)
-            emit(`${pl.qp.var}.transfer(${pyNum(pl.qv)}, ${pl.quench.rack}[${py(pl.quench.well)}], ${quenchDests}, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first`)
+            tipCall(pl.qp, 1 / (pl.qMulti ? pl.perCol : 1))
+            emit(`${pl.qp.var}.transfer(${pyNum(pl.qv)}, ${pl.quench.rack}[${py(pl.quench.well)}], ${quenchDests('series_starts[i]')}, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first`)
           }
           tipCall(pl.pip, pl.tipsPerPoint)
           emit(`${pl.pip.var}.transfer(${pyNum(pl.vol)}, ${srcList}, dests, ${kw.join(', ')})`)
@@ -1342,42 +1685,36 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
           for (let k = loopStart; k < L.length; k++) L[k] = '    ' + L[k]
           // The preview walks the time points the loop will run.
           const t0 = clock
-          const lidWasClosed = targetOn === 'thermocycler' && !lidOpen
           const shaking = usesHS && hsRpm > 0 ? hsRpm : 0
           for (let i = 0; i < count; i++) {
             const tMin = (firstAtZero ? i : i + 1) * iv
             const target = t0 + tMin * 60
             if (target > clock) act({ kind: 'wait', text: `Wait for time point ${i + 1}/${count} (t = ${pyNum(tMin)} min)`, durationSec: target - clock })
             act({ kind: 'comment', text: `Time point ${i + 1}/${count} at t = ${pyNum(tMin)} min` })
-            if (pl.fresh.has(i)) act({ kind: 'swap', userAction: true, text: SWAP_MSG, dst: { slot: String(cfg.deck.samples || '2'), var: 'samples', wells: [] } })
+            if (pl.fresh.has(i)) act({ kind: 'swap', userAction: true, text: SWAP_MSG, dst: { slot: sampleSlots[0], var: 'sample_plates', wells: [], slots: sampleSlots } })
             if (pl.pauseEvery > 0 && i > 0 && i % pl.pauseEvery === 0) act({ kind: 'pause', userAction: true, text: `Paused: ${pl.pauseMessage} — press Resume in the Opentrons App` })
-            if (lidWasClosed) { lidOpen = true; act({ kind: 'tc', text: 'Thermocycler: open the lid for sampling', dst: { slot: '7', var: 'tc', wells: [] }, durationSec: 30 }) }
+            if (lid.open) { lidOpen = true; act({ kind: 'tc', text: 'Thermocycler: open the lid for sampling', dst: { slot: '7', var: 'tc', wells: [] }, durationSec: 30 }) }
             if (shaking) { hsRpm = 0; act({ kind: 'hs', text: 'Heater-Shaker: stop shaking for sampling', dst: { slot: String(cfg.deck.heaterShaker), var: 'hs', wells: [] }, durationSec: 5 }) }
-            const st = pl.starts[i]
-            const rowNames = pl.multi
-              ? Array.from({ length: nU }, (_, k) => sampleNames.slice((st / 8 + k) * 8, (st / 8 + k + 1) * 8)).flat()
-              : sampleNames.slice(st, st + nU)
-            sampleRound(rowNames, `Time point ${i + 1}: `)
-            if (lidWasClosed) { lidOpen = false; act({ kind: 'tc', text: 'Thermocycler: close the lid again', dst: { slot: '7', var: 'tc', wells: [] }, durationSec: 30 }) }
+            sampleRound(spansOf(pl.starts[i], nU * pl.nz), `Time point ${i + 1}: `)
+            if (lid.close) { lidOpen = false; act({ kind: 'tc', text: `Thermocycler: close the lid again${mod.tcBlock != null ? ` — the block stays at ${pyNum(mod.tcBlock)} °C` : ''}`, dst: { slot: '7', var: 'tc', wells: [] }, durationSec: 30 }) }
             if (shaking) { hsRpm = shaking; act({ kind: 'hs', text: `Heater-Shaker: shake again at ${pyNum(shaking)} rpm`, dst: { slot: String(cfg.deck.heaterShaker), var: 'hs', wells: [] }, durationSec: 5 }) }
           }
         } else {
-          const into = pl.multi ? `samples columns ${col0 + 1}–${col0 + nU}` : `samples wells ${pl.start}–${pl.start + nU - 1}`
-          emit(`# Step ${n}: take ${pyNum(pl.vol)} µL from ${fromWhat} into ${into} (${pl.pip.var})`)
-          emit(`sample_wells = [${pl.units.map(py).join(', ')}]`)
-          if (pl.fresh.has(0)) { emit(`protocol.pause(${py(SWAP_MSG)})`); act({ kind: 'swap', userAction: true, text: SWAP_MSG, dst: { slot: String(cfg.deck.samples || '2'), var: 'samples', wells: [] } }) }
+          const spans = spansOf(pl.start, nU * pl.nz)
+          emit(`# Step ${n}: take ${pyNum(pl.vol)} µL from ${fromWhat} into ${spans.map(spanWord).join(' + ')} (${pl.pip.var})`)
+          useNozzles(pl.pip, pl.nz)
+          if (pl.qMulti) useNozzles(pl.qp, pl.nz)
+          emit(`from_wells = [${pl.units.map(py).join(', ')}]`)
+          if (pl.fresh.has(0)) { emit(`protocol.pause(${py(SWAP_MSG)})`); act({ kind: 'swap', userAction: true, text: SWAP_MSG, dst: { slot: sampleSlots[0], var: 'sample_plates', wells: [], slots: sampleSlots } }) }
           emit(`dests = ${destsAt(pl.start)}`)
           const restore = beforePipetting()
           if (pl.quench && pl.qp) {
-            tipCall(pl.qp, 1)
-            emit(`${pl.qp.var}.transfer(${pyNum(pl.qv)}, ${pl.quench.rack}[${py(pl.quench.well)}], ${quenchDests}, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first`)
+            tipCall(pl.qp, 1 / (pl.qMulti ? pl.perCol : 1))
+            emit(`${pl.qp.var}.transfer(${pyNum(pl.qv)}, ${pl.quench.rack}[${py(pl.quench.well)}], ${quenchDests(pl.start)}, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first`)
           }
           tipCall(pl.pip, pl.tipsPerPoint)
           emit(`${pl.pip.var}.transfer(${pyNum(pl.vol)}, ${srcList}, dests, ${kw.join(', ')})`)
-          const names = pl.multi
-            ? Array.from({ length: nU }, (_, k) => sampleNames.slice((col0 + k) * 8, (col0 + k + 1) * 8)).flat()
-            : sampleNames.slice(pl.start, pl.start + nU)
-          sampleRound(names, '')
+          sampleRound(spans, '')
           restore()
         }
         emit()
@@ -1398,10 +1735,28 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   }
   if (!steps.length) emit('protocol.comment("No steps — add a Build plate step.")')
   if (hsRpm > 0 || hsHeating) warn(`The Heater-Shaker is still ${hsRpm > 0 && hsHeating ? 'heating and shaking' : hsRpm > 0 ? 'shaking' : 'heating'} when the protocol ends — the robot does not switch it off by itself. Add a Heater-Shaker step set to off, unless that is intended.`)
+  for (const p of pipettes) if (p.nozzles !== 8) { useNozzles(p, 8); emit() }
   emit('protocol.comment("Done.")')
+
+  if (appliedOffsets.length && !offsetsWorkAt(cfg.apiLevel)) {
+    warn(`Labware offsets: set_offset() does not exist in apiLevel ${OFFSET_API_GAP[0]}–${OFFSET_API_GAP[1]}, so the robot refuses this file as it stands. Choose apiLevel 2.18 or newer.`)
+  }
 
   // Trailing blank lines inside run() are noise; one newline ends the file.
   while (L.length && L[L.length - 1] === '') L.pop()
+  const head = []
+  appliedOffsets.sort((a, b) => Number(a.slot) - Number(b.slot))   // like the DECK block above
+  if (appliedOffsets.length) {
+    head.push('#')
+    head.push('# LABWARE OFFSETS  (from Labware Position Check — mm right / back / up)')
+    for (const o of appliedOffsets) head.push(`#   slot ${o.slot.padStart(2)}  ${oneLine(o.what).padEnd(44)} x ${o.x.toFixed(2).padStart(6)}   y ${o.y.toFixed(2).padStart(6)}   z ${o.z.toFixed(2).padStart(6)}`)
+  }
+  if (warnings.length) {
+    head.push('#')
+    head.push('# CHECK BEFORE RUNNING')
+    for (const w of warnings) head.push(`#   - ${oneLine(w)}`)
+  }
+  H.splice(headerAt, 0, ...head)
   const code = [...H, ...L].join('\n') + '\n'
 
   const summary = {
@@ -1419,12 +1774,19 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     pipettes: pipettes.map(p => ({ mount: p.mount, name: p.def.name, var: p.var, channels: p.def.channels, tipsNeeded: p.tipsNeeded, perRack: p.perRack, tipSlots: p.tipSlots, tipRack: p.tipName })),
     columnLabware: columnLw?.name || '',
     sampleWellsUsed: sampleCursor,
-    sampleCapacity: samplesLw ? samplesLw.rows * samplesLw.cols : 0,
-    samplePlates: usesSamples ? samplePlateIdx + 1 : 0,
+    sampleCapacity: samplesLw ? samplesLw.rows * samplesLw.cols * sampleSlots.length : 0,   // everything on the deck at once
+    samplePlates: samplesLw && usesSamples ? Math.max(1, Math.ceil(sampleCursor / (samplesLw.rows * samplesLw.cols))) : 0,
+    samplePlatesOnDeck: samplesLw ? sampleSlots.length : 0,
     sampleSwaps,
+    prefilled,
+    usesPartial,
+    // Slots a partly tipped 8-channel cannot reach into, because of what stands
+    // behind them. Empty ones count too: the UI offers them for a sample plate.
+    partialBlockedSlots: OT2_SLOTS.filter(s => blocksPartialBehind(behindEntry(slotBehind(s)), occupancy[s])),
+    offsets: appliedOffsets,
     modules: { thermocycler: usesTC, temperature: usesTemp, heaterShaker: usesHS, magnetic: usesMag },
     steps: steps.length,
-    plateSlot, samplesSlot: samplesLw ? String(cfg.deck.samples || '2') : '',
+    plateSlot, sampleSlots: samplesLw ? sampleSlots : [],
     runSec: Math.round(clock),
   }
   // ── Run clearance: the warnings sorted into the checks the Opentrons App would
@@ -1434,8 +1796,9 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   const CHECKS = [
     { id: 'deck', label: 'Deck layout', re: /deck conflict|not an OT-2 deck slot|Heater-Shaker can|recommends slots|next to the Heater-Shaker|left or right of the Heater-Shaker|fits the Thermocycler|cannot be loaded on the/i, info: `${deckEntries.length} slots in use` },
     { id: 'tips', label: 'Tips', re: /tip rack|tips \(|tip columns|needs \d+ tips/i, info: refills ? `${refills} refill pause${refills === 1 ? '' : 's'} scheduled` : 'the loaded racks cover the run' },
-    { id: 'samples', label: 'Sample plate', re: /sample well|sample labware|time point/i, info: usesSamples ? `${sampleCursor} wells over ${samplePlateIdx + 1} plate${samplePlateIdx ? 's' : ''}${sampleSwaps ? ` — ${sampleSwaps} plate change${sampleSwaps === 1 ? '' : 's'} scheduled` : ''}` : 'no sampling' },
-    { id: 'liquids', label: 'Liquids and their containers', re: /needs about|no free position|already taken|has no position|reservoir, so the single|touch tip/i, info: `${sources.filter(d => d.rack).length} liquids placed` },
+    { id: 'samples', label: 'Sample plate', re: /sample well|sample labware|sample plate|time point/i, info: usesSamples ? `${sampleCursor} wells over ${summary.samplePlates} plate${summary.samplePlates === 1 ? '' : 's'}${sampleSlots.length > 1 ? `, ${sampleSlots.length} on the deck at a time` : ''}${sampleSwaps ? ` — ${sampleSwaps} plate change${sampleSwaps === 1 ? '' : 's'} scheduled` : ''}` : 'no sampling' },
+    { id: 'liquids', label: 'Liquids and their containers', re: /needs about|no free position|already taken|has no position|reservoir, so the single|touch tip/i, info: prefilled ? `${included.length} already in the plate, ${sources.filter(d => d.rack).length} on the deck` : `${sources.filter(d => d.rack).length} liquids placed` },
+    { id: 'offsets', label: 'Labware offsets', re: /offset/i, info: appliedOffsets.length ? `${appliedOffsets.length} applied from Labware Position Check` : 'none — the robot uses its own calibration' },
     { id: 'api', label: 'Robot software', re: /apiLevel/i, info: `apiLevel ${cfg.apiLevel}` },
     { id: 'modules', label: 'Modules', re: /Thermocycler|Temperature Module|Heater-Shaker|°C|rpm|profile|magnet/i, info: [usesTC && 'Thermocycler', usesTemp && 'Temperature Module', usesHS && 'Heater-Shaker', usesMag && 'Magnetic Module'].filter(Boolean).join(', ') || 'none' },
     { id: 'pipettes', label: 'Pipettes and volumes', re: /pipette|minimum|maximum|strokes|8-channel|single-channel|mount/i, info: pipettes.map(p => `${p.var} (${p.def.min}–${p.def.max} µL)`).join(', ') || 'none loaded' },

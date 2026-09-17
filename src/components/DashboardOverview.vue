@@ -307,7 +307,7 @@ const MORE = [
 .dc { grid-column: span 12; display: flex; flex-direction: column; text-align: left; min-width: 0; background: var(--cd); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid var(--cdl); border-radius: var(--r); box-shadow: var(--sh); padding: 0; overflow: hidden; cursor: pointer; transition: transform 0.12s ease, box-shadow 0.12s ease; }
 .dc:hover { filter: none; transform: translateY(-1px); box-shadow: 0 12px 34px rgba(20,30,60,.14); }
 .dc-head { display: flex; align-items: center; gap: 9px; padding: 10px 12px; border-bottom: 1px solid var(--ln); }
-.dc-ic { width: 24px; height: 24px; border-radius: 8px; flex: none; background: var(--acc); color: #fff; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 2px 5px var(--acsh); }
+.dc-ic { width: 24px; height: 24px; border-radius: 8px; flex: none; background: var(--acc-fill); color: #fff; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 2px 5px var(--acsh); }
 .dc-ic :deep(svg) { width: 14px; height: 14px; }
 .dc-title { font-size: 13px; font-weight: 600; color: var(--tx); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dc-head .scope-badge { flex: none; }
@@ -346,19 +346,19 @@ const MORE = [
 .tt-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; height: 100%; }
 .tt-val { font-size: 10px; font-weight: 600; color: var(--tx2); font-variant-numeric: tabular-nums; height: 12px; line-height: 12px; }
 .tt-bar { width: 100%; max-width: 20px; min-height: 2px; border-radius: 5px 5px 0 0; background: color-mix(in srgb, var(--acc) 42%, transparent); }
-.tt-bar.is-today { background: var(--acc); }
+.tt-bar.is-today { background: var(--acc-fill); }
 .tt-day { font-size: 10px; color: var(--tx2); }
 .tt-day.is-today { color: var(--acc); font-weight: 700; }
 
 .dc-empty { font-size: 12px; color: var(--tx3); font-style: italic; }
 
 /* Loaned-out chemicals rows */
-.dc-loan { display: grid; grid-template-columns: auto 1fr auto; gap: 3px 8px; align-items: center; min-width: 0; padding: 3px 0; border-bottom: 1px solid var(--ln2, rgba(0,0,0,.06)); }
+.dc-loan { display: grid; grid-template-columns: auto 1fr auto; gap: 3px 8px; align-items: center; min-width: 0; padding: 3px 0; border-bottom: 1px solid var(--ln2); }
 .dc-loan:last-of-type { border-bottom: none; }
-.dc-loan-code { font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 8px; background: var(--acs, rgba(37,99,235,.12)); color: var(--acc, #2563eb); white-space: nowrap; }
+.dc-loan-code { font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 8px; background: var(--acs); color: var(--acc); white-space: nowrap; }
 .dc-loan-name { font-size: 12px; font-weight: 600; color: var(--tx); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.dc-loan-return { font-size: 11px; font-weight: 700; color: var(--acc, #2563eb); white-space: nowrap; cursor: pointer; padding: 2px 6px; border-radius: 7px; }
-.dc-loan-return:hover { background: var(--acs, rgba(37,99,235,.12)); }
+.dc-loan-return { font-size: 11px; font-weight: 700; color: var(--acc); white-space: nowrap; cursor: pointer; padding: 2px 6px; border-radius: 7px; }
+.dc-loan-return:hover { background: var(--acs); }
 .dc-loan-meta { grid-column: 1 / 3; font-size: 10.5px; color: var(--tx3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dc-loan-count { font-size: 10.5px; font-weight: 800; background: #d97706; color: #fff; border-radius: 9px; padding: 1px 7px; }
 

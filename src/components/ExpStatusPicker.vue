@@ -39,8 +39,8 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
 <style scoped>
 .esp-wrap { position: relative; display: inline-flex; }
 .esp-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 0.72rem; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--esp); color: var(--esp); background: color-mix(in srgb, var(--esp) 12%, transparent); cursor: pointer; box-shadow: none; line-height: 1.4; }
-.esp-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 50; min-width: 160px; background: var(--modal, #fff); border: 1px solid var(--ln, #e2e8f0); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.18); padding: 4px; display: flex; flex-direction: column; }
+.esp-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 50; min-width: 160px; background: var(--modal); border: 1px solid var(--ln); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.18); padding: 4px; display: flex; flex-direction: column; }
 .esp-item { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; padding: 7px 10px; border: none; background: transparent; color: inherit; text-align: left; border-radius: 7px; cursor: pointer; box-shadow: none; }
-.esp-item:hover { background: var(--fl, #f1f5f9); }
+.esp-item:hover { background: var(--fl); }
 .esp-item.on { font-weight: 700; }
 </style>

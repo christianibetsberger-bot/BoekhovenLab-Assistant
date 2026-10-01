@@ -4,7 +4,8 @@ import {
   normalizeOt2Config, newOt2Step, targetLabwareOptions, wellNamesOf, labwareByName,
   adjacentSlots, loadVolume, opentronsFilename, multiGroups,
   offsetKey, offsetFor, offsetsWorkAt, parseLabwareOffsets,
-  partialColumnGroups, partialEndNozzle, PARTIAL_REAR_MAX_HEIGHT_MM, slotBehind,
+  partialColumnGroups, partialEndNozzle, PARTIAL_REAR_MAX_HEIGHT_MM, slotBehind, mirrorLayout,
+  columnRuns, packFootprint, footprintAlign, rowsLayout,
 } from './opentronsExport'
 
 // The markup the planners actually write into a well (see plateExport.test.js).
@@ -1194,5 +1195,331 @@ describe('the fixed trash behind slot 9', () => {
     expect(summary.usesPartial).toBe(false)
     expect(summary.partialBlockedSlots).toContain('9')   // still true of the deck
     expect(summary.pipettes.flatMap(p => p.tipSlots)).toContain('9')
+  })
+})
+
+describe('samples laid out as on the plate', () => {
+  const pcr96 = labwareByName('nest_96_wellplate_100ul_pcr_full_skirt')
+
+  it('keeps the rows and puts the columns side by side', () => {
+    const m = mirrorLayout(['A1', 'F1', 'A2', 'F2'], pcr96)
+    expect(m.cols).toBe(2)
+    expect(['A1', 'F1', 'A2', 'F2'].map(m.offsetOf)).toEqual([0, 5, 8, 13])
+    // A column the selection skips is not kept: 3 and 7 become neighbours.
+    expect(mirrorLayout(['B3', 'B7'], pcr96).offsetOf('B7')).toBe(9)
+  })
+  it('says why a sample labware cannot hold the shape', () => {
+    const rack = labwareByName('opentrons_24_tuberack_nest_1.5ml_snapcap')   // 4 rows × 6
+    expect(mirrorLayout(['A1', 'F1'], rack).problem).toMatch(/row F .* stops at row D/)
+    expect(mirrorLayout(['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7'], rack).problem).toMatch(/7 columns .* only 6/)
+  })
+  it('lets a part-column of any length be one stroke, but only in this layout', () => {
+    const six = ['A1', 'B1', 'C1', 'D1', 'E1', 'F1']
+    expect(partialColumnGroups(six, 96)).toBe(null)
+    expect(partialColumnGroups(six, 96, { anyLength: true })).toEqual({ n: 6, groups: [{ address: 'F1', wells: six }] })
+  })
+  it('is off for new and for older steps', () => {
+    expect(newOt2Step('series').layout).toBe('packed')
+    const old = normalizeOt2Config({ steps: [{ id: 'x', type: 'sample', wells: 'A1' }] }, fullPlate())
+    expect(old.steps[0].layout).toBe('packed')
+  })
+
+  const twoBySix = (mutate = () => {}) => gen(fullPlate(), cfg => {
+    cfg.prefilled = true
+    cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' }
+    cfg.steps = [Object.assign(newOt2Step('series'), { count: 8, intervalMinutes: 10, wells: 'A1-F1 A2-F2', volume: 25, layout: 'mirror' })]
+    mutate(cfg)
+  })
+
+  it('fills two columns of six per time point with six tips a stroke, rows G–H left empty', () => {
+    const { code, summary, warnings, actions } = twoBySix()
+    expect(warnings).toEqual([])
+    // Six nozzles: a run of six does not divide 8, which only this layout allows.
+    expect(code).toContain('p300m.configure_nozzle_layout(style=PARTIAL_COLUMN, start="H1", end="C1", tip_racks=tips_p300m)')
+    expect(code).toContain('series_wells = ["F1", "F2"]')
+    expect(code).toContain('series_offsets = [5, 13]')
+    expect(code).toContain('dests = [sample_dests[series_starts[i] + o] for o in series_offsets]')
+    // Six time points fit a 96-well plate; the 7th starts a fresh one at column 1.
+    expect(code).toContain('series_starts = [0, 16, 32, 48, 64, 80, 0, 16]')
+    expect(code).toContain('fresh_plate_before = {6}')
+    // One rack column per six-tip stroke: two strokes a time point.
+    expect(summary.pipettes.find(p => p.var === 'p300m').tipsNeeded).toBe(16)
+    expect(summary.sampleWellsFilled).toBe(96)
+    expect(summary.sampleWellsUsed).toBe(128)
+    const rounds = actions.filter(a => a.kind === 'transfer')
+    expect(rounds[1].dst.wells).toEqual(['A3', 'B3', 'C3', 'D3', 'E3', 'F3', 'A4', 'B4', 'C4', 'D4', 'E4', 'F4'])
+    assertPythonShape(code)
+  })
+
+  it('never splits a time point over two plates, and starts each at the top of a column', () => {
+    const { code, actions } = twoBySix(cfg => {
+      cfg.pipettes = { left: 'p300_single_gen2', right: 'p20_single_gen2' }
+      cfg.sampleSlots = ['2', '3']
+      // Three columns a time point: four fit a 12-column plate, the 5th moves on.
+      cfg.steps[0] = Object.assign(cfg.steps[0], { count: 5, wells: 'B1-C1 B2-C2 B3-C3', volume: 15 })
+    })
+    expect(code).toContain('series_offsets = [1, 2, 9, 10, 17, 18]')
+    expect(code).toContain('series_starts = [0, 24, 48, 72, 96]')
+    expect(code).toContain('fresh_plate_before = set()')
+    const fifth = actions.filter(a => a.kind === 'transfer')[4]
+    expect(fifth.dst.spans).toEqual([{ slot: '3', wells: ['B1', 'C1', 'B2', 'C2', 'B3', 'C3'] }])
+  })
+
+  it('carries on after a packed step at the next whole column', () => {
+    const { code } = twoBySix(cfg => {
+      cfg.pipettes = { left: 'p300_single_gen2', right: 'p20_single_gen2' }
+      cfg.steps = [
+        Object.assign(newOt2Step('sample'), { wells: 'A1-C1', volume: 15 }),
+        Object.assign(newOt2Step('sample'), { wells: 'B1 D2', volume: 15, layout: 'mirror' }),
+      ]
+    })
+    expect(code).toContain('dests = sample_dests[0:3]')
+    // B1 → B2 and D2 → D3: the block starts at column 2, the first free one.
+    expect(code).toContain('dests = [sample_dests[i] for i in [9, 19]]')
+  })
+
+  it('quenches every well a partial stroke fills when the quench goes by single-channel', () => {
+    const { code, warnings } = twoBySix(cfg => {
+      // A liquid pinned to a tube is never taken by the 8-channel.
+      cfg.compounds = { 'quench:hcl': { included: true, position: 'stocks:C1' } }
+      cfg.deck.stocks = '11'   // a tube rack in 4 would stand behind the plate the 8-channel reaches into
+      cfg.steps[0] = Object.assign(cfg.steps[0], { count: 2, quenchName: 'HCl', quenchUl: 15 })
+    })
+    expect(warnings).toEqual([])
+    expect(code).toContain('series_fill_offsets = [0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13]')
+    expect(code).toContain('p20.transfer(15, stocks["C1"], [sample_dests[series_starts[i] + o] for o in series_fill_offsets], new_tip="once"')
+    assertPythonShape(code)
+  })
+
+  it('falls back to the next free wells when the sample labware is too small, and says so', () => {
+    const { code, warnings } = twoBySix(cfg => { cfg.samplesLabware = 'opentrons_24_tuberack_nest_1.5ml_snapcap' })
+    expect(warnings.some(w => /sample labware cannot keep the plate layout — the wells reach down to row F/.test(w))).toBe(true)
+    expect(code).not.toContain('series_offsets')
+  })
+})
+
+describe('the pipette you choose is the pipette that runs', () => {
+  it('reads the unbroken runs down each column', () => {
+    expect(columnRuns(['A1', 'B1', 'C1', 'D1', 'A2', 'B2', 'H2'], 96)).toEqual([
+      { col: 1, wells: ['A1', 'B1', 'C1', 'D1'], n: 4, kind: 'part', address: 'D1' },
+      { col: 2, wells: ['A2', 'B2'], n: 2, kind: 'part', address: 'B2' },
+      { col: 2, wells: ['H2'], n: 1, kind: 'lone', address: 'H2' },
+    ])
+    // A whole column is addressed by its A-row well: every nozzle is tipped.
+    expect(columnRuns('ABCDEFGH'.split('').map(r => `${r}3`), 96)[0]).toMatchObject({ n: 8, kind: 'whole', address: 'A3' })
+    // A run along a row is one lone well per column — nothing for an 8-channel.
+    expect(columnRuns(['A1', 'A2', 'A3'], 96).every(r => r.kind === 'lone')).toBe(true)
+  })
+  it('packs a time point so no stroke crosses the foot of a column', () => {
+    const fp = packFootprint([{ n: 6, multi: true }, { n: 4, multi: true }], 8)
+    // The run of 4 cannot follow the run of 6 inside one column, so it starts the next.
+    expect(fp.placements).toEqual([{ addressOffset: 5, fill: [0, 1, 2, 3, 4, 5] }, { addressOffset: 11, fill: [8, 9, 10, 11] }])
+    expect(fp.extent).toBe(12)
+    expect(footprintAlign(fp.placements, 8)).toBe(8)
+    // Today's shapes keep today's steps: 4-runs move by 4, whole columns by 8, single wells by 1.
+    expect(footprintAlign(packFootprint([{ n: 4, multi: true }, { n: 4, multi: true }], 8).placements, 8)).toBe(4)
+    expect(footprintAlign(packFootprint([{ n: 8, multi: true }], 8).placements, 8)).toBe(8)
+    expect(footprintAlign(packFootprint([{ n: 1, multi: false }, { n: 1, multi: false }], 8).placements, 8)).toBe(1)
+  })
+
+  const pinned = (wells, mutate = () => {}) => gen(fullPlate(), cfg => {
+    cfg.prefilled = true
+    cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' }
+    cfg.deck.stocks = '11'   // a tall rack in slot 4 stands behind the plate in slot 1
+    cfg.steps = [Object.assign(newOt2Step('series'), { count: 4, intervalMinutes: 10, wells, volume: 25, pipette: 'left' })]
+    mutate(cfg)
+  })
+
+  it('takes two columns of six with six tips instead of handing them to the single-channel', () => {
+    const { code, summary, warnings, blocking } = pinned('A1-F1 A2-F2')
+    expect(blocking).toEqual([])
+    expect(warnings).toEqual([])
+    expect(code).toContain('end="C1"')
+    expect(code).not.toContain('p20.transfer(')
+    expect(summary.sampling[Object.keys(summary.sampling)[0]].blocks.map(b => [b.pipette, b.nozzles])).toEqual([['p300m', 6]])
+  })
+  it('does uneven runs with one stroke each, and says the layout changes', () => {
+    const { code, summary, blocking } = pinned('A1-F1 A2-D2')
+    expect(blocking).toEqual([])
+    // Two nozzle layouts, both configured inside the loop so every time point repeats them.
+    expect(code).toContain('series_wells_p300m_6 = ["F1"]')
+    expect(code).toContain('series_wells_p300m_4 = ["D2"]')
+    expect((code.match(/configure_nozzle_layout\(style=PARTIAL_COLUMN/g) || [])).toHaveLength(2)
+    // The run of 4 starts a fresh sample column, so a time point spans 12 wells, and
+    // each time point still starts where both strokes stay inside one column.
+    expect(code).toContain('series_starts = [0, 16, 32, 48]')
+    const plan = summary.sampling[Object.keys(summary.sampling)[0]]
+    expect(plan.layoutChanges).toBe(true)
+    expect(plan.points[0].pairs.map(p => [p.src[0], p.dst[0]])).toEqual([['A1', 'A1'], ['A2', 'A2']])
+    assertPythonShape(code)
+  })
+  it('gives a lone well to the single-channel and says so, instead of dropping the 8-channel', () => {
+    const { code, warnings, blocking, summary } = pinned('A1-B1 D1 A2-H2')
+    expect(blocking).toEqual([])
+    expect(warnings.some(w => /you chose the P300 8-Channel GEN2 \(left\), but D1 stands where its nozzles cannot reach — the P20 Single-Channel GEN2 takes it/.test(w))).toBe(true)
+    expect(summary.sampling[Object.keys(summary.sampling)[0]].blocks.map(b => [b.pipette, b.nozzles])).toEqual([['p300m', 8], ['p300m', 2], ['p20', 0]])
+    expect(code).toContain('p20.transfer(')
+    assertPythonShape(code)
+  })
+  it('stops the file instead of quietly using the other pipette', () => {
+    const cases = [
+      [pinned('A1-D1 A2-D2', cfg => { cfg.apiLevel = '2.16' }), 'API', /partial tip pickup needs apiLevel 2\.20/],
+      [pinned('A1-D1 A2-D2', cfg => { cfg.steps[0].volume = 5 }), 'VOLUME', /5 µL is below what any loaded 8-channel/],
+      [pinned('A1-D1 A2-D2', cfg => { cfg.samplesLabware = 'opentrons_24_tuberack_nest_1.5ml_snapcap' }), 'SAMPLE_LW', /8-row sample labware/],
+      [pinned('A1-D1 A2-D2', cfg => { cfg.steps[0].multi = 'auto' }), 'NOTHING_FOR_MULTI', /whole columns only/],
+      [pinned('A1-A6'), 'NOTHING_FOR_MULTI', /stands on its own in its column/],
+    ]
+    for (const [{ code, blocking }, want, re] of cases) {
+      expect(blocking.map(b => b.code)).toContain(want)
+      expect(blocking[0].message).toMatch(re)
+      // The file raises before it does anything, so the Opentrons App refuses it.
+      const lines = code.split('\n')
+      const at = lines.findIndex(l => l.startsWith('def run('))
+      expect(lines[at + 2]).toMatch(/^    raise RuntimeError\("Step 1 · Sampling series — can't do as set:/)
+      expect(code).not.toContain('p20.transfer(')
+      expect(blocking[0].fixes.length).toBeGreaterThan(0)
+      assertPythonShape(code)
+    }
+  })
+  it('applying a fix clears the block', () => {
+    const { blocking } = pinned('A1-D1 A2-D2', cfg => { cfg.apiLevel = '2.16' })
+    const fix = blocking[0].fixes.find(f => f.cfg?.apiLevel)
+    const fixed = pinned('A1-D1 A2-D2', cfg => { Object.assign(cfg, fix.cfg) })
+    expect(fixed.blocking).toEqual([])
+    expect(fixed.code).toContain('end="E1"')
+  })
+  it('by volume uses the 8-channel where a run allows it, and keeps every well accounted for', () => {
+    const { code, summary } = pinned('A1-F1 A2-D2 H2', cfg => { cfg.steps[0].pipette = 'auto' })
+    const plan = summary.sampling[Object.keys(summary.sampling)[0]]
+    expect(plan.blocks.map(b => [b.pipette, b.nozzles, b.strokes.length])).toEqual([['p300m', 6, 1], ['p300m', 4, 1], ['p20', 0, 1]])
+    // Every chosen well is taken exactly once, and no sample well is used twice.
+    const filled = plan.points[0].wells
+    expect(filled.length).toBe(11)
+    expect(new Set(filled).size).toBe(11)
+    assertPythonShape(code)
+  })
+  it('a quench poured by the single-channel reaches every well the strokes fill', () => {
+    const { code } = pinned('A1-F1 A2-D2', cfg => {
+      cfg.compounds = { 'quench:hcl': { included: true, position: 'stocks:C1' } }
+      Object.assign(cfg.steps[0], { quenchName: 'HCl', quenchUl: 15 })
+    })
+    expect(code).toContain('series_fill_offsets = [0, 1, 2, 3, 4, 5, 8, 9, 10, 11]')
+    expect(code).toContain('p20.transfer(15, stocks["C1"], [sample_dests[series_starts[i] + o] for o in series_fill_offsets], new_tip="once"')
+  })
+  it('counts a fresh tip column at every change of nozzle layout', () => {
+    const even = pinned('A1-F1 A2-F2').summary.pipettes.find(p => p.var === 'p300m').tipsNeeded
+    const uneven = pinned('A1-F1 A2-D2').summary.pipettes.find(p => p.var === 'p300m').tipsNeeded
+    // Even runs: one layout, 2 strokes of 6 a time point, one rack column each.
+    expect(even).toBe(8)
+    // Uneven: the 6 takes a column, the 4 half of the next, and the change throws the rest away.
+    expect(uneven).toBe(7.5)
+  })
+})
+
+describe('a group of wells with a sample plate of its own', () => {
+  const ROWS8 = 'ABCDEFGH'
+  const rowPlate = () => {
+    const wells = {}
+    for (const r of ['A', 'B']) for (let c = 1; c <= 12; c++) {
+      wells[`${r}${c}`] = linked('C1', 'K10 peptide', 10, 'mM', '10.00') + fill('MQ H₂O', '70.00')
+    }
+    return { name: 'Two rows', format: 96, targetVolume: 80, wells }
+  }
+  const twoRows = (mutate = () => {}) => gen(rowPlate(), cfg => {
+    cfg.prefilled = true
+    cfg.sampleSlots = ['2', '3']
+    cfg.steps = [Object.assign(newOt2Step('series'), { count: 8, intervalMinutes: 10, volume: 15, groups: [
+      { id: 'g1', wells: 'A1-A12', plate: '2', layout: 'rows' },
+      { id: 'g2', wells: 'B1-B12', plate: '3', layout: 'rows' },
+    ] })]
+    mutate(cfg)
+  })
+
+  it('lays a row band per time point, each row of the plate into its own sample plate', () => {
+    expect(rowsLayout(['A1', 'A12'], labwareByName('nest_96_wellplate_100ul_pcr_full_skirt'))).toMatchObject({ height: 1, width: 12 })
+    const { code, warnings, blocking, actions, summary } = twoRows()
+    expect([...warnings, ...blocking]).toEqual([])
+    // Each group keeps its own plate, and its time points walk down the rows.
+    expect(code).toContain('series_starts_g1 = [0, 1, 2, 3, 4, 5, 6, 7]')
+    expect(code).toContain('series_starts_g2 = [96, 97, 98, 99, 100, 101, 102, 103]')
+    expect(code).toContain('group 1: 12 wells (A1–A12) → sample plate 1 (slot 2), a row band per time point')
+    expect(code).toContain('group 2: 12 wells (B1–B12) → sample plate 2 (slot 3), a row band per time point')
+    // No plate change: eight time points fit the eight rows of each plate.
+    expect(code).toContain('swap_before = {}')
+    expect(summary.sampleSwaps).toBe(0)
+    // Time point 2 fills row B of both plates, and nothing lands twice.
+    const round2 = actions.filter(a => a.kind === 'transfer' && /Time point 2/.test(a.text))
+    expect(round2.map(a => [a.dst.slot, a.dst.wells[0], a.dst.wells[11]])).toEqual([['2', 'B1', 'B12'], ['3', 'B1', 'B12']])
+    const cells = actions.filter(a => a.kind === 'transfer').flatMap(a => a.dst.spans.flatMap(sp => sp.wells.map(w => `${sp.slot}${w}`)))
+    expect(new Set(cells).size).toBe(cells.length)
+    assertPythonShape(code)
+  })
+
+  it('two groups can share one plate without ever meeting in a well', () => {
+    const { code, actions, blocking } = twoRows(cfg => {
+      cfg.sampleSlots = ['2']
+      cfg.steps[0].groups = [
+        { id: 'g1', wells: 'A1-A12', plate: '2', layout: 'rows' },
+        { id: 'g2', wells: 'B1-B12', plate: '2', layout: 'rows' },
+      ]
+      cfg.steps[0].count = 5
+    })
+    expect(blocking).toEqual([])
+    // Group 1 takes rows A, C, E, G and group 2 the rows in between.
+    expect(code).toContain('series_starts_g1 = [0, 2, 4, 6, 0]')
+    expect(code).toContain('series_starts_g2 = [1, 3, 5, 7, 1]')
+    // The fifth time point needs a fresh plate — and the pause names that plate.
+    expect(code).toContain('swap_before = {4: "Sample plate 1 (slot 2) is full: replace it with a fresh one (and top up the quench), then resume"}')
+    const swap = actions.find(a => a.kind === 'swap')
+    expect(swap.dst.slots).toEqual(['2'])
+    // Every well of a plate load is used once.
+    const before = actions.slice(0, actions.indexOf(swap)).filter(a => a.kind === 'transfer').flatMap(a => a.dst.spans.flatMap(sp => sp.wells))
+    expect(new Set(before).size).toBe(before.length)
+  })
+
+  it('mixes an 8-channel group and a single-channel group, each on its own plate', () => {
+    const plate = { name: 'Mixed', format: 96, targetVolume: 80, wells: {} }
+    for (const r of ROWS8.slice(0, 6)) plate.wells[`${r}1`] = linked('C1', 'K10 peptide', 10, 'mM', '10.00') + fill('MQ H₂O', '70.00')
+    for (let c = 2; c <= 12; c++) plate.wells[`A${c}`] = linked('C1', 'K10 peptide', 10, 'mM', '10.00') + fill('MQ H₂O', '70.00')
+    const { code, blocking, summary } = gen(plate, cfg => {
+      cfg.prefilled = true
+      cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' }
+      cfg.sampleSlots = ['2', '3']
+      cfg.steps = [Object.assign(newOt2Step('series'), { count: 4, intervalMinutes: 10, volume: 25, groups: [
+        { id: 'g1', wells: 'A1-F1', plate: '2', layout: 'mirror' },
+        { id: 'g2', wells: 'A2-A12', plate: '3', layout: 'rows' },
+      ] })]
+    })
+    expect(blocking).toEqual([])
+    // The 8-channel takes the column run; the row run is one well at a time.
+    expect(summary.sampling[Object.keys(summary.sampling)[0]].groups.map(g => [g.slot, g.blocks.map(b => b.pipette)])).toEqual([['2', ['p300m']], ['3', ['p20']]])
+    expect(code).toContain('series_starts_g1 = [0, 8, 16, 24]')
+    expect(code).toContain('series_starts_g2 = [96, 97, 98, 99]')
+    assertPythonShape(code)
+  })
+
+  it('says when a group points at a plate that is not on the deck, or an impossible start', () => {
+    const gone = twoRows(cfg => { cfg.steps[0].groups[1].plate = '9' })
+    expect(gone.blocking.map(b => b.code)).toContain('PLATE_RANGE')
+    expect(gone.blocking[0].message).toMatch(/group 2 is set to go into slot 9/)
+    const start = twoRows(cfg => { cfg.steps[0].groups[0].start = 'Z9' })
+    expect(start.blocking.map(b => b.code)).toContain('START_RANGE')
+  })
+
+  it('warns when the same well is in two groups', () => {
+    const { warnings } = twoRows(cfg => { cfg.steps[0].groups[1].wells = 'A12 B1-B12' })
+    expect(warnings.some(w => /A12 is in group 1 and group 2/.test(w))).toBe(true)
+  })
+
+  it('an ordinary step still writes the Python it always did', () => {
+    const plain = gen(fullPlate(), cfg => {
+      cfg.prefilled = true
+      cfg.steps = [Object.assign(newOt2Step('series'), { count: 3, intervalMinutes: 10, wells: 'A1-A3', volume: 10 })]
+    })
+    expect(plain.code).toContain('series_starts = [0, 3, 6]')
+    expect(plain.code).toContain('dests = sample_dests[series_starts[i]:series_starts[i] + 3]')
+    expect(plain.code).not.toContain('swap_before')
+    expect(newOt2Step('series')).toMatchObject({ plate: 'auto', start: '', groups: [] })
+    expect(normalizeOt2Config({ steps: [{ id: 'x', type: 'series' }] }, fullPlate()).steps[0]).toMatchObject({ plate: 'auto', groups: [] })
   })
 })

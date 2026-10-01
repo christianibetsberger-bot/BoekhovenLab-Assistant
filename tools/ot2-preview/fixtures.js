@@ -44,6 +44,49 @@ export function fixture(which) {
     const series = newOt2Step('series'); Object.assign(series, { count: 4, intervalMinutes: 15, wells: 'A1-H1', volume: 5, quenchName: 'Quench', quenchUl: 20 })
     const off = newOt2Step('thermocycler'); Object.assign(off, { lid: 'open', deactivate: true })
     cfg.steps = [newOt2Step('build'), tc, hs, tm, mg, series, off, newOt2Step('custom'), newOt2Step('pause')]
+  } else if (which === 'groups') {
+    // Two rows of the plate, each sampled into a sample plate of its own.
+    const wells = {}
+    for (const r of ['A', 'B']) for (let c = 1; c <= 12; c++) {
+      wells[`${r}${c}`] = linked('C1', 'K10 peptide', 10, 'mM', '10.00') + linked('C2', 'pU RNA', 8, 'mM', '10.00') + fill('MQ H₂O', '60.00')
+    }
+    plate = { name: 'Two conditions', format: 96, targetVolume: 80, wells }
+    cfg = defaultOt2Config(plate)
+    cfg.prefilled = true
+    cfg.sampleSlots = ['2', '3']
+    const series = newOt2Step('series')
+    Object.assign(series, { count: 8, intervalMinutes: 15, volume: 15, groups: [
+      { id: 'g1', wells: 'A1-A12', plate: '2', start: '', layout: 'rows' },
+      { id: 'g2', wells: 'B1-B12', plate: '3', start: '', layout: 'rows' },
+    ] })
+    cfg.steps = [series]
+  } else if (which === 'hybrid') {
+    // An 8-channel chosen by name, with runs of different lengths and a lone well.
+    plate = plate96({ name: 'Kinetics 6+4', peptide: (r, c) => 5 + c, rna: () => 10 })
+    cfg = defaultOt2Config(plate)
+    cfg.prefilled = true
+    cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' }
+    cfg.deck.stocks = '11'
+    const series = newOt2Step('series')
+    Object.assign(series, { count: 6, intervalMinutes: 10, wells: 'A1-F1 A2-D2 H2', volume: 25, pipette: 'left' })
+    cfg.steps = [series]
+  } else if (which === 'blocked') {
+    // A row run with the 8-channel chosen: it cannot be done as set.
+    plate = plate96({ name: 'Row run', peptide: (r, c) => 5 + c, rna: () => 10 })
+    cfg = defaultOt2Config(plate)
+    cfg.prefilled = true
+    cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' }
+    const series = newOt2Step('series')
+    Object.assign(series, { count: 6, intervalMinutes: 10, wells: 'A1-A6', volume: 25, pipette: 'left' })
+    cfg.steps = [series]
+  } else if (which === 'layout') {
+    // Two part-columns of six, sampled into the same shape on the sample plate.
+    plate = plate96({ name: 'Kinetics 2 × 6', peptide: (r, c) => 5 + c, rna: () => 10 })
+    cfg = defaultOt2Config(plate)
+    cfg.prefilled = true
+    cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' }
+    const series = newOt2Step('series'); Object.assign(series, { count: 8, intervalMinutes: 15, wells: 'A1-F1 A2-F2', volume: 25, layout: 'mirror' })
+    cfg.steps = [series]
   } else {
     plate = plate96({ name: 'Coacervate screen 3', peptide: (r) => 5 + r, rna: (r, c) => c * 2 })
     cfg = defaultOt2Config(plate)

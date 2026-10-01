@@ -15,7 +15,7 @@ import { computed, reactive, ref, watch, nextTick, onMounted, onBeforeUnmount } 
 import { useLabStore } from '../stores/labStore'
 import OtDeckMap from './OtDeckMap.vue'
 import {
-  generateOpentronsProtocol, normalizeOt2Config, newOt2Step, plateDemands, wellNamesOf,
+  generateOpentronsProtocol, normalizeOt2Config, newOt2Step, plateDemands, wellNamesOf, parseWellSelection,
   labwareByName, targetLabwareOptions, defaultTargetLabware, sourceLabwareOptions, sampleLabwareOptions,
   columnLabwareOptions, columnPositions, tipRackOptions, opentronsFilename, fmtUl,
   offsetKey, parseLabwareOffsets, offsetsWorkAt, PARTIAL_REAR_MAX_HEIGHT_MM,
@@ -185,8 +185,8 @@ const stepSummary = (s) => {
     case 'delay': return `${Number(s.minutes) || 0} min ${Number(s.seconds) || 0} s`
     case 'pause': return s.message || ''
     case 'mix': return `${s.wells || 'all'} · ${s.reps} × ${s.volume || 'auto'} µL`
-    case 'sample': return [`${s.volume} µL from ${s.wells || 'all'}`, s.quenchName ? `onto ${s.quenchUl} µL ${s.quenchName}` : '', multiWord(s)].filter(Boolean).join(' · ')
-    case 'series': return [`${s.count} × every ${s.intervalMinutes} min`, `${s.volume} µL from ${s.wells || 'all'}`, s.quenchName ? `onto ${s.quenchUl} µL ${s.quenchName}` : '', multiWord(s)].filter(Boolean).join(' · ')
+    case 'sample': return [`${s.volume} µL from ${groupsOf(s) ? `${s.groups.length} groups` : (s.wells || 'all')}`, s.quenchName ? `onto ${s.quenchUl} µL ${s.quenchName}` : '', s.layout === 'mirror' ? 'plate layout' : '', multiWord(s)].filter(Boolean).join(' · ')
+    case 'series': return [`${s.count} × every ${s.intervalMinutes} min`, `${s.volume} µL from ${groupsOf(s) ? `${s.groups.length} groups` : (s.wells || 'all')}`, s.quenchName ? `onto ${s.quenchUl} µL ${s.quenchName}` : '', s.layout === 'mirror' ? 'plate layout' : '', multiWord(s)].filter(Boolean).join(' · ')
     case 'comment': return s.text || ''
     case 'custom': return `${(s.code || '').split('\n').filter(l => l.trim()).length} lines`
     default: return ''
@@ -197,6 +197,66 @@ const stepSummary = (s) => {
 // The generator's action list, walked one action at a time. The deck map gets
 // an overlay for the current action; the wells filled and the tips used so far
 // are accumulated from every action before it, so scrubbing backwards is exact.
+// A pipette the user chose by name is never quietly replaced: these are the
+// steps that cannot be done as set, and the one-click fixes for them.
+const blocking = computed(() => result.value.blocking || [])
+const blockedStep = (s) => blocking.value.filter(b => b.stepId === s.id)
+const applyFix = (s, fix) => {
+  if (fix.step) Object.assign(s, fix.step)
+  if (fix.cfg) Object.assign(cfg, fix.cfg)
+  if (fix.dropWells?.length) {
+    const keep = parseWellSelection(s.wells, props.plate).wells.filter(w => !fix.dropWells.includes(w))
+    s.wells = keep.join(' ') || 'all'
+  }
+}
+// ── Destinations: one per step, or one per group of wells ──
+// A group is a set of the plate's wells with a sample plate of its own, so the
+// samples from one row can go to one plate while another row goes to the next.
+const LAYOUTS = [
+  { value: 'packed', label: 'next free wells' },
+  { value: 'mirror', label: 'same layout as the plate' },
+  { value: 'rows', label: 'one row per time point' },
+]
+const plateOptions = computed(() => [
+  { value: 'auto', label: 'next free plate' },
+  ...cfg.sampleSlots.map((slot, i) => ({ value: String(slot), label: `plate ${i + 1} · slot ${slot}` })),
+])
+const groupsOf = (s) => (Array.isArray(s.groups) && s.groups.length ? s.groups : null)
+const addGroup = (s) => {
+  if (!Array.isArray(s.groups)) s.groups = []
+  if (!s.groups.length) s.groups.push({ id: newOt2Step('comment').id, wells: s.wells, plate: s.plate || 'auto', start: s.start || '', layout: s.layout })
+  s.groups.push({ id: newOt2Step('comment').id, wells: '', plate: 'auto', start: '', layout: s.layout })
+}
+const removeGroup = (s, i) => {
+  s.groups.splice(i, 1)
+  if (s.groups.length === 1) { const g = s.groups[0]; Object.assign(s, { wells: g.wells, plate: g.plate, start: g.start, layout: g.layout }); s.groups = [] }
+}
+// Split what the step samples into one group per row (or per column), each with
+// its own sample plate when there are plates for them.
+const splitInto = (s, by) => {
+  const wells = parseWellSelection(s.wells, props.plate).wells
+  const keyOf = (w) => by === 'row' ? w[0] : w.slice(1)
+  const keys = [...new Set(wells.map(keyOf))]
+  if (keys.length < 2) { store.toast?.(`These wells are all in one ${by}`); return }
+  while (cfg.sampleSlots.length < keys.length && freeSampleSlot.value) addSamplePlate()
+  s.groups = keys.map((k, i) => ({
+    id: `${s.id}-${by}-${k}`,
+    wells: wells.filter(w => keyOf(w) === k).join(' '),
+    plate: cfg.sampleSlots[i] ? String(cfg.sampleSlots[i]) : 'auto',
+    start: '', layout: by === 'row' ? 'rows' : s.layout,
+  }))
+  if (cfg.sampleSlots.length < keys.length) store.toast?.(`${keys.length} groups, ${cfg.sampleSlots.length} sample plates — the rest share the free ones`)
+}
+// What the planner made of a sampling step: the runs down each column, who takes
+// them, and where the first time point lands.
+const samplePlan = (s) => summary.value?.sampling?.[s.id] || null
+const planWord = (s) => {
+  const pl = samplePlan(s)
+  if (!pl) return ''
+  const runWord = (r) => r.kind === 'lone' ? `${r.wells[0]} on its own` : `${r.wells[0]}–${r.wells[r.n - 1]} (${r.n})`
+  return `${pl.runs.reduce((a, r) => a + r.n, 0)} wells · ${pl.runs.map(runWord).join(' · ')}`
+}
+const blockWord = (b) => b.nozzles === 8 ? `${b.pipette} · all 8 nozzles` : b.nozzles ? `${b.pipette} · ${b.nozzles} of 8 nozzles` : `${b.pipette} · one well at a time`
 const actions = computed(() => result.value.actions || [])
 const clearance = computed(() => result.value.clearance || [])
 const clearanceOk = computed(() => clearance.value.filter(c => c.ok).length)
@@ -348,7 +408,10 @@ const download = () => {
   document.body.appendChild(a); a.click(); document.body.removeChild(a)
   URL.revokeObjectURL(url)
   const n = result.value.warnings.length
-  store.toast?.(`Downloaded ${a.download}${n ? ` — ${n} thing${n === 1 ? '' : 's'} to check first` : ''}`)
+  const stop = (result.value.blocking || []).length
+  store.toast?.(stop
+    ? `Downloaded ${a.download} — it stops at once: fix step ${result.value.blocking[0].step} first`
+    : `Downloaded ${a.download}${n ? ` — ${n} thing${n === 1 ? '' : 's'} to check first` : ''}`)
 }
 </script>
 
@@ -592,7 +655,7 @@ const download = () => {
               <div class="ot-tl">
                 <div v-for="(s, i) in cfg.steps" :key="s.id" class="ot-step" :class="{ open: !collapsed[s.id] }">
                   <div class="ot-step-head" @click="collapsed[s.id] = !collapsed[s.id]">
-                    <span class="ot-step-n">{{ i + 1 }}</span>
+                    <span class="ot-step-n" :class="{ 'ot-step-blocked': blockedStep(s).length }">{{ blockedStep(s).length ? '!' : i + 1 }}</span>
                     <i class="fas ot-step-ic" :class="stepMeta(s.type).icon"></i>
                     <span class="ot-step-title">{{ stepMeta(s.type).label }}</span>
                     <span class="ot-step-sum">{{ stepSummary(s) }}</span>
@@ -732,15 +795,15 @@ const download = () => {
                       <div class="ot-grid4">
                         <label style="grid-column: span 2;">From wells <input type="text" v-model="s.wells" placeholder="all, or A1-H1" /></label>
                         <label>Sample µL <input type="number" min="0" step="0.5" v-model="s.volume" /></label>
-                        <label>Pipette <select v-model="s.pipette"><option value="auto">by volume</option><option v-for="m in pipetteMounts" :key="m.mount" :value="m.mount">{{ m.label }}</option></select></label>
+                        <label title="By volume: the app picks, and shows below what it picked. A mount: that pipette does everything it can reach, and anything it cannot turns the step red instead of going quietly to the other pipette.">Pipette <select v-model="s.pipette"><option value="auto">by volume</option><option v-for="m in pipetteMounts" :key="m.mount" :value="m.mount">{{ m.label }}</option></select></label>
                       </div>
                       <div class="ot-grid4">
                         <label>Tips <select v-model="s.newTip"><option value="always">new tip per well</option><option value="once">one tip per time point</option></select></label>
                         <label>Mix before ×<input type="number" min="0" step="1" v-model="s.mixBeforeReps" placeholder="0" /></label>
                         <label>Mix µL <input type="number" min="0" step="1" v-model="s.mixBeforeUl" placeholder="auto" /></label>
-                        <label v-if="hasMulti" title="Whole columns go in one stroke. Part-columns need partial tip pickup — the 8-channel picks up only as many tips as the run is long (apiLevel 2.20 and newer).">8-channel
+                        <label v-if="hasMulti" title="Every unbroken run down a column is one stroke with as many tips as the run is long (partial tip pickup, apiLevel 2.20 and newer). Whole columns only: runs shorter than 8 go to the single-channel.">8-channel
                           <select v-model="s.multi">
-                            <option value="partial">whole or part columns</option>
+                            <option value="partial">every run down a column</option>
                             <option value="auto">whole columns only</option>
                             <option value="off">off</option>
                           </select>
@@ -750,12 +813,70 @@ const download = () => {
                       <div class="ot-grid4">
                         <label style="grid-column: span 2;" title="Put into each sample well BEFORE the sample, from its own tube (e.g. acid to stop a reaction). Empty = none.">Quench liquid <input type="text" v-model="s.quenchName" placeholder="none" /></label>
                         <label>Quench µL <input type="number" min="0" step="1" v-model="s.quenchUl" :disabled="!s.quenchName" /></label>
+                        <label v-if="!groupsOf(s)" title="Next free wells: every sample well is used, one time point after the other. Same layout as the plate: each time point takes its own block of sample columns, wells in the same rows as on the plate. One row per time point: time point 1 fills row A, time point 2 row B, and so on, columns kept.">Sample layout
+                          <select v-model="s.layout">
+                            <option v-for="l in LAYOUTS" :key="l.value" :value="l.value">{{ l.label }}</option>
+                          </select>
+                        </label>
+                      </div>
+                      <!-- Where the samples go: one destination, or one per group of wells -->
+                      <div v-if="!groupsOf(s)" class="ot-grid4">
+                        <label title="Which sample plate on the deck this step fills. A plate of its own is kept for this step alone.">Into <select v-model="s.plate"><option v-for="o in plateOptions" :key="o.value" :value="o.value">{{ o.label }}</option></select></label>
+                        <label title="The sample well the first time point starts in. Empty = straight after the previous step.">Start at <input type="text" v-model="s.start" placeholder="next free" /></label>
+                        <label style="grid-column: span 2;">Split into groups, each with its own sample plate
+                          <span class="ot-splitrow">
+                            <button class="ot-mini" @click="splitInto(s, 'row')" title="One group per row of the plate, each into its own sample plate">by row</button>
+                            <button class="ot-mini" @click="splitInto(s, 'col')" title="One group per column of the plate, each into its own sample plate">by column</button>
+                            <button class="ot-mini" @click="addGroup(s)" title="Add an empty group and keep the rest as group 1">by hand</button>
+                          </span>
+                        </label>
+                      </div>
+                      <div v-else class="ot-groups">
+                        <div class="ot-grow ot-grow-head"><span>#</span><span>From wells</span><span>Into sample plate</span><span>Start at</span><span>Layout</span><span></span></div>
+                        <div v-for="(g, gi) in s.groups" :key="g.id || gi" class="ot-grow">
+                          <span class="ot-gno">{{ gi + 1 }}</span>
+                          <input type="text" v-model="g.wells" placeholder="A1-A12" />
+                          <select v-model="g.plate"><option v-for="o in plateOptions" :key="o.value" :value="o.value">{{ o.label }}</option></select>
+                          <input type="text" v-model="g.start" placeholder="next free" />
+                          <select v-model="g.layout"><option v-for="l in LAYOUTS" :key="l.value" :value="l.value">{{ l.label }}</option></select>
+                          <button class="ot-mini" @click="removeGroup(s, gi)" title="Remove this group"><i class="fas fa-times"></i></button>
+                        </div>
+                        <div class="ot-grow-add">
+                          <button class="ot-mini" @click="addGroup(s)"><i class="fas fa-plus"></i> group</button>
+                          <span class="ot-muted">each time point samples the groups in this order</span>
+                        </div>
+                      </div>
+                      <div v-if="blockedStep(s).length" class="ot-hint ot-red">
+                        <i class="fas fa-ban"></i> <b>Can't do as set:</b>
+                        <template v-for="b in blockedStep(s)" :key="b.code"> {{ b.message }}
+                          <button v-for="f in b.fixes" :key="f.label" class="ot-mini ot-fix" @click="applyFix(s, f)">{{ f.label }}</button>
+                        </template>
+                        <div>The exported file stops at its first line until this is fixed — nothing is handed to the other pipette.</div>
+                      </div>
+                      <div v-else-if="samplePlan(s)?.groups?.length > 1" class="ot-hint">
+                        <div v-for="g in samplePlan(s).groups" :key="g.no">
+                          <b>Group {{ g.no }}</b> {{ g.wells.length }} wells → plate {{ (cfg.sampleSlots.indexOf(g.slot) + 1) || 1 }} (slot {{ g.slot }}), {{ LAYOUTS.find(l => l.value === g.layout)?.label }} ·
+                          <template v-for="(b, bi) in g.blocks" :key="b.key">{{ bi ? ' · ' : '' }}{{ blockWord(b) }} × {{ b.strokes.length }}</template>
+                        </div>
+                        <template v-if="samplePlan(s).points?.length">
+                          Time point 1 → {{ samplePlan(s).points[0].spans.map(sp => `slot ${sp.slot} ${sp.wells[0]}–${sp.wells[sp.wells.length - 1]}`).join(' + ') }}<template v-if="samplePlan(s).points.length > 1">, time point 2 → {{ samplePlan(s).points[1].spans.map(sp => `slot ${sp.slot} ${sp.wells[0]}–${sp.wells[sp.wells.length - 1]}`).join(' + ') }}</template>
+                        </template>
+                        <template v-if="samplePlan(s).swaps?.length"><br>Plate changes before time point{{ samplePlan(s).swaps.length === 1 ? '' : 's' }} {{ samplePlan(s).swaps.map(i => i + 1).join(', ') }}.</template>
+                      </div>
+                      <div v-else-if="samplePlan(s)" class="ot-hint">
+                        <b>{{ planWord(s) }}</b> ·
+                        <template v-for="(b, bi) in samplePlan(s).blocks" :key="b.key">{{ bi ? ' · ' : '' }}{{ blockWord(b) }} × {{ b.strokes.length }}</template>
+                        <template v-if="samplePlan(s).points?.length">
+                          <br>Time point 1 → {{ samplePlan(s).points[0].spans.map(sp => `${cfg.sampleSlots.length > 1 ? 'slot ' + sp.slot + ' ' : ''}${sp.wells[0]}–${sp.wells[sp.wells.length - 1]}`).join(' + ') }}<template v-if="samplePlan(s).points.length > 1">, time point 2 → {{ samplePlan(s).points[1].spans.map(sp => `${sp.wells[0]}–${sp.wells[sp.wells.length - 1]}`).join(' + ') }}</template>
+                        </template>
+                        <template v-if="samplePlan(s).layoutChanges"><br>Two nozzle layouts a time point: each change starts a fresh column of tips.</template>
                       </div>
                       <div class="ot-hint">
-                        Samples go into the sample labware column by column, each time point into the next free wells; the robot moves on to the next plate on the deck by itself and only pauses when the last one is full<template v-if="summary"> — {{ summary.sampleWellsUsed }} wells over {{ summary.samplePlates || 1 }} plate{{ summary.samplePlates > 1 ? 's' : '' }}, {{ summary.samplePlatesOnDeck || 1 }} on the deck{{ summary.sampleSwaps ? `, ${summary.sampleSwaps} change${summary.sampleSwaps === 1 ? '' : 's'} scheduled` : '' }}</template>.
+                        <template v-if="s.layout === 'mirror'">Each time point goes into the next free sample columns, laid out as on the plate: the same rows, the plate's columns side by side, never split over two plates. Rows the plate does not use stay empty</template>
+                        <template v-else>Samples go into the sample labware column by column, each time point into the next free wells</template>; the robot moves on to the next plate on the deck by itself and only pauses when the last one is full<template v-if="summary"> — {{ summary.sampleWellsFilled }} wells over {{ summary.samplePlates || 1 }} plate{{ summary.samplePlates > 1 ? 's' : '' }}, {{ summary.samplePlatesOnDeck || 1 }} on the deck{{ summary.sampleSwaps ? `, ${summary.sampleSwaps} change${summary.sampleSwaps === 1 ? '' : 's'} scheduled` : '' }}</template>.
                         <template v-if="hasMulti"> Whole columns (A1-H1, A1-H2, …) are taken eight at a time with the 8-channel, one sample column per plate column.</template>
                         <template v-if="s.type === 'series'"> Intervals are measured from the start of the series, so the time sampling takes does not drift them.</template>
-                        <template v-if="hasMulti && s.multi === 'partial'"> An equal, unbroken run of 2 or 4 wells per column is one stroke with just that many tips — the run is addressed by its last well, since the 8-channel is tipped from the front. Nothing over {{ PARTIAL_REAR_MAX_HEIGHT_MM }} mm may stand in the slot behind anything it reaches into.</template>
+                        <template v-if="hasMulti && s.multi === 'partial'"> An equal, unbroken run of {{ s.layout === 'mirror' ? '2 to 7' : '2 or 4' }} wells per column is one stroke with just that many tips — the run is addressed by its last well, since the 8-channel is tipped from the front. Nothing over {{ PARTIAL_REAR_MAX_HEIGHT_MM }} mm may stand in the slot behind anything it reaches into.</template>
                         <template v-if="cfg.target.on === 'thermocycler'"> The Thermocycler lid opens for each time point and closes again in between, and the block holds its temperature throughout.</template>
                         <template v-else-if="cfg.target.on === 'heater_shaker'"> Shaking stops for each time point and starts again afterwards.</template>
                       </div>
@@ -890,10 +1011,13 @@ const download = () => {
             <div v-for="p in summary?.pipettes || []" :key="p.var" class="ot-tile" :title="`${p.tipsNeeded} ${p.channels === 8 ? 'tip columns' : 'tips'} in ${p.tipSlots.length} rack${p.tipSlots.length === 1 ? '' : 's'}`">
               <b>{{ p.tipsNeeded }}</b><span>{{ p.channels === 8 ? 'columns' : 'tips' }} · {{ p.var }}</span>
             </div>
-            <div v-if="hasSampling" class="ot-tile" :title="summary?.sampleSwaps ? `${summary.sampleSwaps} sample-plate change${summary.sampleSwaps === 1 ? '' : 's'} scheduled` : `fits the ${summary?.samplePlatesOnDeck || 1} sample plate(s) on the deck — no swap needed`"><b>{{ summary?.sampleWellsUsed ?? 0 }}<small v-if="!summary?.sampleSwaps">/{{ summary?.sampleCapacity ?? 0 }}</small></b><span>sample wells<template v-if="summary?.samplePlates > 1"> · {{ summary.samplePlates }} plates</template></span></div>
+            <div v-if="hasSampling" class="ot-tile" :title="summary?.sampleSwaps ? `${summary.sampleSwaps} sample-plate change${summary.sampleSwaps === 1 ? '' : 's'} scheduled` : `fits the ${summary?.samplePlatesOnDeck || 1} sample plate(s) on the deck — no swap needed`"><b>{{ summary?.sampleWellsFilled ?? 0 }}<small v-if="!summary?.sampleSwaps && summary?.sampleWellsFilled === summary?.sampleWellsUsed">/{{ summary?.sampleCapacity ?? 0 }}</small></b><span>sample wells<template v-if="summary?.samplePlates > 1"> · {{ summary.samplePlates }} plates</template></span></div>
             <div class="ot-tile" title="Rough estimate from typical OT-2 speeds plus every wait"><b>{{ fmtClock(summary?.runSec) }}</b><span>est. run time<template v-if="userActionCount"> · {{ userActionCount }}× your turn</template></span></div>
           </div>
 
+          <button v-if="blocking.length" class="ot-warnpill ot-blockpill" @click="tab = 'steps'">
+            <i class="fas fa-ban"></i> can't run as set · {{ blocking.length }}
+          </button>
           <button v-if="result.warnings.length" class="ot-warnpill" @click="tab = 'code'">
             <i class="fas fa-triangle-exclamation"></i> {{ result.warnings.length }} thing{{ result.warnings.length === 1 ? '' : 's' }} to check
           </button>
@@ -908,8 +1032,8 @@ const download = () => {
           <button class="ot-btn" @click="copyCode" :title="copied ? 'Copied' : 'Copy the Python to the clipboard'">
             <i class="fas" :class="copied ? 'fa-check' : 'fa-copy'"></i> {{ copied ? 'Copied' : 'Copy' }}
           </button>
-          <button class="ot-btn primary" @click="download" title="Download the .py file">
-            <i class="fas fa-download"></i> Download .py
+          <button class="ot-btn primary" @click="download" :title="blocking.length ? 'The file stops at its first line until the red steps are fixed' : 'Download the .py file'">
+            <i class="fas fa-download"></i> Download .py<template v-if="blocking.length"> — won't run yet</template>
           </button>
         </div>
       </footer>
@@ -1046,6 +1170,16 @@ const download = () => {
 .ot-liq-name i.fas { color: var(--tx3); font-size: .66rem; width: 12px; flex: none; }
 .ot-warn-ic { color: #d97706 !important; }
 .ot-red { color: var(--danger-color); font-weight: 700; }
+.ot-groups { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.ot-grow { display: grid; grid-template-columns: 18px minmax(90px, 1.4fr) 1.1fr 0.8fr 1.2fr 24px; gap: 6px; align-items: center; }
+.ot-grow-head > span { font-size: 0.64rem; text-transform: uppercase; letter-spacing: .03em; color: var(--tx3); white-space: nowrap; overflow: hidden; }
+.ot-grow-add { display: flex; gap: 8px; align-items: center; }
+.ot-gno { font-weight: 700; color: var(--tx2); text-align: center; font-size: 0.78rem; }
+.ot-splitrow { display: flex; gap: 4px; flex-wrap: wrap; }
+.ot-splitrow .ot-mini { width: auto; padding: 2px 8px; }
+.ot-fix { margin: 0 3px; font-weight: 600; border: 1px solid var(--danger-color); color: var(--danger-color); background: var(--danger-bg); padding: 1px 7px; border-radius: 6px; width: auto; }
+.ot-blockpill { background: var(--danger-bg); border-color: var(--danger-color); color: var(--danger-color); }
+.ot-step-blocked { background: var(--danger-color) !important; color: #fff !important; }
 
 /* Steps timeline */
 .ot-tl { position: relative; display: flex; flex-direction: column; gap: 8px; padding-left: 4px; }

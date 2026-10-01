@@ -440,6 +440,12 @@
             <div class="tt-chart-card">
               <div class="tt-chart-title">Weekly Trend (last 8 weeks)</div>
               <div ref="trendChartEl" class="tt-chart"></div>
+              <div class="tt-chart-note" v-if="workloadAverage.workdays > 0">
+                Ø <strong>{{ workloadAverage.perWeek.toFixed(1) }} h</strong>/week =
+                {{ workloadAverage.totalHours.toFixed(0) }} h ÷ {{ +workloadAverage.workdays.toFixed(1) }} workdays
+                ({{ workloadAverage.perDay.toFixed(1) }} h/day) × 5.
+                <br>Sick days, vacation and holidays are not counted as workdays.
+              </div>
             </div>
             <div class="tt-chart-card">
               <div class="tt-chart-title">By Task</div>
@@ -557,24 +563,38 @@
       </div>
     </div>
 
-    <!-- ══════════════ TASK-ALLOCATION SANKEY ══════════════ -->
-    <section class="tt-section tt-sankey-section">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:6px;">
+    <!-- ══════════════ WORKTIME DISTRIBUTION OVER TIME ══════════════ -->
+    <section class="tt-section tt-dist-section">
+      <div class="tt-dist-head">
         <h3 style="margin:0;">
-          <i class="fas fa-diagram-project icon-muted"></i>
-          Task Allocation Flow
-          <span style="font-weight:400; opacity:.6; font-size:.72rem;">— how the task mix shifts across {{ chartPeriodLabel }}</span>
+          <i class="fas fa-chart-simple icon-muted"></i>
+          Worktime Distribution
+          <span class="tt-dist-sub">— how the {{ distDim }} mix changed across {{ chartPeriodLabel }}</span>
         </h3>
-        <select v-model="chartPeriod" style="font-size:0.78rem; padding:3px 8px; width:auto;">
-          <option value="week">This week</option>
-          <option value="14">Last 14 days</option>
-          <option value="30">Last 30 days</option>
-          <option value="year">This year</option>
-          <option value="all">All time</option>
-        </select>
+        <div class="tt-dist-controls">
+          <div class="tt-seg" role="group" aria-label="Scale">
+            <button type="button" class="tt-seg-btn" :class="{ active: distMode === 'share' }"
+                    @click="distMode = 'share'">Share %</button>
+            <button type="button" class="tt-seg-btn" :class="{ active: distMode === 'hours' }"
+                    @click="distMode = 'hours'">Hours</button>
+          </div>
+          <div class="tt-seg" role="group" aria-label="Split by">
+            <button type="button" class="tt-seg-btn" :class="{ active: distDim === 'task' }"
+                    @click="distDim = 'task'">Task</button>
+            <button type="button" class="tt-seg-btn" :class="{ active: distDim === 'project' }"
+                    @click="distDim = 'project'">Project</button>
+          </div>
+          <select v-model="chartPeriod" style="font-size:0.78rem; padding:3px 8px; width:auto;">
+            <option value="week">This week (daily)</option>
+            <option value="14">Last 14 days (weekly)</option>
+            <option value="30">Last 30 days (weekly)</option>
+            <option value="year">This year (monthly)</option>
+            <option value="all">All time (monthly)</option>
+          </select>
+        </div>
       </div>
-      <div v-show="hasSankeyData" ref="sankeyChartEl" class="tt-sankey"></div>
-      <div v-if="!hasSankeyData" class="tt-sankey-empty">
+      <div v-show="hasDistData" ref="distChartEl" class="tt-dist-chart"></div>
+      <div v-if="!hasDistData" class="tt-dist-empty">
         <i class="fas fa-circle-info"></i> No completed entries in this period yet.
       </div>
     </section>
@@ -761,14 +781,24 @@ const dailyChartEl   = ref(null)
 const taskChartEl    = ref(null)
 const projectChartEl = ref(null)
 const trendChartEl   = ref(null)
-const sankeyChartEl  = ref(null)
-const hasSankeyData  = ref(true)
+const distChartEl    = ref(null)
+const hasDistData    = ref(true)
+// Worktime-distribution view: 'share' = every column normalised to 100 %,
+// 'hours' = absolute stacked hours; split by task or by project.
+const distMode = ref('share')
+const distDim  = ref('task')
 
 // Shared qualitative palette — keeps a task the same colour across every chart.
 const CHART_PALETTE = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#14b8a6','#a855f7','#eab308']
-function hexToRgba(hex, a) {
+// Readable ink for a direct label sitting inside a coloured band.
+function inkOn(hex) {
   const n = parseInt(hex.slice(1), 16)
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`
+  const lin = v => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4) }
+  const L = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255)
+  return L > 0.42 ? '#111827' : '#ffffff'
+}
+function escHtml(v) {
+  return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -917,6 +947,38 @@ function effectiveWeekTarget(weekStart) {
   const reduction = absenceDaysInWeek(weekStart) + holidaysInWeek(weekStart)
   return Math.max(0, settings.weekly_hours - (settings.weekly_hours / 5) * reduction)
 }
+// ── Average workload ─────────────────────────────────────────────────────────
+// Ø hours/week = all logged hours ÷ expected workdays × 5. An "expected workday"
+// is any Mon–Fri between the first logged day and today that is neither a
+// Bavarian public holiday nor a sick/vacation day (half days count 0.5), so
+// absences never dilute the average — an unlogged working day still counts as 0 h.
+const WORKDAYS_PER_WEEK = 5
+const workloadAverage = computed(() => {
+  const done = entries.value.filter(e => e.checked_out)
+  let totalHours = done.reduce((s, e) => s + entryMinutes(e), 0) / 60
+  const stamps = done.map(e => new Date(e.checked_in))
+  if (activeEntry.value) {
+    const ai = new Date(activeEntry.value.checked_in)
+    totalHours += (now.value - ai) / 3600000
+    stamps.push(ai)
+  }
+  if (!stamps.length) return { totalHours: 0, workdays: 0, perDay: 0, perWeek: 0 }
+
+  const absFraction = new Map(absences.value.map(a => [a.date, a.half_day ? 0.5 : 1]))
+  const cur = new Date(Math.min(...stamps)); cur.setHours(0, 0, 0, 0)
+  const end = new Date(now.value); end.setHours(0, 0, 0, 0)
+  let workdays = 0
+  while (cur <= end) {
+    const dow = cur.getDay()
+    const key = _fmtDate(cur)
+    if (dow !== 0 && dow !== 6 && !isBavarianHoliday(key))
+      workdays += Math.max(0, 1 - (absFraction.get(key) || 0))
+    cur.setDate(cur.getDate() + 1)
+  }
+  const perDay = workdays > 0 ? totalHours / workdays : 0
+  return { totalHours, workdays, perDay, perWeek: perDay * WORKDAYS_PER_WEEK }
+})
+
 // Convenience for the current week's UI
 const thisWeekAbsenceDays = computed(() => absenceDaysInWeek(thisWeekStart.value))
 const effectiveWeeklyHours = computed(() => effectiveWeekTarget(thisWeekStart.value))
@@ -1621,9 +1683,9 @@ function renderCharts() {
     renderDailyChart()
     renderBreakdownCharts()
     renderTrendChart()
-    renderSankey()
+    renderDistribution()
     // Force Plotly to recompute against the (possibly aspect-ratio-driven) container size
-    ;[dailyChartEl, taskChartEl, projectChartEl, trendChartEl, sankeyChartEl].forEach(el => {
+    ;[dailyChartEl, taskChartEl, projectChartEl, trendChartEl, distChartEl].forEach(el => {
       if (el.value) try { Plotly.Plots.resize(el.value) } catch(_) {}
     })
   })
@@ -1813,21 +1875,24 @@ function renderTrendChart() {
     const wStart = new Date(monday); wStart.setDate(wStart.getDate() - w * 7)
     weekTargets.push(effectiveWeekTarget(wStart))
   }
-  // Average over the displayed weeks — drawn as a single horizontal line
-  const avg = hours.length ? hours.reduce((s, h) => s + h, 0) / hours.length : 0
+  // Reference line: the average weekly workload (all logged hours ÷ expected
+  // workdays × 5), so vacation and sick leave never pull the benchmark down.
+  const avg = workloadAverage.value.perWeek
 
   const layout = plotLayout()
   layout.bargap = 0.12
   layout.yaxis.title = { text: 'h', font: { size: 10 } }
-  layout.shapes = [{
-    type: 'line', xref: 'paper', x0: 0, x1: 1,
-    y0: avg, y1: avg,
-    line: { color: '#3b82f6', width: 1.8, dash: 'dash' },
-  }]
-  layout.annotations = [{
-    x: labels[labels.length - 1], y: avg, text: `Ø ${avg.toFixed(1)}h`,
-    showarrow: false, xanchor: 'right', yanchor: 'bottom', font: { size: 10, color: '#3b82f6' },
-  }]
+  if (avg > 0) {
+    layout.shapes = [{
+      type: 'line', xref: 'paper', x0: 0, x1: 1,
+      y0: avg, y1: avg,
+      line: { color: '#3b82f6', width: 1.8, dash: 'dash' },
+    }]
+    layout.annotations = [{
+      x: labels[labels.length - 1], y: avg, text: `Ø ${avg.toFixed(1)}h`,
+      showarrow: false, xanchor: 'right', yanchor: 'bottom', font: { size: 10, color: '#3b82f6' },
+    }]
+  }
   Plotly.react(trendChartEl.value, [
     {
       type: 'bar', x: labels, y: hours, name: 'h',
@@ -1839,12 +1904,17 @@ function renderTrendChart() {
   ], layout, { responsive: true, displayModeBar: false })
 }
 
-// ── Task-allocation Sankey ──────────────────────────────────────────────────────
-// Splits the selected period into ordered time buckets (days / weeks / months)
-// laid out as columns, then draws an alluvial flow: each task is a coloured band
-// flowing from one bucket to the next, so you can read how the task mix changes
-// across the period (e.g. weekday → weekday within the current week).
-function getSankeyBuckets() {
+// ── Worktime distribution over time ──────────────────────────────────────────
+// Part-to-whole across ordered time buckets (days / weeks / months): one stacked
+// column per bucket, one band per task (or project). "Share" normalises every
+// column to 100 %, so a shift in the mix is visible even when the total hours
+// move; "Hours" keeps the absolute scale. The tail past MAX_DIST_SERIES folds
+// into "Other" so a colour never stands for two different tasks.
+const MAX_DIST_SERIES = 7
+const OTHER_KEY  = 'Other'
+const NO_PROJECT = '(no project)'
+
+function getDistBuckets() {
   const period = chartPeriod.value
   const buckets = []
   if (period === 'week') {
@@ -1881,173 +1951,109 @@ function getSankeyBuckets() {
   return buckets
 }
 
-function renderSankey() {
-  if (!sankeyChartEl.value) return
+function renderDistribution() {
+  if (!distChartEl.value) return
+  const theme   = plotTheme(store.theme)
   const dark    = store.isDarkMode
-  const buckets = getSankeyBuckets()
+  const buckets = getDistBuckets()
+  const share     = distMode.value === 'share'
+  const byProject = distDim.value === 'project'
 
-  // hours[bucketIndex] = { task: hours }
+  // perBucket[i] = { series: hours }
   const perBucket = buckets.map(() => ({}))
-  const taskTotals = {}
-  const tally = (when, task, h) => {
+  const totals = {}
+  const tally = (when, key, h) => {
     const bi = buckets.findIndex(b => when >= b.start && when < b.end)
     if (bi < 0 || h <= 0) return
-    perBucket[bi][task] = (perBucket[bi][task] || 0) + h
-    taskTotals[task] = (taskTotals[task] || 0) + h
+    perBucket[bi][key] = (perBucket[bi][key] || 0) + h
+    totals[key] = (totals[key] || 0) + h
   }
+  const keyOf = e => byProject ? (e.project || NO_PROJECT) : e.task
   for (const e of entries.value) {
     if (!e.checked_out) continue
-    tally(new Date(e.checked_in), e.task, entryMinutes(e) / 60)
+    tally(new Date(e.checked_in), keyOf(e), entryMinutes(e) / 60)
   }
   if (activeEntry.value) {
     const ai = new Date(activeEntry.value.checked_in)
-    tally(ai, activeEntry.value.task, (now.value - ai) / 3600000)
+    tally(ai, keyOf(activeEntry.value), (now.value - ai) / 3600000)
   }
 
-  // Tasks ordered by total hours (biggest first) → stable colour & stacking order.
-  const tasks = Object.keys(taskTotals).sort((a, b) => taskTotals[b] - taskTotals[a])
-  const B = buckets.length
-  const nonEmpty = perBucket.filter(m => Object.keys(m).length).length
-  hasSankeyData.value = tasks.length > 0
-  if (!hasSankeyData.value) { try { Plotly.purge(sankeyChartEl.value) } catch(_) {}; return }
+  // Biggest total first → stable colour, and the largest band sits at the bottom
+  // of every column where its changing height is easiest to read.
+  let keys = Object.keys(totals).sort((a, b) => totals[b] - totals[a])
+  hasDistData.value = keys.length > 0
+  if (!hasDistData.value) { try { Plotly.purge(distChartEl.value) } catch(_) {}; return }
 
-  const taskColor = {}
-  tasks.forEach((t, i) => { taskColor[t] = CHART_PALETTE[i % CHART_PALETTE.length] })
-
-  const baseLayout = {
-    paper_bgcolor: plotTheme(store.theme).paper,
-    plot_bgcolor:  plotTheme(store.theme).plot,
-    font:   { color: dark ? '#f3f4f6' : '#1f2937', size: 10 },
-    margin: { l: 4, r: 4, t: 20, b: 4 },
-  }
-  const finish = () => nextTick(() => {
-    if (sankeyChartEl.value) try { Plotly.Plots.resize(sankeyChartEl.value) } catch(_) {}
-  })
-
-  // ── Fallback: only one bucket has data → a flow needs at least two columns.
-  // Show that single bucket split across its tasks instead.
-  if (nonEmpty < 2 || B < 2) {
-    const map = perBucket.find(m => Object.keys(m).length) || {}
-    const present = tasks.filter(t => map[t] > 0)
-    Plotly.react(sankeyChartEl.value, [{
-      type: 'sankey', orientation: 'h', arrangement: 'snap',
-      node: {
-        label: ['Period', ...present.map(t => `${t} · ${map[t].toFixed(1)}h`)],
-        color: [dark ? '#475569' : '#cbd5e1', ...present.map(t => taskColor[t])],
-        pad: 12, thickness: 14, line: { color: dark ? '#111827' : '#ffffff', width: 1 },
-        hovertemplate: '%{label}<extra></extra>',
-      },
-      link: {
-        source: present.map(() => 0),
-        target: present.map((_, i) => i + 1),
-        value:  present.map(t => +map[t].toFixed(2)),
-        color:  present.map(t => hexToRgba(taskColor[t], dark ? 0.55 : 0.45)),
-        customdata: present,
-        hovertemplate: '%{customdata} · %{value:.1f}h<extra></extra>',
-      },
-    }], baseLayout, { responsive: true, displayModeBar: false })
-    finish()
-    return
-  }
-
-  // ── Alluvial: one node per (bucket, task) with hours, columns ordered by time.
-  // Bands link the same task between consecutive buckets; width = the source
-  // bucket's hours for that task, so the band swells/shrinks as allocation shifts.
-  const nodeIdx = new Map()                 // `${bi}|${task}` → node index
-  const nodeLabel = [], nodeColor = [], nodeX = [], nodeCustom = []
-  buckets.forEach((b, bi) => {
-    const x = B === 1 ? 0.5 : 0.04 + (bi / (B - 1)) * 0.92
-    for (const t of tasks) {                // iterate in stable order for clean stacking
-      const h = perBucket[bi][t]
-      if (!h) continue
-      nodeIdx.set(`${bi}|${t}`, nodeLabel.length)
-      nodeLabel.push(t)
-      nodeColor.push(taskColor[t])
-      nodeX.push(x)
-      nodeCustom.push(`${t} · ${b.label} · ${h.toFixed(1)}h`)
+  if (keys.length > MAX_DIST_SERIES + 1) {
+    const tail = keys.slice(MAX_DIST_SERIES)
+    keys = keys.slice(0, MAX_DIST_SERIES)
+    for (const m of perBucket) {
+      let sum = 0
+      for (const k of tail) { sum += m[k] || 0; delete m[k] }
+      if (sum > 0) m[OTHER_KEY] = (m[OTHER_KEY] || 0) + sum
     }
-  })
-
-  const src = [], tgt = [], val = [], linkColor = [], linkCustom = []
-  for (let bi = 0; bi < B - 1; bi++) {
-    for (const t of tasks) {
-      const a = nodeIdx.get(`${bi}|${t}`)
-      const c = nodeIdx.get(`${bi + 1}|${t}`)
-      if (a == null || c == null) continue   // task absent in one of the two → band breaks
-      src.push(a); tgt.push(c)
-      val.push(+perBucket[bi][t].toFixed(2))
-      linkColor.push(hexToRgba(taskColor[t], dark ? 0.5 : 0.4))
-      linkCustom.push(`${t}: ${buckets[bi].label} → ${buckets[bi + 1].label}`)
-    }
+    totals[OTHER_KEY] = tail.reduce((s, k) => s + totals[k], 0)
+    keys.push(OTHER_KEY)
   }
 
-  // Guard: data so sparse that no task spans two consecutive buckets → no bands.
-  // Fall back to a bucket → task split so the breakdown is still visible.
-  if (!src.length) {
-    const liveBuckets = buckets.map((b, bi) => ({ b, bi })).filter(({ bi }) => Object.keys(perBucket[bi]).length)
-    const bLabel = liveBuckets.map(({ b }) => b.label)
-    const fSrc = [], fTgt = [], fVal = [], fColor = [], fCustom = []
-    liveBuckets.forEach(({ bi }, col) => {
-      for (const t of tasks) {
-        const h = perBucket[bi][t]
-        if (!h) continue
-        fSrc.push(col)
-        fTgt.push(liveBuckets.length + tasks.indexOf(t))
-        fVal.push(+h.toFixed(2))
-        fColor.push(hexToRgba(taskColor[t], dark ? 0.5 : 0.4))
-        fCustom.push(`${t} · ${buckets[bi].label}`)
-      }
+  const labels       = buckets.map(b => b.label)
+  const bucketTotals = perBucket.map(m => Object.values(m).reduce((s, h) => s + h, 0))
+  const maxTotal     = Math.max(0, ...bucketTotals)
+  const muted        = dark ? '#64748b' : '#94a3b8'
+  const colorFor = (k, i) =>
+    (k === OTHER_KEY || k === NO_PROJECT) ? muted : CHART_PALETTE[i % CHART_PALETTE.length]
+
+  const traces = keys.map((k, i) => {
+    const hours = perBucket.map(m => m[k] || 0)
+    const pct   = hours.map((h, bi) => bucketTotals[bi] > 0 ? (h / bucketTotals[bi]) * 100 : 0)
+    const y     = share ? pct : hours
+    const color = colorFor(k, i)
+    // Direct labels only inside bands tall enough to hold one.
+    const text = y.map(v => {
+      const roomy = share ? v >= 12 : (maxTotal > 0 && v / maxTotal >= 0.1)
+      if (!roomy) return ''
+      return share ? `${Math.round(v)}%` : (v >= 10 ? v.toFixed(0) : v.toFixed(1))
     })
-    Plotly.react(sankeyChartEl.value, [{
-      type: 'sankey', orientation: 'h', arrangement: 'snap',
-      node: {
-        label: [...bLabel, ...tasks.map(t => `${t} · ${taskTotals[t].toFixed(1)}h`)],
-        color: [...liveBuckets.map(() => dark ? '#475569' : '#cbd5e1'), ...tasks.map(t => taskColor[t])],
-        pad: 12, thickness: 14, line: { color: dark ? '#111827' : '#ffffff', width: 1 },
-        hovertemplate: '%{label}<extra></extra>',
-      },
-      link: { source: fSrc, target: fTgt, value: fVal, color: fColor, customdata: fCustom,
-        hovertemplate: '%{customdata} · %{value:.1f}h<extra></extra>' },
-    }], baseLayout, { responsive: true, displayModeBar: false })
-    finish()
-    return
+    return {
+      type: 'bar', name: k, x: labels,
+      y: y.map(v => +v.toFixed(2)),
+      // A surface-coloured outline keeps a hairline gap between stacked bands.
+      marker: { color, line: { color: theme.plot, width: 1.5 } },
+      text, textposition: 'inside', insidetextanchor: 'middle',
+      textfont: { size: 9, color: inkOn(color) },
+      customdata: hours.map((h, bi) => [h, pct[bi], bucketTotals[bi]]),
+      hovertemplate: `<b>${escHtml(k)}</b> · %{x}<br>%{customdata[0]:.1f} h · ` +
+                     `%{customdata[1]:.0f} % of %{customdata[2]:.1f} h<extra></extra>`,
+    }
+  })
+
+  const layout = {
+    paper_bgcolor: theme.paper,
+    plot_bgcolor:  theme.plot,
+    font:    { color: dark ? '#f3f4f6' : '#1f2937', size: 10 },
+    margin:  { l: 46, r: 8, t: 6, b: 56 },
+    barmode: 'stack',
+    bargap:  labels.length > 18 ? 0.08 : 0.25,
+    xaxis: { type: 'category', showgrid: false, zeroline: false, ticks: 'outside', tickfont: { size: 9 } },
+    yaxis: {
+      showgrid: false, zeroline: true, zerolinecolor: dark ? '#374151' : '#e5e7eb',
+      ticks: 'outside', tickfont: { size: 9 },
+      title: { text: share ? 'share of hours' : 'h', font: { size: 10 } },
+      ...(share ? { range: [0, 100], ticksuffix: '%' } : {}),
+    },
+    showlegend: true,
+    legend: { orientation: 'h', x: 0, y: -0.12, yanchor: 'top', font: { size: 9 }, bgcolor: 'rgba(0,0,0,0)' },
+    hovermode: 'closest',
   }
-
-  // Time-axis column headers above each bucket.
-  baseLayout.annotations = buckets.map((b, bi) => ({
-    x: B === 1 ? 0.5 : 0.04 + (bi / (B - 1)) * 0.92,
-    y: 1.04, xref: 'paper', yref: 'paper',
-    text: b.label, showarrow: false, xanchor: 'center',
-    font: { size: 9, color: dark ? '#9ca3af' : '#6b7280' },
-  }))
-
-  Plotly.react(sankeyChartEl.value, [{
-    type: 'sankey',
-    orientation: 'h',
-    arrangement: 'snap',
-    node: {
-      label: nodeLabel,
-      color: nodeColor,
-      x: nodeX,
-      customdata: nodeCustom,
-      pad: 10,
-      thickness: 12,
-      line: { color: dark ? '#111827' : '#ffffff', width: 1 },
-      hovertemplate: '%{customdata}<extra></extra>',
-    },
-    link: {
-      source: src, target: tgt, value: val, color: linkColor,
-      customdata: linkCustom,
-      hovertemplate: '%{customdata}<br>%{value:.1f}h<extra></extra>',
-    },
-  }], baseLayout, { responsive: true, displayModeBar: false })
-  finish()
+  Plotly.react(distChartEl.value, traces, layout, { responsive: true, displayModeBar: false })
+  nextTick(() => { if (distChartEl.value) try { Plotly.Plots.resize(distChartEl.value) } catch(_) {} })
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 watch(() => store.theme, renderCharts)
 watch(chartPeriod, renderCharts)
+watch([distMode, distDim], () => nextTick(renderDistribution))
 watch(entries, () => nextTick(renderCharts), { deep: true })
 watch(absences, () => nextTick(renderCharts), { deep: true })
 watch(() => settings.weekly_hours, renderCharts)
@@ -2078,7 +2084,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   clearInterval(clockTimer)
-  ;[dailyChartEl, taskChartEl, projectChartEl, trendChartEl, sankeyChartEl]
+  ;[dailyChartEl, taskChartEl, projectChartEl, trendChartEl, distChartEl]
     .forEach(el => { if (el.value) Plotly.purge(el.value) })
 })
 </script>
@@ -2206,13 +2212,27 @@ onBeforeUnmount(() => {
 .tt-charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .tt-chart-card  { display: flex; flex-direction: column; min-width: 0; }
 .tt-chart-title { font-size: .72rem; opacity: .7; text-align: center; margin-bottom: 2px; }
+.tt-chart-note  { font-size: .64rem; line-height: 1.35; opacity: .62; text-align: center; margin-top: 3px; }
 .tt-chart       { width: 100%; aspect-ratio: 1 / 1; }
 .tt-table-wrap  { max-height: 220px !important; }
 
-/* Full-width task-allocation Sankey below the two-column layout. */
-.tt-sankey-section { margin-top: 8px; }
-.tt-sankey { width: 100%; height: 340px; }
-.tt-sankey-empty {
+/* Full-width worktime-distribution chart below the two-column layout. */
+.tt-dist-section { margin-top: 8px; }
+.tt-dist-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 6px; flex-wrap: wrap; gap: 6px;
+}
+.tt-dist-sub { font-weight: 400; opacity: .6; font-size: .72rem; }
+.tt-dist-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tt-seg { display: inline-flex; padding: 2px; gap: 2px; background: var(--fl); border-radius: calc(var(--rc) + 2px); }
+.tt-seg-btn {
+  background: transparent; color: var(--tx2); border: none; box-shadow: none;
+  padding: 3px 9px; border-radius: var(--rc); font-size: .74rem; font-weight: 600; cursor: pointer;
+}
+.tt-seg-btn:hover { filter: none; color: var(--tx); }
+.tt-seg-btn.active { background: var(--acc-fill); color: #fff; box-shadow: 0 2px 6px var(--acsh); }
+.tt-dist-chart { width: 100%; height: 340px; }
+.tt-dist-empty {
   font-size: .8rem; opacity: .6; height: 340px;
   display: flex; align-items: center; justify-content: center; gap: 6px;
 }

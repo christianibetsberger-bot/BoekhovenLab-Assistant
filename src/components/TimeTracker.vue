@@ -598,6 +598,65 @@
         <i class="fas fa-circle-info"></i> No completed entries in this period yet.
       </div>
     </section>
+
+    <!-- ══════════════ FOCUS BLOCKS / FRAGMENTATION ══════════════ -->
+    <section class="tt-section tt-dist-section">
+      <div class="tt-dist-head">
+        <h3 style="margin:0;">
+          <i class="fas fa-stopwatch icon-muted"></i>
+          Focus Blocks
+          <span class="tt-dist-sub">— how long one task runs before another starts</span>
+        </h3>
+        <div class="tt-dist-controls">
+          <div class="tt-seg" role="group" aria-label="Granularity">
+            <button type="button" class="tt-seg-btn" :class="{ active: fragMode === 'week' }"
+                    @click="fragMode = 'week'">Weekly</button>
+            <button type="button" class="tt-seg-btn" :class="{ active: fragMode === 'month' }"
+                    @click="fragMode = 'month'">Monthly</button>
+          </div>
+        </div>
+      </div>
+      <template v-if="blockStats.count">
+        <div class="tt-year-grid">
+          <div class="tt-stat">
+            <div class="tt-stat-value">{{ formatHours(blockStats.avg) }}</div>
+            <div class="tt-stat-label">Ø block</div>
+          </div>
+          <div class="tt-stat">
+            <div class="tt-stat-value">{{ formatHours(blockStats.median) }}</div>
+            <div class="tt-stat-label">Median block</div>
+          </div>
+          <div class="tt-stat">
+            <div class="tt-stat-value">{{ blockStats.perDay.toFixed(1) }}</div>
+            <div class="tt-stat-label">Blocks per logged day</div>
+          </div>
+          <div class="tt-stat">
+            <div class="tt-stat-value">{{ formatHours(blockStats.longest) }}</div>
+            <div class="tt-stat-label">Longest block</div>
+          </div>
+        </div>
+        <div class="tt-focus-grid">
+          <div class="tt-chart-card">
+            <div class="tt-chart-title">Ø uninterrupted block per {{ fragMode }}</div>
+            <div ref="focusAvgChartEl" class="tt-focus-chart"></div>
+          </div>
+          <div class="tt-chart-card">
+            <div class="tt-chart-title">Blocks per logged day — fragmentation</div>
+            <div ref="focusFragChartEl" class="tt-focus-chart"></div>
+          </div>
+        </div>
+        <div class="tt-chart-note" style="text-align:left;">
+          A block is one task worked without switching: consecutive entries on the same task merge
+          while the gap stays under {{ BLOCK_GAP_MIN }} min, and any other task starts a new block.
+          Breaks end a block without counting as one. {{ blockStats.count }} blocks over
+          {{ blockStats.days }} logged days — more blocks per day at a shorter Ø means a more
+          fragmented day.
+        </div>
+      </template>
+      <div v-else class="tt-dist-empty">
+        <i class="fas fa-circle-info"></i> No completed entries yet.
+      </div>
+    </section>
   </div>
 </template>
 
@@ -783,6 +842,10 @@ const projectChartEl = ref(null)
 const trendChartEl   = ref(null)
 const distChartEl    = ref(null)
 const hasDistData    = ref(true)
+const focusAvgChartEl  = ref(null)
+const focusFragChartEl = ref(null)
+// Focus-block granularity: 'week' | 'month'
+const fragMode = ref('week')
 // Worktime-distribution view: 'share' = every column normalised to 100 %,
 // 'hours' = absolute stacked hours; split by task or by project.
 const distMode = ref('share')
@@ -977,6 +1040,60 @@ const workloadAverage = computed(() => {
   }
   const perDay = workdays > 0 ? totalHours / workdays : 0
   return { totalHours, workdays, perDay, perWeek: perDay * WORKDAYS_PER_WEEK }
+})
+
+// ── Focus blocks ─────────────────────────────────────────────────────────────
+// A "block" is one task worked without switching: consecutive entries on the
+// same task merge into one block while the gap between them stays under
+// BLOCK_GAP_MIN, and a different task (or a longer gap) starts a new one.
+// Breaks are interruptions — they end the running block but are not counted as
+// a block themselves, so a lunch break never shows up as a 30-minute "focus".
+const BLOCK_GAP_MIN = 10
+const FOCUS_BUCKETS = 12
+function isBreakTask(t) { return /break|pause/i.test(t || '') }
+
+const workBlocks = computed(() => {
+  const segs = entries.value
+    .filter(e => e.checked_out)
+    .map(e => ({ task: e.task, start: new Date(e.checked_in), end: new Date(e.checked_out) }))
+  if (activeEntry.value)
+    segs.push({ task: activeEntry.value.task, start: new Date(activeEntry.value.checked_in), end: new Date(now.value) })
+  segs.sort((a, b) => a.start - b.start)
+
+  const blocks = []
+  let cur = null
+  for (const seg of segs) {
+    const hours = (seg.end - seg.start) / 3600000
+    if (hours <= 0) continue
+    if (isBreakTask(seg.task)) { cur = null; continue }
+    const contiguous = cur && cur.task === seg.task && (seg.start - cur.end) <= BLOCK_GAP_MIN * 60000
+    if (contiguous) {
+      // Clamp against an overlapping manual entry so the block can't inflate.
+      cur.hours += Math.max(0, (seg.end - Math.max(+seg.start, +cur.end)) / 3600000)
+      cur.end = new Date(Math.max(+cur.end, +seg.end))
+      cur.parts++
+    } else {
+      cur = { task: seg.task, start: seg.start, end: seg.end, hours, parts: 1 }
+      blocks.push(cur)
+    }
+  }
+  return blocks
+})
+
+const blockStats = computed(() => {
+  const blocks = workBlocks.value
+  if (!blocks.length) return { count: 0, avg: 0, median: 0, longest: 0, perDay: 0, days: 0 }
+  const lens = blocks.map(b => b.hours).sort((a, b) => a - b)
+  const days = new Set(blocks.map(b => _fmtDate(b.start))).size
+  const mid  = Math.floor(lens.length / 2)
+  return {
+    count:   blocks.length,
+    avg:     lens.reduce((s, h) => s + h, 0) / lens.length,
+    median:  lens.length % 2 ? lens[mid] : (lens[mid - 1] + lens[mid]) / 2,
+    longest: lens[lens.length - 1],
+    perDay:  blocks.length / days,
+    days,
+  }
 })
 
 // Convenience for the current week's UI
@@ -1684,8 +1801,10 @@ function renderCharts() {
     renderBreakdownCharts()
     renderTrendChart()
     renderDistribution()
+    renderFocusCharts()
     // Force Plotly to recompute against the (possibly aspect-ratio-driven) container size
-    ;[dailyChartEl, taskChartEl, projectChartEl, trendChartEl, distChartEl].forEach(el => {
+    ;[dailyChartEl, taskChartEl, projectChartEl, trendChartEl, distChartEl,
+       focusAvgChartEl, focusFragChartEl].forEach(el => {
       if (el.value) try { Plotly.Plots.resize(el.value) } catch(_) {}
     })
   })
@@ -1908,11 +2027,11 @@ function renderTrendChart() {
 // Part-to-whole across ordered time buckets (days / weeks / months): one stacked
 // column per bucket, one band per task (or project). "Share" normalises every
 // column to 100 %, so a shift in the mix is visible even when the total hours
-// move; "Hours" keeps the absolute scale. The tail past MAX_DIST_SERIES folds
-// into "Other" so a colour never stands for two different tasks.
-const MAX_DIST_SERIES = 7
-const OTHER_KEY  = 'Other'
+// move; "Hours" keeps the absolute scale. Every contributing task gets its own
+// band — past the palette's 12 hues a pattern overlay (hue × texture) keeps a
+// reused hue distinguishable, so no two series ever look alike.
 const NO_PROJECT = '(no project)'
+const DIST_PATTERNS = ['', '/', 'x', '-', '\\', '+']
 
 function getDistBuckets() {
   const period = chartPeriod.value
@@ -1980,34 +2099,26 @@ function renderDistribution() {
 
   // Biggest total first → stable colour, and the largest band sits at the bottom
   // of every column where its changing height is easiest to read.
-  let keys = Object.keys(totals).sort((a, b) => totals[b] - totals[a])
+  const keys = Object.keys(totals).sort((a, b) => totals[b] - totals[a])
   hasDistData.value = keys.length > 0
   if (!hasDistData.value) { try { Plotly.purge(distChartEl.value) } catch(_) {}; return }
-
-  if (keys.length > MAX_DIST_SERIES + 1) {
-    const tail = keys.slice(MAX_DIST_SERIES)
-    keys = keys.slice(0, MAX_DIST_SERIES)
-    for (const m of perBucket) {
-      let sum = 0
-      for (const k of tail) { sum += m[k] || 0; delete m[k] }
-      if (sum > 0) m[OTHER_KEY] = (m[OTHER_KEY] || 0) + sum
-    }
-    totals[OTHER_KEY] = tail.reduce((s, k) => s + totals[k], 0)
-    keys.push(OTHER_KEY)
-  }
 
   const labels       = buckets.map(b => b.label)
   const bucketTotals = perBucket.map(m => Object.values(m).reduce((s, h) => s + h, 0))
   const maxTotal     = Math.max(0, ...bucketTotals)
   const muted        = dark ? '#64748b' : '#94a3b8'
-  const colorFor = (k, i) =>
-    (k === OTHER_KEY || k === NO_PROJECT) ? muted : CHART_PALETTE[i % CHART_PALETTE.length]
+  // Colour follows the series' rank in total hours, so it stays put as the
+  // period changes; a texture is added only once the hues start over.
+  const styleFor = (k, i) => k === NO_PROJECT
+    ? { color: muted, pattern: '' }
+    : { color: CHART_PALETTE[i % CHART_PALETTE.length],
+        pattern: DIST_PATTERNS[Math.floor(i / CHART_PALETTE.length) % DIST_PATTERNS.length] }
 
   const traces = keys.map((k, i) => {
     const hours = perBucket.map(m => m[k] || 0)
     const pct   = hours.map((h, bi) => bucketTotals[bi] > 0 ? (h / bucketTotals[bi]) * 100 : 0)
     const y     = share ? pct : hours
-    const color = colorFor(k, i)
+    const { color, pattern } = styleFor(k, i)
     // Direct labels only inside bands tall enough to hold one.
     const text = y.map(v => {
       const roomy = share ? v >= 12 : (maxTotal > 0 && v / maxTotal >= 0.1)
@@ -2018,7 +2129,10 @@ function renderDistribution() {
       type: 'bar', name: k, x: labels,
       y: y.map(v => +v.toFixed(2)),
       // A surface-coloured outline keeps a hairline gap between stacked bands.
-      marker: { color, line: { color: theme.plot, width: 1.5 } },
+      marker: {
+        color, line: { color: theme.plot, width: 1.5 },
+        ...(pattern ? { pattern: { shape: pattern, fgcolor: inkOn(color), solidity: 0.3, size: 5 } } : {}),
+      },
       text, textposition: 'inside', insidetextanchor: 'middle',
       textfont: { size: 9, color: inkOn(color) },
       customdata: hours.map((h, bi) => [h, pct[bi], bucketTotals[bi]]),
@@ -2031,7 +2145,8 @@ function renderDistribution() {
     paper_bgcolor: theme.paper,
     plot_bgcolor:  theme.plot,
     font:    { color: dark ? '#f3f4f6' : '#1f2937', size: 10 },
-    margin:  { l: 46, r: 8, t: 6, b: 56 },
+    // Room for a legend that wraps once there are many tasks.
+    margin:  { l: 46, r: 8, t: 6, b: 44 + Math.ceil(keys.length / 6) * 15 },
     barmode: 'stack',
     bargap:  labels.length > 18 ? 0.08 : 0.25,
     xaxis: { type: 'category', showgrid: false, zeroline: false, ticks: 'outside', tickfont: { size: 9 } },
@@ -2049,11 +2164,105 @@ function renderDistribution() {
   nextTick(() => { if (distChartEl.value) try { Plotly.Plots.resize(distChartEl.value) } catch(_) {} })
 }
 
+// Ordered week / month buckets for the focus-block charts, trimmed so the chart
+// never opens with empty columns from before the first logged block.
+function getFocusBuckets() {
+  const buckets = []
+  if (fragMode.value === 'week') {
+    const monday = getMonday(now.value)
+    for (let w = FOCUS_BUCKETS - 1; w >= 0; w--) {
+      const start = new Date(monday); start.setDate(start.getDate() - w * 7)
+      const end   = new Date(start);  end.setDate(end.getDate() + 7)
+      buckets.push({ label: `${String(start.getDate()).padStart(2,'0')}.${String(start.getMonth()+1).padStart(2,'0')}`, start, end })
+    }
+  } else {
+    for (let m = FOCUS_BUCKETS - 1; m >= 0; m--) {
+      const start = new Date(now.value.getFullYear(), now.value.getMonth() - m, 1)
+      const end   = new Date(start.getFullYear(), start.getMonth() + 1, 1)
+      buckets.push({ label: start.toLocaleDateString('de-DE', { month: 'short', year: '2-digit' }), start, end })
+    }
+  }
+  const first = workBlocks.value[0]
+  if (first) while (buckets.length > 1 && buckets[0].end <= first.start) buckets.shift()
+  return buckets
+}
+
+// Per bucket: Ø block length, how many blocks, and how many per logged day.
+const focusSeries = computed(() => {
+  const buckets = getFocusBuckets()
+  const acc = buckets.map(() => ({ hours: 0, count: 0, days: new Set(), longest: 0 }))
+  for (const b of workBlocks.value) {
+    const bi = buckets.findIndex(k => b.start >= k.start && b.start < k.end)
+    if (bi < 0) continue
+    const a = acc[bi]
+    a.hours += b.hours
+    a.count++
+    a.days.add(_fmtDate(b.start))
+    a.longest = Math.max(a.longest, b.hours)
+  }
+  return {
+    labels: buckets.map(b => b.label),
+    avg:     acc.map(a => a.count ? +(a.hours / a.count).toFixed(2) : 0),
+    perDay:  acc.map(a => a.days.size ? +(a.count / a.days.size).toFixed(2) : 0),
+    count:   acc.map(a => a.count),
+    days:    acc.map(a => a.days.size),
+    longest: acc.map(a => +a.longest.toFixed(2)),
+  }
+})
+
+function renderFocusCharts() {
+  if (!focusAvgChartEl.value || !focusFragChartEl.value) return
+  const f = focusSeries.value
+  if (!blockStats.value.count) {
+    ;[focusAvgChartEl, focusFragChartEl].forEach(el => { try { Plotly.purge(el.value) } catch(_) {} })
+    return
+  }
+  const overall = blockStats.value.avg
+
+  // Ø block length — one series, so one hue and no legend; the dashed line is
+  // the all-time average to compare each bucket against.
+  const avgLayout = plotLayout()
+  avgLayout.bargap = 0.2
+  avgLayout.yaxis.title = { text: 'h', font: { size: 10 } }
+  avgLayout.shapes = [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: overall, y1: overall,
+    line: { color: '#3b82f6', width: 1.6, dash: 'dash' } }]
+  avgLayout.annotations = [{ x: f.labels[f.labels.length - 1], y: overall, text: `Ø ${overall.toFixed(1)}h`,
+    showarrow: false, xanchor: 'right', yanchor: 'bottom', font: { size: 9, color: '#3b82f6' } }]
+  Plotly.react(focusAvgChartEl.value, [{
+    type: 'bar', x: f.labels, y: f.avg,
+    text: barText(f.avg), textposition: 'outside', textfont: { size: 8 }, cliponaxis: false,
+    marker: { color: 'rgba(59,130,246,.65)' },
+    customdata: f.labels.map((_, i) => [f.count[i], f.days[i], f.longest[i]]),
+    hovertemplate: 'Ø %{y:.1f} h per block<br>%{customdata[0]} blocks on %{customdata[1]} day(s)' +
+                   '<br>longest %{customdata[2]:.1f} h<extra></extra>',
+  }], avgLayout, { responsive: true, displayModeBar: false })
+
+  // Blocks per logged day — the fragmentation counterpart: more, shorter blocks
+  // means the day was cut up more often.
+  const fragLayout = plotLayout()
+  fragLayout.bargap = 0.2
+  fragLayout.yaxis.title = { text: 'blocks / day', font: { size: 10 } }
+  Plotly.react(focusFragChartEl.value, [{
+    type: 'bar', x: f.labels, y: f.perDay,
+    text: barText(f.perDay), textposition: 'outside', textfont: { size: 8 }, cliponaxis: false,
+    marker: { color: 'rgba(139,92,246,.65)' },
+    customdata: f.labels.map((_, i) => [f.count[i], f.days[i]]),
+    hovertemplate: '%{y:.1f} blocks per logged day<br>%{customdata[0]} blocks on %{customdata[1]} day(s)<extra></extra>',
+  }], fragLayout, { responsive: true, displayModeBar: false })
+
+  nextTick(() => {
+    ;[focusAvgChartEl, focusFragChartEl].forEach(el => {
+      if (el.value) try { Plotly.Plots.resize(el.value) } catch(_) {}
+    })
+  })
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 watch(() => store.theme, renderCharts)
 watch(chartPeriod, renderCharts)
 watch([distMode, distDim], () => nextTick(renderDistribution))
+watch(fragMode, () => nextTick(renderFocusCharts))
 watch(entries, () => nextTick(renderCharts), { deep: true })
 watch(absences, () => nextTick(renderCharts), { deep: true })
 watch(() => settings.weekly_hours, renderCharts)
@@ -2084,7 +2293,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   clearInterval(clockTimer)
-  ;[dailyChartEl, taskChartEl, projectChartEl, trendChartEl, distChartEl]
+  ;[dailyChartEl, taskChartEl, projectChartEl, trendChartEl, distChartEl,
+     focusAvgChartEl, focusFragChartEl]
     .forEach(el => { if (el.value) Plotly.purge(el.value) })
 })
 </script>
@@ -2232,6 +2442,9 @@ onBeforeUnmount(() => {
 .tt-seg-btn:hover { filter: none; color: var(--tx); }
 .tt-seg-btn.active { background: var(--acc-fill); color: #fff; box-shadow: 0 2px 6px var(--acsh); }
 .tt-dist-chart { width: 100%; height: 340px; }
+.tt-focus-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 2px; }
+.tt-focus-chart { width: 100%; height: 215px; }
+@media (max-width:780px) { .tt-focus-grid { grid-template-columns: 1fr; } }
 .tt-dist-empty {
   font-size: .8rem; opacity: .6; height: 340px;
   display: flex; align-items: center; justify-content: center; gap: 6px;

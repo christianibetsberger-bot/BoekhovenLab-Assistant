@@ -80,15 +80,20 @@ export function fixture(which) {
     Object.assign(series, { count: 6, intervalMinutes: 10, wells: 'A1-A6', volume: 25, pipette: 'left' })
     cfg.steps = [series]
   } else if (which === 'concurrent') {
-    // Two series from one plate: column 1 every 15 min, column 2 every 5 min.
-    plate = plate96({ name: 'Two clocks', peptide: (r, c) => 5 + c, rna: () => 10 })
+    // Two kinetics from one plate: column 1 every 15 min into sample plate 1,
+    // column 2 every 5 min into sample plate 2 — each series its own plate.
+    const full = plate96({ name: 'Two kinetics', peptide: (r, c) => 5 + c, rna: () => 10 })
+    const wells = {}
+    for (const r of ROWS) for (const c of [1, 2]) wells[`${r}${c}`] = full.wells[`${r}${c}`]
+    plate = { name: 'Two kinetics', format: 96, targetVolume: 80, wells }
     cfg = defaultOt2Config(plate)
     cfg.prefilled = true
     cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' }
+    cfg.sampleSlots = ['2', '3']
     const series = newOt2Step('series')
     Object.assign(series, { count: 6, intervalMinutes: 15, volume: 25, quenchName: 'TFA 1 %', quenchUl: 30, groups: [
-      { id: 'g1', wells: 'A1-H1', plate: 'auto', start: '', layout: 'packed', timing: 'step' },
-      { id: 'g2', wells: 'A2-H2', plate: 'auto', start: '', layout: 'packed', timing: 'interval', count: 12, intervalMinutes: 5, firstAtZero: true },
+      { id: 'g1', wells: 'A1-H1', plate: '2', start: '', layout: 'packed', timing: 'step' },
+      { id: 'g2', wells: 'A2-H2', plate: '3', start: '', layout: 'packed', timing: 'interval', count: 12, intervalMinutes: 5, firstAtZero: true },
     ] })
     cfg.steps = [series]
   } else if (which === 'times') {

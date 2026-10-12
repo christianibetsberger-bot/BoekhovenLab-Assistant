@@ -18,7 +18,7 @@ import {
   generateOpentronsProtocol, normalizeOt2Config, newOt2Step, plateDemands, wellNamesOf, parseWellSelection,
   labwareByName, targetLabwareOptions, defaultTargetLabware, sourceLabwareOptions, sampleLabwareOptions,
   columnLabwareOptions, columnPositions, tipRackOptions, opentronsFilename, fmtUl,
-  offsetKey, parseLabwareOffsets, offsetsWorkAt, PARTIAL_REAR_MAX_HEIGHT_MM,
+  offsetKey, parseLabwareOffsets, offsetsWorkAt, PARTIAL_REAR_MAX_HEIGHT_MM, seriesSchedule,
   OT2_PIPETTES, OT2_API_LEVELS, OT2_SLOTS, OT2_MODULES, OT2_STEP_TYPES,
 } from '../utils/opentronsExport'
 
@@ -186,7 +186,7 @@ const stepSummary = (s) => {
     case 'pause': return s.message || ''
     case 'mix': return `${s.wells || 'all'} · ${s.reps} × ${s.volume || 'auto'} µL`
     case 'sample': return [`${s.volume} µL from ${groupsOf(s) ? `${s.groups.length} groups` : (s.wells || 'all')}`, s.quenchName ? `onto ${s.quenchUl} µL ${s.quenchName}` : '', s.layout === 'mirror' ? 'plate layout' : '', multiWord(s)].filter(Boolean).join(' · ')
-    case 'series': return [`${s.count} × every ${s.intervalMinutes} min`, `${s.volume} µL from ${groupsOf(s) ? `${s.groups.length} groups` : (s.wells || 'all')}`, s.quenchName ? `onto ${s.quenchUl} µL ${s.quenchName}` : '', s.layout === 'mirror' ? 'plate layout' : '', multiWord(s)].filter(Boolean).join(' · ')
+    case 'series': return [scheduleWord(s), `${s.volume} µL from ${groupsOf(s) ? `${s.groups.length} groups` : (s.wells || 'all')}`, s.quenchName ? `onto ${s.quenchUl} µL ${s.quenchName}` : '', s.layout === 'mirror' ? 'plate layout' : '', multiWord(s)].filter(Boolean).join(' · ')
     case 'comment': return s.text || ''
     case 'custom': return `${(s.code || '').split('\n').filter(l => l.trim()).length} lines`
     default: return ''
@@ -204,6 +204,7 @@ const blockedStep = (s) => blocking.value.filter(b => b.stepId === s.id)
 const applyFix = (s, fix) => {
   if (fix.step) Object.assign(s, fix.step)
   if (fix.cfg) Object.assign(cfg, fix.cfg)
+  if (fix.group && s.groups?.[fix.group.index]) Object.assign(s.groups[fix.group.index], fix.group.patch)
   if (fix.dropWells?.length) {
     const keep = parseWellSelection(s.wells, props.plate).wells.filter(w => !fix.dropWells.includes(w))
     s.wells = keep.join(' ') || 'all'
@@ -224,12 +225,32 @@ const plateOptions = computed(() => [
 const groupsOf = (s) => (Array.isArray(s.groups) && s.groups.length ? s.groups : null)
 const addGroup = (s) => {
   if (!Array.isArray(s.groups)) s.groups = []
-  if (!s.groups.length) s.groups.push({ id: newOt2Step('comment').id, wells: s.wells, plate: s.plate || 'auto', start: s.start || '', layout: s.layout })
-  s.groups.push({ id: newOt2Step('comment').id, wells: '', plate: 'auto', start: '', layout: s.layout })
+  if (!s.groups.length) s.groups.push({ id: newOt2Step('comment').id, wells: s.wells, plate: s.plate || 'auto', start: s.start || '', layout: s.layout, timing: 'step' })
+  s.groups.push({ id: newOt2Step('comment').id, wells: '', plate: 'auto', start: '', layout: s.layout, timing: 'step' })
 }
 const removeGroup = (s, i) => {
   s.groups.splice(i, 1)
   if (s.groups.length === 1) { const g = s.groups[0]; Object.assign(s, { wells: g.wells, plate: g.plate, start: g.start, layout: g.layout }); s.groups = [] }
+}
+// ── When a series samples ──
+// The step counts its time points out of an interval, or takes the minutes as
+// listed. A group may keep a clock of its own, which is how one plate runs two
+// series side by side (one row every 15 min, another every 5); the generator
+// merges them into one loop. A group that switches to its own clock starts
+// from the step's numbers, so there is something sensible in the boxes.
+const seedGroupTiming = (s, g) => {
+  if (g.timing === 'step') return
+  if (g.count == null) g.count = s.count
+  if (g.intervalMinutes == null) g.intervalMinutes = s.intervalMinutes
+  if (g.firstAtZero == null) g.firstAtZero = s.firstAtZero !== false
+  if (g.times == null) g.times = s.times || ''
+}
+const schedOf = (s, g = null) => seriesSchedule(s, g)
+const scheduleWord = (s) => {
+  const base = schedOf(s)
+  const word = base.timing === 'times' ? (base.times.length ? `at ${base.list} min` : 'no time points') : `${base.count} × every ${s.intervalMinutes} min`
+  const own = (groupsOf(s) || []).filter(g => g.timing && g.timing !== 'step').length
+  return own ? `${word} + ${own} group${own === 1 ? '' : 's'} on ${own === 1 ? 'its' : 'their'} own clock` : word
 }
 // Split what the step samples into one group per row (or per column), each with
 // its own sample plate when there are plates for them.
@@ -243,7 +264,7 @@ const splitInto = (s, by) => {
     id: `${s.id}-${by}-${k}`,
     wells: wells.filter(w => keyOf(w) === k).join(' '),
     plate: cfg.sampleSlots[i] ? String(cfg.sampleSlots[i]) : 'auto',
-    start: '', layout: by === 'row' ? 'rows' : s.layout,
+    start: '', layout: by === 'row' ? 'rows' : s.layout, timing: 'step',
   }))
   if (cfg.sampleSlots.length < keys.length) store.toast?.(`${keys.length} groups, ${cfg.sampleSlots.length} sample plates — the rest share the free ones`)
 }
@@ -786,11 +807,27 @@ const download = () => {
                     <!-- Take samples / series -->
                     <template v-else-if="s.type === 'sample' || s.type === 'series'">
                       <div v-if="s.type === 'series'" class="ot-grid4">
-                        <label>Time points <input type="number" min="1" step="1" v-model="s.count" /></label>
-                        <label>Every … min <input type="number" min="0" step="1" v-model="s.intervalMinutes" /></label>
-                        <label class="ot-checks" style="grid-column: span 2;"><span><input type="checkbox" v-model="s.firstAtZero" /> first sample right away (t = 0)</span></label>
+                        <label title="Every N minutes: the time points are counted out from the start of the series. At these times: list the minutes yourself — 0, 5, 10, 30, 60 — or 0-60/5 for every 5 min up to 60; 90s and 2h are read too.">Timing
+                          <select v-model="s.timing">
+                            <option value="interval">every N minutes</option>
+                            <option value="times">at these times</option>
+                          </select>
+                        </label>
+                        <template v-if="s.timing === 'times'">
+                          <label style="grid-column: span 3;">At … min <input type="text" v-model="s.times" placeholder="0, 5, 10, 20, 40, 60, 120 — or 0-60/5, 90, 120" /></label>
+                        </template>
+                        <template v-else>
+                          <label>Time points <input type="number" min="1" step="1" v-model="s.count" /></label>
+                          <label>Every … min <input type="number" min="0" step="1" v-model="s.intervalMinutes" /></label>
+                          <label class="ot-checks" title="Ticked: the first sample is taken as soon as the series starts. Unticked: the first one comes after one interval."><span><input type="checkbox" v-model="s.firstAtZero" /> first at t = 0</span></label>
+                        </template>
                         <label title="The robot pauses before every Nth time point so you can top up the quench, swap tubes, check the plate — 0 = never">Pause every … time points <input type="number" min="0" step="1" v-model.number="s.pauseEvery" /></label>
                         <label style="grid-column: span 2;">Pause message <input type="text" v-model="s.pauseMessage" :disabled="!s.pauseEvery" placeholder="Top up the quench, check the plate …" /></label>
+                      </div>
+                      <div v-if="s.type === 'series'" class="ot-hint" :class="{ 'ot-red': schedOf(s).problem }">
+                        <i class="fas fa-clock-rotate-left" style="margin-right: 5px;"></i>
+                        <template v-if="schedOf(s).problem">{{ schedOf(s).problem }}</template>
+                        <template v-else>Sampling {{ schedOf(s).word }}<template v-if="groupsOf(s)?.some(g => g.timing && g.timing !== 'step')"> for the groups on the step's clock</template>.</template>
                       </div>
                       <div class="ot-grid4">
                         <label style="grid-column: span 2;">From wells <input type="text" v-model="s.wells" placeholder="all, or A1-H1" /></label>
@@ -832,18 +869,36 @@ const download = () => {
                         </label>
                       </div>
                       <div v-else class="ot-groups">
-                        <div class="ot-grow ot-grow-head"><span>#</span><span>From wells</span><span>Into sample plate</span><span>Start at</span><span>Layout</span><span></span></div>
-                        <div v-for="(g, gi) in s.groups" :key="g.id || gi" class="ot-grow">
-                          <span class="ot-gno">{{ gi + 1 }}</span>
-                          <input type="text" v-model="g.wells" placeholder="A1-A12" />
-                          <select v-model="g.plate"><option v-for="o in plateOptions" :key="o.value" :value="o.value">{{ o.label }}</option></select>
-                          <input type="text" v-model="g.start" placeholder="next free" />
-                          <select v-model="g.layout"><option v-for="l in LAYOUTS" :key="l.value" :value="l.value">{{ l.label }}</option></select>
-                          <button class="ot-mini" @click="removeGroup(s, gi)" title="Remove this group"><i class="fas fa-times"></i></button>
-                        </div>
+                        <div class="ot-grow" :class="{ 'ot-grow-head': true, 'ot-grow-series': s.type === 'series' }"><span>#</span><span>From wells</span><span>Into sample plate</span><span>Start at</span><span>Layout</span><span v-if="s.type === 'series'">Timing</span><span></span></div>
+                        <template v-for="(g, gi) in s.groups" :key="g.id || gi">
+                          <div class="ot-grow" :class="{ 'ot-grow-series': s.type === 'series' }">
+                            <span class="ot-gno">{{ gi + 1 }}</span>
+                            <input type="text" v-model="g.wells" placeholder="A1-A12" />
+                            <select v-model="g.plate"><option v-for="o in plateOptions" :key="o.value" :value="o.value">{{ o.label }}</option></select>
+                            <input type="text" v-model="g.start" placeholder="next free" />
+                            <select v-model="g.layout"><option v-for="l in LAYOUTS" :key="l.value" :value="l.value">{{ l.label }}</option></select>
+                            <select v-if="s.type === 'series'" v-model="g.timing" @change="seedGroupTiming(s, g)" title="A group with a clock of its own is a second series running beside the others — every group is sampled on its own schedule, in one loop.">
+                              <option value="step">as the step</option>
+                              <option value="interval">every N minutes</option>
+                              <option value="times">at these times</option>
+                            </select>
+                            <button class="ot-mini" @click="removeGroup(s, gi)" title="Remove this group"><i class="fas fa-times"></i></button>
+                          </div>
+                          <div v-if="s.type === 'series' && g.timing && g.timing !== 'step'" class="ot-grow-sub">
+                            <template v-if="g.timing === 'times'">
+                              <label class="ot-sub-wide">At … min <input type="text" v-model="g.times" placeholder="0, 5, 10, 20, 40, 60 — or 0-60/5" /></label>
+                            </template>
+                            <template v-else>
+                              <label>Time points <input type="number" min="1" step="1" v-model="g.count" /></label>
+                              <label>Every … min <input type="number" min="0" step="1" v-model="g.intervalMinutes" /></label>
+                              <label class="ot-checks"><span><input type="checkbox" v-model="g.firstAtZero" /> first at t = 0</span></label>
+                            </template>
+                            <span class="ot-muted" :class="{ 'ot-red': schedOf(s, g).problem }">{{ schedOf(s, g).problem || `group ${gi + 1} samples ${schedOf(s, g).word}` }}</span>
+                          </div>
+                        </template>
                         <div class="ot-grow-add">
                           <button class="ot-mini" @click="addGroup(s)"><i class="fas fa-plus"></i> group</button>
-                          <span class="ot-muted">each time point samples the groups in this order</span>
+                          <span class="ot-muted">{{ s.type === 'series' ? 'groups due at the same minute are sampled in this order; a group with its own clock runs beside the others' : 'each time point samples the groups in this order' }}</span>
                         </div>
                       </div>
                       <div v-if="blockedStep(s).length" class="ot-hint ot-red">
@@ -862,6 +917,7 @@ const download = () => {
                           Time point 1 → {{ samplePlan(s).points[0].spans.map(sp => `slot ${sp.slot} ${sp.wells[0]}–${sp.wells[sp.wells.length - 1]}`).join(' + ') }}<template v-if="samplePlan(s).points.length > 1">, time point 2 → {{ samplePlan(s).points[1].spans.map(sp => `slot ${sp.slot} ${sp.wells[0]}–${sp.wells[sp.wells.length - 1]}`).join(' + ') }}</template>
                         </template>
                         <template v-if="samplePlan(s).swaps?.length"><br>Plate changes before time point{{ samplePlan(s).swaps.length === 1 ? '' : 's' }} {{ samplePlan(s).swaps.map(i => i + 1).join(', ') }}.</template>
+                        <template v-if="samplePlan(s).schedule?.staggered"><br><b>Two clocks:</b> <template v-for="(g, k) in samplePlan(s).schedule.groups" :key="g.no">{{ k ? ' · ' : '' }}group {{ g.no }} {{ g.word }}</template> — {{ samplePlan(s).schedule.timeline.length }} time points in all, the series runs {{ samplePlan(s).schedule.lastMin }} min; a group is only pipetted at the time points on its own clock.</template>
                       </div>
                       <div v-else-if="samplePlan(s)" class="ot-hint">
                         <b>{{ planWord(s) }}</b> ·
@@ -875,7 +931,7 @@ const download = () => {
                         <template v-if="s.layout === 'mirror'">Each time point goes into the next free sample columns, laid out as on the plate: the same rows, the plate's columns side by side, never split over two plates. Rows the plate does not use stay empty</template>
                         <template v-else>Samples go into the sample labware column by column, each time point into the next free wells</template>; the robot moves on to the next plate on the deck by itself and only pauses when the last one is full<template v-if="summary"> — {{ summary.sampleWellsFilled }} wells over {{ summary.samplePlates || 1 }} plate{{ summary.samplePlates > 1 ? 's' : '' }}, {{ summary.samplePlatesOnDeck || 1 }} on the deck{{ summary.sampleSwaps ? `, ${summary.sampleSwaps} change${summary.sampleSwaps === 1 ? '' : 's'} scheduled` : '' }}</template>.
                         <template v-if="hasMulti"> Whole columns (A1-H1, A1-H2, …) are taken eight at a time with the 8-channel, one sample column per plate column.</template>
-                        <template v-if="s.type === 'series'"> Intervals are measured from the start of the series, so the time sampling takes does not drift them.</template>
+                        <template v-if="s.type === 'series'"> Time points are measured from the start of the series, so the time sampling takes does not drift them. To run two series side by side — one set of wells every 15 min, another every 5 — split into groups and give a group a clock of its own; groups due at the same minute are sampled one after the other.</template>
                         <template v-if="hasMulti && s.multi === 'partial'"> An equal, unbroken run of {{ s.layout === 'mirror' ? '2 to 7' : '2 or 4' }} wells per column is one stroke with just that many tips — the run is addressed by its last well, since the 8-channel is tipped from the front. Nothing over {{ PARTIAL_REAR_MAX_HEIGHT_MM }} mm may stand in the slot behind anything it reaches into.</template>
                         <template v-if="cfg.target.on === 'thermocycler'"> The Thermocycler lid opens for each time point and closes again in between, and the block holds its temperature throughout.</template>
                         <template v-else-if="cfg.target.on === 'heater_shaker'"> Shaking stops for each time point and starts again afterwards.</template>
@@ -1172,8 +1228,16 @@ const download = () => {
 .ot-red { color: var(--danger-color); font-weight: 700; }
 .ot-groups { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
 .ot-grow { display: grid; grid-template-columns: 18px minmax(90px, 1.4fr) 1.1fr 0.8fr 1.2fr 24px; gap: 6px; align-items: center; }
+.ot-grow.ot-grow-series { grid-template-columns: 18px minmax(80px, 1.3fr) 1fr 0.7fr 1.1fr 1fr 24px; }
 .ot-grow-head > span { font-size: 0.64rem; text-transform: uppercase; letter-spacing: .03em; color: var(--tx3); white-space: nowrap; overflow: hidden; }
+/* A group on its own clock: its numbers sit on a line of their own under the row. */
+.ot-grow-sub { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 10px; margin: 0 30px 6px 24px; padding: 6px 10px 2px; border-left: 2px solid var(--ln2); }
+.ot-card .ot-grow-sub label { margin-bottom: 6px; width: 110px; }
+.ot-card .ot-grow-sub label.ot-sub-wide { width: min(100%, 320px); }
+.ot-card .ot-grow-sub label.ot-checks { width: auto; height: 32px; margin-bottom: 6px; }
+.ot-grow-sub .ot-muted { margin-bottom: 10px; }
 .ot-grow-add { display: flex; gap: 8px; align-items: center; }
+.ot-grow-add .ot-mini { width: auto; padding: 2px 8px; white-space: nowrap; }
 .ot-gno { font-weight: 700; color: var(--tx2); text-align: center; font-size: 0.78rem; }
 .ot-splitrow { display: flex; gap: 4px; flex-wrap: wrap; }
 .ot-splitrow .ot-mini { width: auto; padding: 2px 8px; }

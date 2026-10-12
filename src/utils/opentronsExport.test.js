@@ -5,7 +5,7 @@ import {
   adjacentSlots, loadVolume, opentronsFilename, multiGroups,
   offsetKey, offsetFor, offsetsWorkAt, parseLabwareOffsets,
   partialColumnGroups, partialEndNozzle, PARTIAL_REAR_MAX_HEIGHT_MM, slotBehind, mirrorLayout,
-  columnRuns, packFootprint, footprintAlign, rowsLayout,
+  columnRuns, packFootprint, footprintAlign, rowsLayout, parseTimePoints, seriesSchedule,
 } from './opentronsExport'
 
 // The markup the planners actually write into a well (see plateExport.test.js).
@@ -393,7 +393,10 @@ describe('generateOpentronsProtocol — modules and steps', () => {
     // The swap comes right after the time-point comment, before anything is pipetted.
     const k = actions.findIndex(a => a.kind === 'swap')
     expect(actions[k - 1].kind).toBe('comment')
-    expect(clearance.find(c => c.id === 'samples')).toMatchObject({ ok: true, info: '1920 wells over 20 plates — 19 plate changes scheduled' })
+    // 96 wells one at a time take longer than the 5 min between time points, and the estimate says so once.
+    expect(warnings.filter(w => /is due before the robot has finished/.test(w))).toHaveLength(1)
+    expect(warnings.some(w => /time point 2 \(t = 10 min\) is due before the robot has finished time point 1/.test(w))).toBe(true)
+    expect(clearance.find(c => c.id === 'samples')).toMatchObject({ ok: false, info: '1920 wells over 20 plates — 19 plate changes scheduled' })
   })
   it('a series can pause for a scheduled check every N time points; the clearance list sorts every warning into a check', () => {
     const { code, warnings, actions, clearance } = gen(fullPlate(), cfg => {
@@ -1118,7 +1121,7 @@ describe('a module behind a slot blocks a partial stroke', () => {
     cfg.sampleSlots = slots
     cfg.steps = [
       Object.assign(newOt2Step('thermocycler'), { lid: 'close', blockTemp: 37 }),
-      Object.assign(newOt2Step('series'), { count: 4, intervalMinutes: 1, wells: 'A1-D1 A2-D2', volume: 25 }),
+      Object.assign(newOt2Step('series'), { count: 4, intervalMinutes: 5, wells: 'A1-D1 A2-D2', volume: 25 }),
     ]
   })
 
@@ -1521,5 +1524,136 @@ describe('a group of wells with a sample plate of its own', () => {
     expect(plain.code).not.toContain('swap_before')
     expect(newOt2Step('series')).toMatchObject({ plate: 'auto', start: '', groups: [] })
     expect(normalizeOt2Config({ steps: [{ id: 'x', type: 'series' }] }, fullPlate()).steps[0]).toMatchObject({ plate: 'auto', groups: [] })
+  })
+})
+
+describe('when a series samples', () => {
+  const pre = (cfg) => { cfg.prefilled = true }
+
+  it('reads a list of minutes, with units and ranges, sorted and without repeats', () => {
+    expect(parseTimePoints('0, 5, 10, 30, 60')).toEqual({ times: [0, 5, 10, 30, 60], bad: [] })
+    expect(parseTimePoints('90s 2h 30min 1.5')).toEqual({ times: [1.5, 30, 120], bad: [] })
+    expect(parseTimePoints('0-20/5, 60, 10')).toEqual({ times: [0, 5, 10, 15, 20, 60], bad: [] })
+    expect(parseTimePoints('0; 5;; soon, 10-5/1')).toEqual({ times: [0, 5], bad: ['soon', '10-5/1'] })
+    expect(parseTimePoints('')).toEqual({ times: [], bad: [] })
+  })
+
+  it('counts time points out of an interval, or takes them as listed; a group follows the step unless it has a clock of its own', () => {
+    const s = Object.assign(newOt2Step('series'), { count: 4, intervalMinutes: 15 })
+    expect(seriesSchedule(s)).toMatchObject({ timing: 'interval', own: false, times: [0, 15, 30, 45], word: 'every 15 min × 4 (t = 0 … 45 min)', problem: '' })
+    expect(seriesSchedule(Object.assign(newOt2Step('series'), { count: 3, intervalMinutes: 10, firstAtZero: false })).times).toEqual([10, 20, 30])
+    expect(seriesSchedule(Object.assign(newOt2Step('series'), { timing: 'times', times: '0, 5, 2h' }))).toMatchObject({ timing: 'times', times: [0, 5, 120], word: 'at 0, 5, 120 min (3 time points)' })
+    expect(seriesSchedule(s, { timing: 'step', count: 99 })).toMatchObject({ own: false, times: [0, 15, 30, 45] })
+    expect(seriesSchedule(s, { timing: 'interval', count: 3, intervalMinutes: 5 })).toMatchObject({ own: true, times: [0, 5, 10] })
+    expect(seriesSchedule(s, { timing: 'times', times: '' }).problem).toMatch(/no time points could be read/)
+    expect(seriesSchedule(Object.assign(newOt2Step('series'), { intervalMinutes: 0 })).problem).toMatch(/positive number of minutes/)
+  })
+
+  it('lists the minutes in the Python and waits for each, when they are typed in', () => {
+    const { code, warnings, blocking, actions, summary } = gen(fullPlate(), cfg => {
+      pre(cfg)
+      cfg.steps = [Object.assign(newOt2Step('series'), { timing: 'times', times: '0, 5, 10, 20, 40, 60, 2h', wells: 'A1-H1', volume: 5, quenchName: 'TFA', quenchUl: 20 })]
+    })
+    expect(blocking).toEqual([])
+    expect(warnings).toEqual([])
+    expect(code).toContain('# Step 1: sampling series — 7 time points at 0, 5, 10 … 60, 120 min, 5 µL from 8 wells (p20)')
+    expect(code).toContain('series_times = [0, 5, 10, 20, 40, 60, 120]  # minutes from the start of the series')
+    expect(code).toContain('series_starts = [0, 8, 16, 24, 32, 40, 48]')
+    expect(code).toContain('for i, t_min in enumerate(series_times):')
+    expect(code).toContain('    wait_until(series_t0 + t_min * 60)')
+    expect(code).toContain('protocol.comment(f"Time point {i + 1}/7 at t = {t_min} min")')
+    expect(code).not.toContain('range(7)')
+    const points = actions.filter(a => a.kind === 'comment' && /^Time point/.test(a.text))
+    expect(points.map(a => a.text)).toEqual([0, 5, 10, 20, 40, 60, 120].map((t, k) => `Time point ${k + 1}/7 at t = ${t} min`))
+    const t0 = points[0].clockSec
+    expect(points[6].clockSec).toBe(t0 + 120 * 60)
+    expect(summary.sources.find(d => d.isQuench).demandUl).toBe(20 * 8 * 7)
+    expect(Object.values(summary.sampling)[0].schedule).toMatchObject({ staggered: false, timeline: [0, 5, 10, 20, 40, 60, 120], lastMin: 120 })
+    assertPythonShape(code)
+  })
+
+  it('runs two series side by side — one group every 15 min, another every 5 — in one loop', () => {
+    const { code, warnings, blocking, actions, summary } = gen(fullPlate(), cfg => {
+      pre(cfg)
+      cfg.pipettes = { left: 'p300_multi_gen2', right: 'p20_single_gen2' }
+      cfg.steps = [Object.assign(newOt2Step('series'), { count: 6, intervalMinutes: 15, volume: 25, groups: [
+        { id: 'g1', wells: 'A1-H1', timing: 'step' },
+        { id: 'g2', wells: 'A2-H2', timing: 'interval', count: 12, intervalMinutes: 5, firstAtZero: true },
+      ] })]
+    })
+    expect(blocking).toEqual([])
+    expect(warnings).toEqual([])
+    // Every minute either group is due, once: 0 … 55 every 5, then 60 and 75.
+    expect(code).toContain('series_times = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 75]')
+    expect(code).toContain('# Step 1: sampling series — 14 time points in all (group 1 every 15 min × 6 (t = 0 … 75 min); group 2 every 5 min × 12 (t = 0 … 55 min))')
+    expect(code).toContain('group 1: 8 wells (A1–H1) → sample plate 1 (slot 2), every 15 min × 6 (t = 0 … 75 min)')
+    expect(code).toContain('group 2: 8 wells (A2–H2) → sample plate 1 (slot 2), every 5 min × 12 (t = 0 … 55 min)')
+    // A group's starts are keyed by time point, and its lines run only when it is due.
+    expect(code).toMatch(/series_starts_g1 = \{0: 0, 3: 32, 6: 64, 9: \d+, 12: \d+, 13: \d+\}/)
+    expect(code).toMatch(/series_starts_g2 = \{0: 8, 1: 16, 2: 24, 3: 40, 4: 48, 5: 56, 6: 72, 7: 80, 8: 88(, \d+: \d+){3}\}/)
+    expect(code).toContain('        if i in series_starts_g1:\n            dests_g1_p300m_8 = [sample_dests[series_starts_g1[i] + o] for o in series_offsets_g1_p300m_8]')
+    expect(code).toContain('            p300m.transfer(25, [plate[w] for w in series_wells_g1_p300m_8], dests_g1_p300m_8, new_tip="always", blow_out=True, blowout_location="destination well")')
+    expect(code).toContain('        if i in series_starts_g2:')
+    // All 8 nozzles for both groups: nothing to configure, in or out of the loop.
+    expect(code).not.toContain('configure_nozzle_layout')
+    const transfers = actions.filter(a => a.kind === 'transfer')
+    expect(transfers.filter(a => a.group === 1)).toHaveLength(6)
+    expect(transfers.filter(a => a.group === 2)).toHaveLength(12)
+    const comments = actions.filter(a => a.kind === 'comment' && /^Time point/.test(a.text)).map(a => a.text)
+    expect(comments[0]).toBe('Time point 1/14 at t = 0 min — groups 1, 2')
+    expect(comments[1]).toBe('Time point 2/14 at t = 5 min — group 2')
+    expect(comments[13]).toBe('Time point 14/14 at t = 75 min — group 1')
+    // 18 columns of samples do not fit one plate: a change is scheduled, and no well is used twice per load.
+    const swap = actions.find(a => a.kind === 'swap')
+    expect(swap).toBeTruthy()
+    const before = actions.slice(0, actions.indexOf(swap)).filter(a => a.kind === 'transfer').flatMap(a => a.dst.spans.flatMap(sp => sp.wells))
+    expect(new Set(before).size).toBe(before.length)
+    expect(Object.values(summary.sampling)[0].schedule).toMatchObject({ staggered: true, lastMin: 75, groups: [{ no: 1, own: false, count: 6 }, { no: 2, own: true, count: 12 }] })
+    assertPythonShape(code)
+  })
+
+  it('a group can list its own minutes beside a step on an interval', () => {
+    const { code, blocking, actions } = gen(fullPlate(), cfg => {
+      pre(cfg)
+      cfg.steps = [Object.assign(newOt2Step('series'), { count: 2, intervalMinutes: 15, volume: 5, groups: [
+        { id: 'a', wells: 'A1', timing: 'step' },
+        { id: 'b', wells: 'B1', timing: 'times', times: '0, 2, 4' },
+      ] })]
+    })
+    expect(blocking).toEqual([])
+    expect(code).toContain('series_times = [0, 2, 4, 15]')
+    expect(code).toContain('series_starts_g1 = {0: 0, 3: 4}')
+    expect(code).toContain('series_starts_g2 = {0: 1, 1: 2, 2: 3}')
+    expect(actions.filter(a => a.kind === 'transfer').map(a => [a.group, a.dst.wells[0]])).toEqual([[1, 'A1'], [2, 'B1'], [2, 'C1'], [2, 'D1'], [1, 'E1']])
+  })
+
+  it('stops the file when a list of times reads as nothing, and names what it could not read otherwise', () => {
+    const r = gen(fullPlate(), cfg => { pre(cfg); cfg.steps = [Object.assign(newOt2Step('series'), { timing: 'times', times: 'soon', wells: 'A1', volume: 5 })] })
+    expect(r.blocking.map(b => b.code)).toEqual(['TIMES'])
+    expect(r.blocking[0].fixes[0]).toMatchObject({ step: { timing: 'interval' } })
+    expect(r.code).toContain('raise RuntimeError(')
+    const g = gen(fullPlate(), cfg => { pre(cfg); cfg.steps = [Object.assign(newOt2Step('series'), { count: 2, intervalMinutes: 10, volume: 5, groups: [{ id: 'a', wells: 'A1', timing: 'step' }, { id: 'b', wells: 'B1', timing: 'times', times: '' }] })] })
+    expect(g.blocking[0]).toMatchObject({ code: 'TIMES', fixes: [{ group: { index: 1, patch: { timing: 'step' } } }] })
+    expect(g.blocking[0].message).toMatch(/^group 2: no time points/)
+    const w = gen(fullPlate(), cfg => { pre(cfg); cfg.steps = [Object.assign(newOt2Step('series'), { timing: 'times', times: '0, five, 10', wells: 'A1', volume: 5 })] })
+    expect(w.blocking).toEqual([])
+    expect(w.warnings).toContain('Sampling series: "five" could not be read as a time — the rest was kept.')
+    expect(w.code).toContain('series_times = [0, 10]')
+  })
+
+  it('says when a time point is due before the robot can finish the one before', () => {
+    const { warnings } = gen(fullPlate(), cfg => { pre(cfg); cfg.steps = [Object.assign(newOt2Step('series'), { timing: 'times', times: '0, 1, 30', wells: 'all', volume: 5 })] })
+    expect(warnings.filter(w => /is due before the robot has finished/.test(w))).toEqual([expect.stringMatching(/^Sampling series: time point 2 \(t = 1 min\) is due before the robot has finished time point 1 — by this estimate it would be taken about \d+(\.\d)? min late\./)])
+  })
+
+  it('older steps and groups keep the step\'s clock, and the loop they always had', () => {
+    const c = normalizeOt2Config({ steps: [{ id: 'x', type: 'series', count: 3, intervalMinutes: 10, groups: [{ id: 'g', wells: 'A1' }] }] }, fullPlate())
+    expect(c.steps[0]).toMatchObject({ timing: 'interval', times: '' })
+    expect(c.steps[0].groups[0]).toMatchObject({ timing: 'step', wells: 'A1' })
+    expect(seriesSchedule(c.steps[0], c.steps[0].groups[0]).times).toEqual([0, 10, 20])
+    const { code } = gen(fullPlate(), cfg => { pre(cfg); cfg.steps = [Object.assign(newOt2Step('series'), { count: 3, intervalMinutes: 10, wells: 'A1-A3', volume: 10 })] })
+    expect(code).toContain('for i in range(3):')
+    expect(code).toContain('wait_until(series_t0 + i * 10 * 60)')
+    expect(code).not.toContain('series_times')
   })
 })

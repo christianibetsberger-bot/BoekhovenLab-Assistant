@@ -1,7 +1,7 @@
 // Dev-only preview of the OT-2 export dialog, outside the app shell and its login.
 // Serve with `npm run dev`, then open
 //   /BoekhovenLab-Assistant/tools/ot2-preview/index.html?case=multi&tab=deck
-// case: basic | multi | swap | modules | layout | groups | hybrid | blocked
+// case: basic | multi | swap | modules | layout | groups | hybrid | blocked | concurrent | times
 //       tab: robot | deck | steps | preview | code
 import { createApp, h } from 'vue'
 import { createPinia } from 'pinia'

@@ -441,7 +441,7 @@ export const OT2_STEP_TYPES = [
   { type: 'pause',         label: 'Pause for user',     icon: 'fa-hand',             help: 'Stop until someone presses Resume in the Opentrons App.' },
   { type: 'mix',           label: 'Mix wells',          icon: 'fa-blender',          help: 'Mix the plate wells in place.' },
   { type: 'sample',        label: 'Take samples',       icon: 'fa-vial',             help: 'Move a sample from plate wells into the sample labware — once.' },
-  { type: 'series',        label: 'Sampling series',    icon: 'fa-clock-rotate-left', help: 'Take samples every N minutes, M times, each time point into fresh wells.' },
+  { type: 'series',        label: 'Sampling series',    icon: 'fa-clock-rotate-left', help: 'Take samples every N minutes or at the times you list, each time point into fresh wells. Groups of wells can run on clocks of their own, side by side.' },
   { type: 'comment',       label: 'Comment',            icon: 'fa-message',          help: 'A line shown in the run log.' },
   { type: 'custom',        label: 'Custom Python',      icon: 'fa-code',             help: 'Your own Python inside run(); the labware and pipettes are in scope.' },
 ]
@@ -465,7 +465,12 @@ export function newOt2Step(type) {
     // groups: [] = the whole selection goes to one destination; otherwise one
     //         entry per group of wells, each with its own plate, start and layout.
     case 'sample':        return { ...base, wells: 'all', volume: 10, pipette: 'auto', multi: 'partial', layout: 'packed', plate: 'auto', start: '', groups: [], newTip: 'always', mixBeforeReps: 0, mixBeforeUl: '', quenchName: '', quenchUl: '' }
-    case 'series':        return { ...base, count: 6, intervalMinutes: 30, firstAtZero: true, wells: 'all', volume: 10, pipette: 'auto', multi: 'partial', layout: 'packed', plate: 'auto', start: '', groups: [], newTip: 'always', mixBeforeReps: 0, mixBeforeUl: '', quenchName: '', quenchUl: '', pauseEvery: 0, pauseMessage: '' }
+    // timing: 'interval' = count × every intervalMinutes (first at t = 0 or after
+    //         one interval); 'times' = the minutes listed in `times`, as typed.
+    //         A group may carry a timing of its own ('step' = the step's), which
+    //         is how two series run side by side from one plate: the wells of one
+    //         group every 15 min, those of another every 5.
+    case 'series':        return { ...base, timing: 'interval', count: 6, intervalMinutes: 30, firstAtZero: true, times: '', wells: 'all', volume: 10, pipette: 'auto', multi: 'partial', layout: 'packed', plate: 'auto', start: '', groups: [], newTip: 'always', mixBeforeReps: 0, mixBeforeUl: '', quenchName: '', quenchUl: '', pauseEvery: 0, pauseMessage: '' }
     case 'comment':       return { ...base, text: '' }
     case 'custom':        return { ...base, code: '' }
     default:              return base
@@ -513,12 +518,81 @@ export function normalizeOt2Config(cfg, plate) {
   c.deck = { ...d.deck, ...(cfg?.deck || {}) }
   c.compounds = { ...(cfg?.compounds || {}) }
   c.offsets = { ...(cfg?.offsets || {}) }
-  c.steps = Array.isArray(cfg?.steps) && cfg.steps.length ? cfg.steps.map(s => ({ ...newOt2Step(s.type), ...s })) : d.steps
+  // A group saved before groups had a timing of their own follows the step's.
+  c.steps = Array.isArray(cfg?.steps) && cfg.steps.length
+    ? cfg.steps.map(s => ({ ...newOt2Step(s.type), ...s, ...(Array.isArray(s.groups) ? { groups: s.groups.map(g => ({ timing: 'step', ...g })) } : {}) }))
+    : d.steps
   // The single sample slot of older configs becomes the first of the list.
   const slots = Array.isArray(cfg?.sampleSlots) ? cfg.sampleSlots.map(String).filter(Boolean) : (cfg?.deck?.samples ? [String(cfg.deck.samples)] : [])
   c.sampleSlots = slots.length ? [...new Set(slots)] : d.sampleSlots
   delete c.deck.samples
   return c
+}
+
+// ── When a series samples ────────────────────────────────────────────────────
+
+const fmtMin = (m) => (Math.round(m * 1000) / 1000).toString()
+
+/**
+ * The time points typed into a series, in minutes: "0, 5, 10, 30, 60, 120".
+ * A number is minutes; "90s", "2h" and "30min" say otherwise; "0-60/5" is every
+ * 5 min from 0 to 60. The list comes back sorted, without repeats, and with
+ * whatever could not be read in `bad` so the dialog can point at it.
+ */
+export function parseTimePoints(text) {
+  const times = [], bad = []
+  const unit = (u) => u === 's' || u === 'sec' ? 1 / 60 : u === 'h' ? 60 : 1
+  const one = (tok) => {
+    const m = /^(\d+(?:\.\d+)?)\s*(s|sec|m|min|h)?$/i.exec(tok)
+    return m ? Number(m[1]) * unit((m[2] || '').toLowerCase()) : null
+  }
+  for (const raw of String(text || '').split(/[\s,;]+/)) {
+    const tok = raw.trim()
+    if (!tok) continue
+    const range = /^(.+?)(?:-|\.\.)(.+?)\/(.+)$/.exec(tok)
+    if (range) {
+      const a = one(range[1]), b = one(range[2]), step = one(range[3])
+      if (a == null || b == null || step == null || !(step > 0) || b < a) { bad.push(tok); continue }
+      for (let t = a; t <= b + 1e-9; t += step) times.push(t)
+      continue
+    }
+    const t = one(tok)
+    if (t == null) bad.push(tok)
+    else times.push(t)
+  }
+  const seen = new Set(), out = []
+  for (const t of times.map(t => Math.round(t * 1e6) / 1e6).sort((a, b) => a - b)) {
+    if (seen.has(t)) continue
+    seen.add(t); out.push(t)
+  }
+  return { times: out, bad }
+}
+
+/**
+ * When one group of a series is sampled: the step's own timing, or the group's
+ * when it has one. Returns the minutes from the start of the series and a word
+ * for the dialog and the Python ("every 15 min × 6 (t = 0 … 75 min)").
+ */
+export function seriesSchedule(step, group = null) {
+  const own = !!(group && group.timing && group.timing !== 'step')
+  const src = own ? group : step
+  const timing = src.timing === 'times' ? 'times' : 'interval'
+  if (timing === 'times') {
+    const { times, bad } = parseTimePoints(src.times)
+    const list = times.length <= 6 ? times.map(fmtMin).join(', ') : `${times.slice(0, 3).map(fmtMin).join(', ')} … ${times.slice(-2).map(fmtMin).join(', ')}`
+    const word = times.length ? `at ${list} min (${times.length} time point${times.length === 1 ? '' : 's'})` : 'no time points'
+    const problem = !times.length ? `no time points could be read from "${String(src.times || '').trim() || ' '}" — list minutes such as 0, 5, 10, 30, 60 (or 0-60/5 for every 5 min up to 60)`
+      : bad.length ? `"${bad.join('", "')}" could not be read as a time — the rest was kept` : ''
+    return { timing, own, times, word, list, problem, bad, lastMin: times[times.length - 1] ?? 0 }
+  }
+  const count = Math.max(1, Math.floor(Number(src.count) || 0))
+  const ivRaw = parseFloat(String(src.intervalMinutes ?? '').replace(',', '.'))
+  const iv = isFinite(ivRaw) && ivRaw > 0 ? ivRaw : 0
+  const firstAtZero = src.firstAtZero !== false
+  const times = Array.from({ length: count }, (_, i) => Math.round((firstAtZero ? i : i + 1) * iv * 1e6) / 1e6)
+  const last = times[times.length - 1]
+  const word = `every ${fmtMin(iv)} min × ${count} (t = ${fmtMin(times[0])}${count > 1 ? ` … ${fmtMin(last)}` : ''} min)`
+  return { timing, own, times, word, problem: iv > 0 ? '' : 'the interval must be a positive number of minutes', count, intervalMinutes: iv, firstAtZero, lastMin: last }
 }
 
 // ── Reading the plate ────────────────────────────────────────────────────────
@@ -806,18 +880,28 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   const steps = prefilled ? allSteps.filter(s => s.type !== 'build') : allSteps
   const stepsOf = (...types) => steps.filter(s => types.includes(s.type))
 
+  // A step samples one set of wells, or several groups each with their own
+  // destination — a row of the plate into one sample plate, another row into
+  // the next. One group is the ordinary case and keeps the shorter Python.
+  // In a series every group has a schedule too: the step's, or one of its own,
+  // which is how one plate carries two series running side by side.
+  const groupsOf = (s) => (Array.isArray(s.groups) && s.groups.length
+    ? s.groups.map((g, i) => ({ no: i + 1, wells: g.wells, plate: String(g.plate || 'auto'), start: String(g.start || ''), layout: g.layout || s.layout, sched: s.type === 'series' ? seriesSchedule(s, g) : null }))
+    : [{ no: 1, wells: s.wells, plate: String(s.plate || 'auto'), start: String(s.start || ''), layout: s.layout, sched: s.type === 'series' ? seriesSchedule(s) : null }])
+
   // Quench liquids from sampling steps are sources too: they need a tube and a
   // volume like any stock, and are pipetted from the same racks.
   const quenchDemands = new Map()
-  const quenchStepCount = (s) => (s.type === 'series' ? Math.max(1, Math.floor(Number(s.count) || 0)) : 1)
   for (const s of stepsOf('sample', 'series')) {
     const qn = String(s.quenchName || '').trim()
     const qv = num(s.quenchUl)
     if (!qn || !(qv > 0)) continue
-    const n = parseWellSelection(s.wells, plate).wells.length
     const key = 'quench:' + qn.toLowerCase()
     if (!quenchDemands.has(key)) quenchDemands.set(key, { key, name: qn, code: '', invId: '', stock: null, unit: '', isFill: false, linked: false, isQuench: true, transfers: [], totalUl: 0, included: true, position: cfg.compounds?.[key]?.position || '' })
-    quenchDemands.get(key).totalUl += qv * n * quenchStepCount(s)
+    for (const g of groupsOf(s)) {
+      const n = parseWellSelection(g.wells, plate).wells.length
+      quenchDemands.get(key).totalUl += qv * n * (g.sched ? Math.max(1, g.sched.times.length) : 1)
+    }
   }
   // What the robot draws from a tube or trough. A prefilled plate contributes
   // nothing here — only the quench liquids a sampling step pours still need one.
@@ -978,12 +1062,6 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     plan.shape = mirror
     return plan
   }
-  // A step samples one set of wells, or several groups each with their own
-  // destination — a row of the plate into one sample plate, another row into
-  // the next. One group is the ordinary case and keeps the shorter Python.
-  const groupsOf = (s) => (Array.isArray(s.groups) && s.groups.length
-    ? s.groups.map((g, i) => ({ no: i + 1, wells: g.wells, plate: String(g.plate || 'auto'), start: String(g.start || ''), layout: g.layout || s.layout }))
-    : [{ no: 1, wells: s.wells, plate: String(s.plate || 'auto'), start: String(s.start || ''), layout: s.layout }])
   let stepNo = 0
   for (const s of steps) {
     stepNo++
@@ -1018,6 +1096,13 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
           message: `${many ? `group ${g.no} is` : 'the samples are'} set to start at ${g.start}, which is not a well of the ${samplesLw.label}.`,
           fixes: [{ label: 'Start at the next free well', step: many ? {} : { start: '' } }] })
       }
+      // A list of times that reads as nothing stops the file: a series that
+      // silently took no samples is worse than one that will not start.
+      if (g.sched && g.sched.timing === 'times' && !g.sched.times.length) {
+        blocking.push({ stepId: s.id, step: stepNo, label, code: 'TIMES',
+          message: `${many && g.sched.own ? `group ${g.no}: ` : ''}${g.sched.problem}.`,
+          fixes: g.sched.own && many ? [{ label: 'Same times as the step', group: { index: g.no - 1, patch: { timing: 'step' } } }] : [{ label: 'Every N minutes instead', step: { timing: 'interval' } }] })
+      } else if (g.sched?.problem) warn(`${label}${many && g.sched.own ? `, group ${g.no}` : ''}: ${g.sched.problem}.`)
       const plan = planSampling(s, what, stepNo, wells, tw, shape)
       units.push({ ...g, wells, tw, plan, shape, label: what })
     }
@@ -1172,7 +1257,22 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     const units = pre.units
     const vol = num(s.volume) || 0
     if (!(vol > 0)) warn(`${label}: sample volume must be a positive number of µL.`)
-    const count = s.type === 'series' ? Math.max(1, Math.floor(Number(s.count) || 0)) : 1
+    // The time points of the step: every group's schedule merged into one
+    // timeline, so two series from one plate run side by side in a single loop.
+    // A group is "due" at the time points on its own schedule; a one-off
+    // sample is one time point everyone is due at.
+    const timeline = s.type === 'series'
+      ? [...new Set(units.flatMap(u => u.sched ? u.sched.times : [0]))].sort((a, b) => a - b)
+      : [0]
+    if (!timeline.length) timeline.push(0)
+    for (const u of units) {
+      u.due = new Set(s.type === 'series' && u.sched ? u.sched.times.map(t => timeline.indexOf(t)).filter(i => i >= 0) : [0])
+      if (!u.due.size) u.due.add(0)
+    }
+    const dueUnits = (i) => units.filter(u => u.due.has(i))
+    const count = timeline.length
+    // Staggered: not every group is sampled at every time point.
+    const staggered = units.some(u => u.due.size !== count)
     const capacity = capacityAll
     const deckCapacity = capacity * sampleSlots.length
     if (samplesLw && vol > samplesLw.maxUl) warn(`${label}: ${pyNum(vol)} µL exceeds a ${samplesLw.label} well (${samplesLw.maxUl} µL).`)
@@ -1214,7 +1314,8 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
       u.filled = ordered.reduce((a, { st }) => a + st.wells.length, 0)
       u.plateIdx = -1
       u.cursor = 0
-      u.points = []
+      u.points = []                  // the time points this group is sampled at, in order
+      u.pointAt = new Map()          // time point index -> that point (a staggered group skips some)
       if (deckCapacity && u.extent > deckCapacity) warn(`${u.label}: one time point needs ${u.extent} sample wells but the ${sampleSlots.length > 1 ? `${sampleSlots.length} × ` : ''}${samplesLw.label} on the deck hold ${deckCapacity} — sample fewer wells, add a sample plate, or split the step in two.`)
     }
     const starts = [], fresh = new Set()
@@ -1232,7 +1333,8 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         if (loadIdx > sampleLoadIdx) { fresh.add(i); sampleLoadIdx = loadIdx }
         const local = deckCapacity ? abs % deckCapacity : abs
         starts.push(local)
-        u.points.push({ i, abs: local, plateIdx: capacity ? Math.floor(local / capacity) : 0, load: fresh.size })
+        const pt = { i, abs: local, plateIdx: capacity ? Math.floor(local / capacity) : 0, load: fresh.size }
+        u.points.push(pt); u.pointAt.set(i, pt)
         abs += u.extent
       }
       sampleCursor = abs
@@ -1246,7 +1348,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         const attempt = (clear) => {
           const scratch = plateUsed.map((set, pi) => clear.includes(pi) ? new Set() : new Set(set))
           const placed = []
-          for (const u of units) {
+          for (const u of dueUnits(i)) {
             const allowed = u.plate !== 'auto' ? [sampleSlots.indexOf(u.plate)] : autoPlates
             let got = null
             for (const pi of allowed) {
@@ -1287,7 +1389,8 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         for (const { u, pi, c } of r.placed) {
           u.plateIdx = pi
           u.cursor = u.advance(c)
-          u.points.push({ i, abs: pi * capacity + c, plateIdx: pi, load: plateLoads[pi] })
+          const pt = { i, abs: pi * capacity + c, plateIdx: pi, load: plateLoads[pi] }
+          u.points.push(pt); u.pointAt.set(i, pt)
         }
         starts.push(r.placed[0] ? r.placed[0].pi * capacity + r.placed[0].c : 0)
       }
@@ -1326,16 +1429,19 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
     // the count is rounded up before every change.
     const multiBlocks = allBlocks.filter(b => b.kind === 'multi')
     const inLoop = new Set(multiBlocks.map(b => `${b.pip.var}:${b.n}`)).size > 1
-    multiBlocks.forEach((b, i) => { b.configure = inLoop ? multiBlocks[(i - 1 + multiBlocks.length) % multiBlocks.length].n !== b.n : true })
+    // Which block ran before a given one is fixed round an ordinary loop, but
+    // not when groups come and go with their own schedules: then every multi
+    // block sets its layout itself, and the tip count rounds up at each.
+    multiBlocks.forEach((b, i) => { b.configure = inLoop ? (staggered || multiBlocks[(i - 1 + multiBlocks.length) % multiBlocks.length].n !== b.n) : true })
     for (const b of allBlocks) {
       b.perCol = b.kind === 'multi' ? Math.floor(8 / b.n) : 1
       b.pickups = s.newTip === 'once' ? 1 : b.strokes.length * strokes(b.pip, vol)
       b.tipsPerPoint = b.pickups / b.perCol
     }
     for (let i = 0; i < count; i++) {
-      for (const u of units) {
+      for (const u of dueUnits(i)) {
         for (const b of u.blocks) {
-          if (b.kind === 'multi' && (inLoop ? b.configure : i === 0) && b.pip.dryN !== b.n) { b.pip.tipsNeeded = Math.ceil(b.pip.tipsNeeded - 1e-9); b.pip.dryN = b.n }
+          if (b.kind === 'multi' && (inLoop ? b.configure : i === 0) && (b.pip.dryN !== b.n || (inLoop && staggered))) { b.pip.tipsNeeded = Math.ceil(b.pip.tipsNeeded - 1e-9); b.pip.dryN = b.n }
           if (quench && qp && qMulti && b.kind === 'multi') tipCount(qp, 1 / b.perCol)
           tipCount(b.pip, b.tipsPerPoint)
         }
@@ -1343,11 +1449,11 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         if (quench && qp && !qMulti && u.blocks.length) tipCount(qp, 1)
       }
     }
-    if (s.type === 'series') {
-      const iv = num(s.intervalMinutes)
-      if (!(iv > 0)) warn('Sampling series: the interval must be a positive number of minutes.')
-    }
     const pauseEvery = s.type === 'series' ? Math.max(0, Math.floor(Number(s.pauseEvery) || 0)) : 0
+    // The loop a series has always had — `wait_until(series_t0 + i * iv * 60)` —
+    // holds while every group is on the step's own interval; listed times, or a
+    // group with a schedule of its own, read the minutes from a list instead.
+    const uniform = s.type === 'series' && units.every(u => u.sched && !u.sched.own && u.sched.timing === 'interval')
     sampleFilled += count * units.reduce((a, u) => a + u.filled, 0)
     // One group with one block keeps the shorter Python it has always had.
     const only = units.length === 1 && units[0].blocks.length === 1 ? units[0].blocks[0] : null
@@ -1363,6 +1469,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
       mirror: units.length === 1 ? units[0].shape : null, wells: pre.wells,
       quench, qp, qv, qMulti, pauseEvery, filledPerPoint: units.reduce((a, u) => a + u.filled, 0),
       pauseMessage: oneLine(s.pauseMessage || 'Scheduled check — do what is needed, then resume'),
+      timeline, staggered, uniform, dueUnits,
       points: [],
     })
   }
@@ -1491,7 +1598,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
   const act = (a) => {
     const durationSec = Math.round(a.durationSec || 0)
     actions.push({ id: actions.length, step: curN, stepId: curStep?.id || '', stepType: curStep?.type || 'setup', kind: a.kind, text: a.text,
-                   pipette: a.pipette || '', multi: !!a.multi, src: a.src || null, dst: a.dst || null, volume: a.volume ?? null, count: a.count || 0,
+                   pipette: a.pipette || '', multi: !!a.multi, src: a.src || null, dst: a.dst || null, volume: a.volume ?? null, count: a.count || 0, group: a.group || 0,
                    tipsUsed: a.tipsUsed || 0, durationSec, userAction: !!a.userAction, clockSec: Math.round(clock),
                    state: { tcLid: lidOpen ? 'open' : 'closed', tcBlock: mod.tcBlock, tcLidTemp: mod.tcLidTemp, temp: mod.temp, hsTemp: mod.hsTemp, hsRpm, mag: mod.mag, tipsLeft: { ...previewTips } } })
     clock += durationSec
@@ -2024,7 +2131,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         const destsVar = (u, b) => many ? `dests${gsuf(u)}_${b.key}` : 'dests'
         const startsVar = (u) => `series_starts${gsuf(u)}`
         const fillVar = (u) => `${isSeries ? 'series_fill_offsets' : 'fill_offsets'}${gsuf(u)}`
-        const startAt = (u, i) => u.points[i]?.abs ?? 0
+        const startAt = (u, i) => u.pointAt.get(i)?.abs ?? 0
         const kwFor = (b) => {
           const kw = [`new_tip=${py(s.newTip === 'once' ? 'once' : 'always')}`, 'blow_out=True', 'blowout_location="destination well"']
           const mb = Math.floor(Number(s.mixBeforeReps) || 0)
@@ -2083,7 +2190,7 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
         // The lists the loop reads, per group and per block.
         const emitLists = () => {
           for (const u of units) {
-            if (units.length > 1) emit(`#   group ${u.no}: ${u.wells.length} well${u.wells.length === 1 ? '' : 's'} (${u.wells[0]}${u.wells.length > 1 ? `–${u.wells[u.wells.length - 1]}` : ''}) → sample plate ${u.plateIdx + 1} (slot ${sampleSlots[u.plateIdx]})${u.shape ? u.shape.kind === 'rows' ? ', a row band per time point' : ', laid out as on the plate' : ''}`)
+            if (units.length > 1) emit(`#   group ${u.no}: ${u.wells.length} well${u.wells.length === 1 ? '' : 's'} (${u.wells[0]}${u.wells.length > 1 ? `–${u.wells[u.wells.length - 1]}` : ''}) → sample plate ${u.plateIdx + 1} (slot ${sampleSlots[u.plateIdx]})${u.shape ? u.shape.kind === 'rows' ? ', a row band per time point' : ', laid out as on the plate' : ''}${isSeries && (pl.staggered || u.sched.own) ? `, ${u.sched.word}` : ''}`)
             for (const b of u.blocks) {
               emit(`${wellsVar(u, b)} = [${b.strokes.map(x => py(x.address)).join(', ')}]${b.kind === 'multi' && b.n > 1 && b.n < 8 ? `  # runs of ${b.n}, each addressed by its LAST well (the tips sit on the front nozzles)` : ''}`)
               if (pl.form === 'offsets' || many) emit(`${offsVar(u, b)} = [${b.strokes.map(x => x.addressOffset).join(', ')}]  # where each of ${wellsVar(u, b)} lands, counted from the first well of its time point`)
@@ -2092,12 +2199,14 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
           }
         }
         // The preview records for one round, in the order the Python runs them.
+        // Only the groups due at this time point take part.
         const sampleRound = (i, label) => {
-          const allCells = units.flatMap(u => cellsAt(startAt(u, i), u.fillOffsets))
+          const due = pl.dueUnits(i)
+          const allCells = due.flatMap(u => cellsAt(startAt(u, i), u.fillOffsets))
           const allSpans = spansOfCells(allCells)
-          pl.points.push({ i, start: startAt(units[0], i), spans: allSpans, wells: allCells.map(c => c.well),
-                           pairs: units.flatMap(u => u.blocks.flatMap(b => b.strokes.map(x => ({ group: u.no, pipette: b.pip.var, nozzles: b.kind === 'multi' ? b.n : 0, src: x.wells, dst: cellsAt(startAt(u, i), x.fill).map(c => c.well), slot: cellsAt(startAt(u, i), x.fill)[0].slot })))) })
-          for (const u of units) {
+          pl.points.push({ i, tMin: pl.timeline[i], groups: due.map(u => u.no), start: startAt(due[0] || units[0], i), spans: allSpans, wells: allCells.map(c => c.well),
+                           pairs: due.flatMap(u => u.blocks.flatMap(b => b.strokes.map(x => ({ group: u.no, pipette: b.pip.var, nozzles: b.kind === 'multi' ? b.n : 0, src: x.wells, dst: cellsAt(startAt(u, i), x.fill).map(c => c.well), slot: cellsAt(startAt(u, i), x.fill)[0].slot })))) })
+          for (const u of due) {
             const st = startAt(u, i)
             if (pl.quench && pl.qp && !pl.qMulti) {
               const cells = cellsAt(st, u.fillOffsets), spans = spansOfCells(cells)
@@ -2110,6 +2219,9 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
               const spans = spansOfCells(cellsAt(st, b.strokes.flatMap(x => x.fill).sort((a, c) => a - c)))
               const where = spans.map(spanWord).join(' + ')
               if (b.kind === 'multi' && pl.inLoop && b.configure) {
+                // The Python rounds tips_left down here: what is left of the
+                // current tip column is abandoned by the new layout.
+                if (needRefill && previewTips[b.pip.var] != null) previewTips[b.pip.var] = Math.floor(previewTips[b.pip.var])
                 act({ kind: 'nozzles', pipette: b.pip.var, nozzles: b.n, durationSec: 3,
                       text: `${b.pip.var}: ${b.n === 8 ? 'all 8 nozzles' : `${b.n} of the 8 nozzles`} — a new layout starts on a fresh column of tips` })
               }
@@ -2130,9 +2242,14 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
             }
           }
         }
-        // The transfers of one round. `stOf` indexes sample_dests at run time.
-        const emitRound = (stOf) => {
+        // The transfers of one round. `stOf` indexes sample_dests at run time;
+        // `guardOf` wraps a group's lines in an `if` when it is not sampled at
+        // every time point (its starts are then a dict keyed by time point).
+        const emitRound = (stOf, guardOf = null) => {
           for (const u of units) {
+            const guard = guardOf ? guardOf(u) : ''
+            const from = L.length
+            if (guard) emit(guard)
             if (pl.quench && pl.qp && !pl.qMulti) {
               tipCall(pl.qp, 1)
               emit(`${pl.qp.var}.transfer(${pyNum(pl.qv)}, ${pl.quench.rack}[${py(pl.quench.well)}], ${quenchExpr(u, stOf(u))}, new_tip="once", blow_out=True, blowout_location="destination well")  # quench first`)
@@ -2150,12 +2267,16 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
               tipCall(b.pip, b.tipsPerPoint)
               emit(`${b.pip.var}.transfer(${pyNum(pl.vol)}, [plate[w] for w in ${wellsVar(u, b)}], ${destsVar(u, b)}, ${kwFor(b).join(', ')})`)
             }
+            if (guard) for (let k = from + 1; k < L.length; k++) L[k] = '    ' + L[k]
           }
         }
         if (isSeries) {
-          const iv = num(s.intervalMinutes) || 0
           const count = pl.count
-          emit(`# Step ${n}: sampling series — ${count} time points every ${pyNum(iv)} min, ${pyNum(pl.vol)} µL from ${fromWhat}${many ? '' : ` (${one.pip.var})`}`)
+          const sched0 = units[0].sched
+          const schedWord = pl.staggered || units.some(u => u.sched.own) ? `${count} time points in all (${units.map(u => `group ${u.no} ${u.sched.word}`).join('; ')})`
+            : sched0.timing === 'times' ? `${count} time point${count === 1 ? '' : 's'} at ${sched0.list} min`
+            : `${count} time points every ${pyNum(sched0.intervalMinutes)} min`
+          emit(`# Step ${n}: sampling series — ${schedWord}, ${pyNum(pl.vol)} µL from ${fromWhat}${many ? '' : ` (${one.pip.var})`}`)
           const plates = sampleSlots.length > 1 ? `${sampleSlots.length} sample plates (slots ${sampleSlots.join(', ')}), one plate after the other` : 'sample labware'
           const swapNote = pl.fresh.size ? `; ${sampleSlots.length > 1 ? 'all of them are swapped for fresh ones' : 'the plate is swapped for a fresh one'} before time point${pl.fresh.size === 1 ? '' : 's'} ${[...pl.fresh].map(i => i + 1).join(', ')}` : ''
           if (!pl.usesGroups) emit(pl.mirror
@@ -2165,14 +2286,25 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
           if (!pl.inLoop) for (const b of pl.blocks) if (b.kind === 'multi') useNozzles(b.pip, b.n)
           if (pl.qMulti && !pl.inLoop) useNozzles(pl.qp, pl.blocks.find(b => b.kind === 'multi').n)
           emitLists()
-          for (const u of units) emit(`${startsVar(u)} = [${u.points.map(p => p.abs).join(', ')}]  # first sample well of each time point${units.length > 1 ? ` for group ${u.no}` : ''}, across all plates on the deck`)
+          // The minutes of every time point, unless the loop can count them itself.
+          if (!pl.uniform) emit(`series_times = [${pl.timeline.map(pyNum).join(', ')}]  # minutes from the start of the series`)
+          for (const u of units) {
+            if (pl.staggered) emit(`${startsVar(u)} = {${u.points.map(p => `${p.i}: ${p.abs}`).join(', ')}}  # group ${u.no}, ${u.sched.word}: time point -> its first sample well, across all plates on the deck`)
+            else emit(`${startsVar(u)} = [${u.points.map(p => p.abs).join(', ')}]  # first sample well of each time point${units.length > 1 ? ` for group ${u.no}` : ''}, across all plates on the deck`)
+          }
           if (pl.usesGroups) emit(`swap_before = {${[...pl.swaps.entries()].map(([i, plates]) => `${i}: ${py(swapMsg(plates))}`).join(', ')}}  # time points that start on a fresh sample plate`)
           else emit(`fresh_plate_before = ${pl.fresh.size ? '{' + [...pl.fresh].join(', ') + '}' : 'set()'}  # time points that begin on fresh sample labware`)
           emit(`series_t0 = time.monotonic()`)
-          emit(`for i in range(${count}):`)
-          const firstAtZero = s.firstAtZero !== false
-          emit(`    wait_until(series_t0 + ${firstAtZero ? 'i' : '(i + 1)'} * ${pyNum(iv)} * 60)`)
-          emit(`    protocol.comment(f"Time point {i + 1}/${count} at t = {${firstAtZero ? 'i' : '(i + 1)'} * ${pyNum(iv)}} min")`)
+          if (pl.uniform) {
+            const iv = sched0.intervalMinutes, firstAtZero = sched0.firstAtZero
+            emit(`for i in range(${count}):`)
+            emit(`    wait_until(series_t0 + ${firstAtZero ? 'i' : '(i + 1)'} * ${pyNum(iv)} * 60)`)
+            emit(`    protocol.comment(f"Time point {i + 1}/${count} at t = {${firstAtZero ? 'i' : '(i + 1)'} * ${pyNum(iv)}} min")`)
+          } else {
+            emit(`for i, t_min in enumerate(series_times):`)
+            emit(`    wait_until(series_t0 + t_min * 60)`)
+            emit(`    protocol.comment(f"Time point {i + 1}/${count} at t = {t_min} min")`)
+          }
           if (pl.usesGroups) {
             emit(`    if i in swap_before:`)
             emit(`        protocol.pause(swap_before[i])`)
@@ -2188,17 +2320,24 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
           // moves it, so the preview below replays exactly the same moves.
           const lid = lidPlan({ loop: true })
           const restore = beforePipetting({ record: false, loop: true })
-          emitRound((u) => `${startsVar(u)}[i]`)
+          emitRound((u) => `${startsVar(u)}[i]`, pl.staggered ? (u) => `if i in ${startsVar(u)}:` : null)
           restore()
           for (let k = loopStart; k < L.length; k++) L[k] = '    ' + L[k]
           // The preview walks the time points the loop will run.
           const t0 = clock
           const shaking = usesHS && hsRpm > 0 ? hsRpm : 0
+          let saidLate = false
           for (let i = 0; i < count; i++) {
-            const tMin = (firstAtZero ? i : i + 1) * iv
+            const tMin = pl.timeline[i]
             const target = t0 + tMin * 60
             if (target > clock) act({ kind: 'wait', text: `Wait for time point ${i + 1}/${count} (t = ${pyNum(tMin)} min)`, durationSec: target - clock })
-            act({ kind: 'comment', text: `Time point ${i + 1}/${count} at t = ${pyNum(tMin)} min` })
+            else if (i > 0 && clock - target > 30 && !saidLate) {
+              // The estimate is rough (seconds per stroke), so only a clear miss is named.
+              saidLate = true
+              warn(`${label}: time point ${i + 1} (t = ${pyNum(tMin)} min) is due before the robot has finished time point ${i} — by this estimate it would be taken about ${fmtMin(Math.round((clock - target) / 6) / 10)} min late. Space the time points further apart, or sample fewer wells at a time.`)
+            }
+            const due = pl.dueUnits(i)
+            act({ kind: 'comment', text: `Time point ${i + 1}/${count} at t = ${pyNum(tMin)} min${pl.staggered ? ` — group${due.length === 1 ? '' : 's'} ${due.map(u => u.no).join(', ')}` : ''}` })
             const swapped = pl.usesGroups ? pl.swaps.get(i) : (pl.fresh.has(i) ? sampleSlots.map((_, k) => k) : null)
             if (swapped) act({ kind: 'swap', userAction: true, text: pl.usesGroups ? swapMsg(swapped) : SWAP_MSG,
                                dst: { slot: sampleSlots[swapped[0]], var: 'sample_plates', wells: [], slots: swapped.map(k => sampleSlots[k]) } })
@@ -2318,6 +2457,11 @@ export function generateOpentronsProtocol(plate, rawConfig, { now = new Date() }
       blocks: pl.blocks.map(b => ({ key: b.key, pipette: b.pip.var, channels: b.pip.def.channels, nozzles: b.kind === 'multi' ? b.n : 0, label: b.pip.def.label,
                                     strokes: b.strokes.map(x => ({ address: x.address, wells: x.wells })), tipsPerPoint: b.tipsPerPoint, configures: !!(pl.inLoop && b.configure) })),
       points: pl.points, extent: pl.extent, filled: pl.filledPerPoint, layoutChanges: pl.inLoop, swaps: [...(pl.swaps?.keys() || [])],
+      // When the step samples: the merged timeline, and each group's own
+      // schedule where it has one (a staggered step samples some groups at
+      // some time points only).
+      schedule: pl.timeline ? { timeline: pl.timeline, staggered: !!pl.staggered, lastMin: pl.timeline[pl.timeline.length - 1] || 0,
+                                groups: pl.units.map(u => ({ no: u.no, own: !!u.sched?.own, word: u.sched?.word || '', count: u.sched?.times.length || 0 })) } : null,
     }])),
     sampleCapacity: samplesLw ? samplesLw.rows * samplesLw.cols * sampleSlots.length : 0,   // everything on the deck at once
     samplePlates: samplesLw && usesSamples ? Math.max(1, Math.ceil(sampleCursor / (samplesLw.rows * samplesLw.cols))) : 0,
